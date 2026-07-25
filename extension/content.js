@@ -425,6 +425,45 @@
     }).catch(() => {});
   }
 
+  async function reportLatestAssistantSnapshot() {
+    const nodes = getAssistantNodes();
+    if (!nodes.length) return false;
+    const node = nodes[nodes.length - 1];
+    const text = extractAssistantText(node);
+    if (!text) return false;
+    const item = ensureElementState(node, text);
+    const chunks = splitSpeakChunks(text, {
+      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
+      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
+      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+    });
+    const preview = extractAutoPreview(text, {
+      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
+      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
+      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+    });
+    if (!chunks.length || !preview) return false;
+    await reportChunks({
+      node,
+      text,
+      messageKey: item.key,
+      chunks,
+      autoPreview: preview,
+      capturedAt: Date.now(),
+    }, false);
+    return true;
+  }
+
+  async function registerCurrentTab({ claimOwner = false, includeLatest = false } = {}) {
+    const response = await runtimeMessage('register-tab', {
+      title: getPlainDocumentTitle(),
+      claimOwner: Boolean(claimOwner),
+    });
+    applyOwnerState(response && typeof response.isUiOwner !== 'undefined' ? response.isUiOwner : null, response || null);
+    if (includeLatest) await reportLatestAssistantSnapshot();
+    return response || null;
+  }
+
   function maybeMarkResponseCompleted(node, item, text) {
     if (!item.sent || item.completionNotified) return;
     if (isResponseGenerating()) {
@@ -812,6 +851,12 @@
         clearCompletionMarker();
         return false;
       }
+      if (message.type === 'bridge-reconnect') {
+        registerCurrentTab({ includeLatest: true })
+          .then((payload) => sendResponse({ ok: true, payload }))
+          .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+        return true;
+      }
       if (message.type === 'state-update') {
         applyOwnerState(message.payload.isUiOwner, message.payload);
         return false;
@@ -881,8 +926,7 @@
     titleObserver.observe(document.head, { childList: true, subtree: true, characterData: true });
     markExistingMessagesAsSeen();
     try {
-      const response = await runtimeMessage('register-tab', { title: getPlainDocumentTitle() });
-      applyOwnerState(response && typeof response.isUiOwner !== 'undefined' ? response.isUiOwner : null, response || null);
+      await registerCurrentTab({ includeLatest: true });
     } catch (_error) {
       applyOwnerState(null);
     }

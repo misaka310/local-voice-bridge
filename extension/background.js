@@ -18,8 +18,10 @@ const DEFAULT_SETTINGS = {
   cancelGraceMs: 700,
 };
 const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
+const CHATGPT_TAB_PATTERNS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
 
 const tabs = new Map();
+const reconnectingTabs = new Map();
 let selectedTabId = null;
 let uiOwnerTabId = null;
 let queue = [];
@@ -35,6 +37,7 @@ let seq = 1;
 let lastStatusText = 'Ready';
 let lastStatusLevel = 'info';
 let externalControlPollPromise = null;
+let localApiConnected = false;
 let lastExternalCommandId = 0;
 let lastExternalConversationEventId = 0;
 let lastExternalSettingsRevision = -1;
@@ -486,6 +489,45 @@ async function pushOptionSettings(settings = null) {
   return payload;
 }
 
+async function reconnectChatGptTab(tab) {
+  const tabId = Number(tab && tab.id);
+  if (!Number.isInteger(tabId) || tabId <= 0) return false;
+  if (reconnectingTabs.has(tabId)) return reconnectingTabs.get(tabId);
+  const attempt = (async () => {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
+      return Boolean(response && response.ok === true);
+    } catch (_error) {}
+    if (!chrome.scripting || typeof chrome.scripting.executeScript !== 'function') return false;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['prompt-input-core.js', 'content.js'],
+      });
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
+      return Boolean(response && response.ok === true);
+    } catch (_error) {
+      return false;
+    }
+  })();
+  reconnectingTabs.set(tabId, attempt);
+  try {
+    return await attempt;
+  } finally {
+    reconnectingTabs.delete(tabId);
+  }
+}
+
+async function reconnectOpenChatGptTabs() {
+  let openTabs = [];
+  try {
+    openTabs = await chrome.tabs.query({ url: CHATGPT_TAB_PATTERNS });
+  } catch (_error) {
+    return;
+  }
+  await Promise.all(openTabs.map((tab) => reconnectChatGptTab(tab)));
+}
+
 function externalStateSnapshot() {
   const currentText = String(currentItem?.text || lastPlayedItem?.text || '');
   return {
@@ -622,10 +664,16 @@ async function syncExternalControlPanel() {
       method: 'POST',
       body: state,
     });
+    const recovered = !localApiConnected;
+    localApiConnected = true;
+    if (recovered) await reconnectOpenChatGptTabs();
     return state;
   })();
   try {
     return await externalControlPollPromise;
+  } catch (error) {
+    localApiConnected = false;
+    throw error;
   } finally {
     externalControlPollPromise = null;
   }
@@ -857,8 +905,15 @@ function executeUiCommand(cmd, senderTabId, params = {}) {
   return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
 }
 
-chrome.runtime.onInstalled.addListener(migrateSettings);
-chrome.runtime.onStartup.addListener(migrateSettings);
+chrome.runtime.onInstalled.addListener(() => {
+  void migrateSettings();
+  void reconnectOpenChatGptTabs();
+});
+chrome.runtime.onStartup.addListener(() => {
+  void migrateSettings();
+  void reconnectOpenChatGptTabs();
+});
+void reconnectOpenChatGptTabs();
 chrome.tabs.onRemoved.addListener((tabId) => {
   const ownedCurrentPlayback = isPlaying && currentPlaybackTabId === tabId;
   tabs.delete(tabId);

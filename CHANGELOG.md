@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reconnected already-open ChatGPT tabs automatically after the local Voice Bridge API or unpacked extension restarts, injecting the current content scripts when needed and restoring tab and latest-response state without auto-reading old replies.
+- Moved the microphone shortcut and STT status into the microphone button to reduce the Windows panel height.
 - Bounded generated audio to the newest 1,000 files, 1 GiB, and 14 days, pruning the oldest files at startup and after synthesis while preserving the current response.
 - Rotated both controller and server logs at 2 MiB with two backups and suppressed routine successful HTTP access logs.
 - Made full application restart safely stop a residual API only when it belongs to the same repository installation, using a local per-process control token.

@@ -249,16 +249,13 @@ class LocalVoiceControlPanel(QWidget):
 
         mic_row = QHBoxLayout()
         mic_row.setSpacing(6)
-        self.mic_button = QPushButton("マイク会話", card)
+        self.mic_button = QPushButton("マイク会話　右Ctrl＋＼ 長押し", card)
+        self.mic_button.setObjectName("panel-mic")
         self.mic_button.setCheckable(True)
+        self.mic_button.setMinimumHeight(30)
         self.mic_button.clicked.connect(self._on_mic_clicked)
         mic_row.addWidget(self.mic_button, 1)
         card_layout.addLayout(mic_row)
-
-        self.mic_detail_label = QLabel("右Ctrl＋＼（右Shift左）長押しで録音", card)
-        self.mic_detail_label.setObjectName("panel-mic-detail")
-        self.mic_detail_label.setWordWrap(True)
-        card_layout.addWidget(self.mic_detail_label)
 
         controls = QHBoxLayout()
         controls.setSpacing(6)
@@ -320,6 +317,15 @@ class LocalVoiceControlPanel(QWidget):
         for button in (self.next_button, self.regen_button, self.replay_button):
             button.setEnabled(False)
 
+    def _set_mic_button_text(self, title: str, detail: str, *, visible_detail: str = "") -> None:
+        safe_title = str(title or "マイク会話")
+        safe_detail = str(detail or "")
+        safe_visible_detail = str(visible_detail or "")
+        self.mic_button.setText(
+            f"{safe_title}　{safe_visible_detail}" if safe_visible_detail else safe_title
+        )
+        self.mic_button.setToolTip(safe_detail)
+
     def apply_snapshot(self, snapshot: dict[str, Any]) -> None:
         settings = snapshot.get("settings") if isinstance(snapshot.get("settings"), dict) else {}
         extension = snapshot.get("extension") if isinstance(snapshot.get("extension"), dict) else {}
@@ -350,24 +356,37 @@ class LocalVoiceControlPanel(QWidget):
             current_text = str(extension.get("currentText") or "No assistant response yet")
             self._set_current_text(current_text)
         else:
-            self.status_label.setText("Waiting for ChatGPT")
-            self._set_current_text("Open or reload a ChatGPT tab", tooltip="")
+            self.status_label.setText("拡張機能を再読み込みしてください")
+            self._set_current_text(
+                "Chrome / Braveの拡張機能画面でLocal Voice Bridgeを再読み込みしてください。ChatGPTタブの再読み込みは不要です。"
+            )
 
         mic_enabled = bool(settings.get("micConversationEnabled"))
         stt_installed = bool(components.get("sttInstalled"))
         self.mic_button.setEnabled(stt_installed)
-        self.mic_button.setText("マイク会話" if stt_installed else "マイク会話（追加セットアップ）")
         if not stt_installed:
-            self.mic_detail_label.setText("通知領域の環境セットアップから「読み上げ + マイク会話」を追加してください")
+            self._set_mic_button_text(
+                "マイク会話（追加セットアップ）",
+                "読み上げ + マイク会話を追加してください",
+            )
         elif mic_enabled:
-            self.status_label.setText(str(conversation.get("statusText") or "待機中（右Ctrl＋＼ 長押し）"))
+            if connected:
+                self.status_label.setText(str(conversation.get("statusText") or "待機中（右Ctrl＋＼ 長押し）"))
             device = str(conversation.get("sttDevice") or "未ロード")
             device_label = "CUDA" if device.lower() == "cuda" else "CPU fallback" if device.lower() == "cpu" else device
             model_label = str(conversation.get("sttModel") or settings.get("sttModel") or "small")
             error = str(conversation.get("error") or "")
-            self.mic_detail_label.setText(error or f"右Ctrl＋＼（右Shift左） · STT {model_label} · {device_label}")
+            self._set_mic_button_text(
+                "マイク会話",
+                error or f"右Ctrl＋＼（右Shift左） · STT {model_label} · {device_label}",
+                visible_detail="エラー" if error else "右Ctrl＋＼ 長押し",
+            )
         else:
-            self.mic_detail_label.setText("オフ（右Ctrlは通常どおり使用できます）")
+            self._set_mic_button_text(
+                "マイク会話",
+                "オフ（右Ctrlは通常どおり使用できます）",
+                visible_detail="右Ctrl＋＼ 長押し",
+            )
 
         queue_size = max(0, int(extension.get("queueSize") or 0))
         tabs_count = max(0, int(extension.get("tabsCount") or 0))

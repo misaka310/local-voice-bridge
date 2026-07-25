@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Local Voice Bridge",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "Unofficial local voice assistance for chatgpt.com, with optional push-to-talk input and local reply playback.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:8717/*",
-    "http://localhost:8717/*"
+    "http://localhost:8717/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
   ],
   "background": {
     "service_worker": "background-entry.js"
