@@ -29,7 +29,7 @@ function response(body, status = 200) {
   };
 }
 
-function createHarness({ initialized = true } = {}) {
+function createHarness({ initialized = true, openTabs = [], missingContentScriptTabs = [] } = {}) {
   const storage = {
     enabled: false,
     apiUrl: 'http://127.0.0.1:8717/v1/speak',
@@ -48,7 +48,11 @@ function createHarness({ initialized = true } = {}) {
   const conversationStatePosts = [];
   const settingsPosts = [];
   const sentMessages = [];
+  const injectedScripts = [];
+  const injectedTabs = new Set();
+  const missingContentScripts = new Set(missingContentScriptTabs.map(Number));
   const tabMessageResponders = new Map();
+  let pollError = null;
   let runtimeListener = null;
   let tabsRemovedListener = null;
   let tabsUpdatedListener = null;
@@ -93,8 +97,16 @@ function createHarness({ initialized = true } = {}) {
       onRemoved: { addListener(listener) { tabsRemovedListener = listener; } },
       onActivated: { addListener() {} },
       onUpdated: { addListener(listener) { tabsUpdatedListener = listener; } },
+      async query() {
+        return openTabs.map((tab) => ({ ...tab }));
+      },
       async sendMessage(tabId, message) {
         sentMessages.push({ tabId, message });
+        if (message.type === 'bridge-reconnect'
+          && missingContentScripts.has(Number(tabId))
+          && !injectedTabs.has(Number(tabId))) {
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        }
         const responder = tabMessageResponders.get(tabId);
         if (responder) return responder(message);
         if (message.type === 'conversation-target-status') {
@@ -103,11 +115,19 @@ function createHarness({ initialized = true } = {}) {
         return { ok: true };
       },
     },
+    scripting: {
+      async executeScript(details) {
+        injectedScripts.push(details);
+        injectedTabs.add(Number(details?.target?.tabId));
+        return [];
+      },
+    },
   };
 
   async function fetch(url, options = {}) {
     const target = new URL(String(url));
     if (target.pathname === '/v1/control-panel/poll') {
+      if (pollError) throw new Error(pollError);
       const after = Number(target.searchParams.get('after') || 0);
       return response({
         ...control,
@@ -194,10 +214,12 @@ function createHarness({ initialized = true } = {}) {
   return {
     control: () => control,
     setControl(next) { control = { ...control, ...next }; },
+    setPollError(error) { pollError = error ? String(error) : null; },
     setTabResponder(tabId, responder) { tabMessageResponders.set(tabId, responder); },
     removeTab(tabId) { tabsRemovedListener(tabId); },
     reloadTab(tabId) { tabsUpdatedListener(tabId, { status: 'loading' }); },
     conversationStatePosts,
+    injectedScripts,
     petPosts,
     sentMessages,
     settingsPosts,
@@ -208,6 +230,75 @@ function createHarness({ initialized = true } = {}) {
     sendAsync,
   };
 }
+
+test('recovering the local API asks every already-open ChatGPT tab to reconnect', async () => {
+  const harness = createHarness({
+    openTabs: [
+      { id: 101, title: 'Tab A', url: 'https://chatgpt.com/c/101' },
+      { id: 202, title: 'Tab B', url: 'https://chatgpt.com/c/202' },
+    ],
+  });
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+
+  const initial = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(initial.ok, true);
+  await waitFor(() => harness.sentMessages.filter((entry) => entry.message.type === 'bridge-reconnect').length >= 2);
+
+  harness.sentMessages.length = 0;
+  harness.setPollError('local API unavailable');
+  const failed = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(failed.ok, false);
+
+  harness.setPollError(null);
+  const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(recovered.ok, true);
+  await waitFor(() => harness.sentMessages.filter((entry) => entry.message.type === 'bridge-reconnect').length === 2);
+  assert.deepEqual(
+    harness.sentMessages
+      .filter((entry) => entry.message.type === 'bridge-reconnect')
+      .map((entry) => entry.tabId)
+      .sort((a, b) => a - b),
+    [101, 202],
+  );
+});
+
+test('missing receivers are injected into already-open ChatGPT tabs before reconnecting', async () => {
+  const harness = createHarness({
+    openTabs: [
+      { id: 303, title: 'Existing Tab', url: 'https://chatgpt.com/c/303' },
+    ],
+    missingContentScriptTabs: [303],
+  });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 303, 'Existing Tab');
+  assert.equal(result.ok, true);
+  await waitFor(() => harness.injectedScripts.length === 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
+    target: { tabId: 303 },
+    files: ['prompt-input-core.js', 'content.js'],
+  });
+  await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
+});
+
+test('an existing reconnect receiver failure does not inject a duplicate content script', async () => {
+  const harness = createHarness({
+    openTabs: [
+      { id: 404, title: 'Existing Receiver', url: 'https://chatgpt.com/c/404' },
+    ],
+  });
+  harness.setTabResponder(404, (message) => (
+    message.type === 'bridge-reconnect'
+      ? { ok: false, error: 'temporary registration failure' }
+      : { ok: true }
+  ));
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 404, 'Existing Receiver');
+  assert.equal(result.ok, true);
+  assert.ok(
+    harness.sentMessages.filter((entry) => entry.tabId === 404 && entry.message.type === 'bridge-reconnect').length >= 1,
+  );
+  assert.equal(harness.injectedScripts.length, 0);
+});
 
 test('external panel poll applies settings, executes each command once, and posts global state', async () => {
   const harness = createHarness();

@@ -96,12 +96,48 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertFalse(hasattr(panel, "stt_model_combo"))
             self.assertFalse(hasattr(panel, "cancel_grace_spin"))
             self.assertIn("録音中", panel.status_label.text())
-            self.assertIn("CUDA", panel.mic_detail_label.text())
+            self.assertFalse(hasattr(panel, "mic_detail_label"))
+            self.assertIn("マイク会話", panel.mic_button.text())
+            self.assertNotIn("\n", panel.mic_button.text())
+            self.assertEqual(panel.mic_button.minimumHeight(), 30)
+            self.assertIn("右Ctrl＋＼", panel.mic_button.text())
+            self.assertIn("STT medium", panel.mic_button.toolTip())
+            self.assertIn("CUDA", panel.mic_button.toolTip())
+            self.assertLessEqual(
+                panel.mic_button.fontMetrics().horizontalAdvance(panel.mic_button.text()),
+                panel.mic_button.width() - 16,
+            )
             self.assertEqual(panel.current_text_label.toolTip(), "全タブから届いた返答です。")
             self.assertTrue(panel.current_text_label.text().startswith("全タブから届い"))
             self.assertIn("Queue 2", panel.queue_label.text())
             self.assertIn("3 tabs", panel.queue_label.text())
             self.assertTrue(panel.replay_button.isEnabled())
+            panel.shutdown()
+
+    def test_disconnected_extension_requests_extension_reload_not_chatgpt_tab_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def disconnected_snapshot() -> dict[str, object]:
+                payload = original()
+                extension = dict(payload["extension"])
+                extension.update({"connected": False, "loadedVersion": "", "tabsCount": 0})
+                payload["extension"] = extension
+                return payload
+
+            client.get_snapshot = disconnected_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+            )
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしてください")
+            self.assertIn("ChatGPTタブの再読み込みは不要", panel.current_text_label.toolTip())
+            self.assertNotIn("Open or reload", panel.current_text_label.toolTip())
             panel.shutdown()
 
     def test_controls_send_settings_and_commands(self) -> None:
@@ -154,7 +190,7 @@ class ControlPanelQtTests(unittest.TestCase):
 
             self.assertFalse(panel.mic_button.isEnabled())
             self.assertIn("追加セットアップ", panel.mic_button.text())
-            self.assertIn("読み上げ + マイク会話", panel.mic_detail_label.text())
+            self.assertIn("読み上げ + マイク会話", panel.mic_button.toolTip())
             panel.shutdown()
 
     def test_old_extension_version_shows_reload_instruction(self) -> None:

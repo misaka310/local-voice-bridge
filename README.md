@@ -66,9 +66,9 @@ setup-voice-env.cmd
 
 ## Usage / 起動と操作
 
-セットアップ後はWindows検索で`Local Voice Bridge`を開きます。セットアップが現在のユーザーのスタートメニューへショートカットを登録します。リポジトリ内の`LocalVoiceBridge.exe`を直接ダブルクリックしても同じです。EXEは既存のPython環境をターミナルなしで起動します。日常の音声操作はChrome外のWindows Local Voice小窓で行います。小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から開閉できます。通知領域は小窓の表示、状態確認、再起動、フォルダ表示、自動起動、再セットアップ、終了を担当します。ペットは`Ref`と自動連動して1体だけ表示され、左ドラッグで移動できます。シングルクリックと右クリックでは何も起きません。
+セットアップ後はWindows検索で`Local Voice Bridge`を開きます。セットアップが現在のユーザーのスタートメニューへショートカットを登録します。リポジトリ内の`LocalVoiceBridge.exe`を直接ダブルクリックしても同じです。EXEは既存のPython環境をターミナルなしで起動します。日常の音声操作はChrome外のWindows Local Voice小窓で行います。小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から開閉できます。通知領域は小窓の表示、状態確認、再起動、フォルダ表示、自動起動、再セットアップ、終了を担当します。Voice Bridgeを再起動した場合も、開いたままのChatGPTタブは自動で再接続されるため、タブの再読み込みは不要です。ペットは`Ref`と自動連動して1体だけ表示され、左ドラッグで移動できます。シングルクリックと右クリックでは何も起きません。
 
-`http://127.0.0.1:8717/health`を開き、`ok=true`と`engine=irodori_direct`を確認します。その後、[拡張機能の導入・更新手順](extension/INSTALL.md)に従い、Chrome / Braveの**Load unpacked**から`extension/`を選択してください。更新後に旧版が残っている場合は、Windows Local Voice小窓が再読み込みを案内します。
+`http://127.0.0.1:8717/health`を開き、`ok=true`と`engine=irodori_direct`を確認します。その後、[拡張機能の導入・更新手順](extension/INSTALL.md)に従い、Chrome / Braveの**Load unpacked**から`extension/`を選択してください。更新後に旧版が残っている場合は、Windows Local Voice小窓が拡張機能の再読み込みを案内します。拡張機能を再読み込みすると、開いているChatGPTタブへ自動で再接続するため、ChatGPTタブ自体の再読み込みは不要です。
 
 読み上げる最大行数・最大文字数、文字起こしモデル、文字起こし後の送信前猶予は、Chrome / Braveの拡張機能アイコンを右クリックして`オプション`を開き、設定します。`マイク会話`のオン・オフは、これまでどおりWindows Local Voice小窓で操作します。
 
