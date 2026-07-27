@@ -41,6 +41,8 @@ let localApiConnected = false;
 let lastExternalCommandId = 0;
 let lastExternalConversationEventId = 0;
 let lastExternalSettingsRevision = -1;
+let lastKnownReferenceVoice = '';
+let referenceSettingsLoaded = false;
 let lastComposerFocusedTabId = null;
 let activeConversationTargetTabId = null;
 let conversationPhase = 'off';
@@ -60,6 +62,13 @@ function storedReferenceVoice(raw) {
   const voiceId = normalizeStoredReference(raw && raw.voiceId);
   if (voiceId) return voiceId;
   return normalizeStoredReference(raw && raw.referenceVoice);
+}
+
+function rememberReferenceVoice(settings) {
+  const safe = settings && typeof settings === 'object' ? settings : {};
+  lastKnownReferenceVoice = normalizeStoredReference(safe.referenceVoice ?? safe.voiceId);
+  referenceSettingsLoaded = true;
+  return settings;
 }
 
 function clampInteger(value, fallback, minimum, maximum) {
@@ -101,8 +110,10 @@ function sanitizeSettings(raw = {}) {
 
 async function migrateSettings() {
   const current = await chrome.storage.local.get(null);
-  await chrome.storage.local.set(sanitizeSettings(current));
+  const sanitized = sanitizeSettings(current);
+  await chrome.storage.local.set(sanitized);
   await chrome.storage.local.remove(LEGACY_BROWSER_UI_STORAGE_KEYS);
+  rememberReferenceVoice(sanitized);
 }
 
 async function getSettings() {
@@ -111,7 +122,7 @@ async function getSettings() {
   if (stored.voiceProfile !== sanitized.voiceProfile || stored.referenceVoice !== sanitized.referenceVoice || stored.settingsVersion !== SETTINGS_VERSION) {
     await chrome.storage.local.set(sanitized);
   }
-  return sanitized;
+  return rememberReferenceVoice(sanitized);
 }
 
 function cloneItem(item) {
@@ -317,6 +328,11 @@ async function speak(text, requestId, voiceProfile, referenceVoice, voicePrompt)
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  const returnedReferenceVoice = normalizeStoredReference(body.referenceVoice ?? body.voiceId);
+  const usedReferenceAudio = String(body.usedReferenceAudio || '').trim();
+  if (pickedReferenceVoice && (returnedReferenceVoice !== pickedReferenceVoice || !usedReferenceAudio)) {
+    throw new Error(`Reference voice was not applied: ${pickedReferenceVoice}`);
+  }
   return body;
 }
 
@@ -444,12 +460,30 @@ async function postConversationState(payload) {
   });
 }
 
+function externalReferenceSelection(remote, fallbackValue = '') {
+  const safe = remote && typeof remote === 'object' ? remote : {};
+  const hasReference = Object.prototype.hasOwnProperty.call(safe, 'voiceId')
+    || Object.prototype.hasOwnProperty.call(safe, 'referenceVoice');
+  if (!hasReference) return normalizeStoredReference(fallbackValue);
+  const referenceVoice = storedReferenceVoice(safe);
+  const explicit = Boolean(safe.referenceVoiceExplicit);
+  return referenceVoice || explicit ? referenceVoice : normalizeStoredReference(fallbackValue);
+}
+
+function legacyExternalReferenceNeedsRepair(remote, fallbackValue = '') {
+  const safe = remote && typeof remote === 'object' ? remote : {};
+  const hasReference = Object.prototype.hasOwnProperty.call(safe, 'voiceId')
+    || Object.prototype.hasOwnProperty.call(safe, 'referenceVoice');
+  return Boolean(hasReference
+    && !storedReferenceVoice(safe)
+    && !safe.referenceVoiceExplicit
+    && normalizeStoredReference(fallbackValue));
+}
+
 async function applyExternalSettings(payload, settingsRevision) {
   const remote = payload && typeof payload === 'object' ? payload : {};
   const current = await getSettings();
-  const hasReference = Object.prototype.hasOwnProperty.call(remote, 'voiceId')
-    || Object.prototype.hasOwnProperty.call(remote, 'referenceVoice');
-  const referenceVoice = hasReference ? storedReferenceVoice(remote) : normalizeStoredReference(current.referenceVoice);
+  const referenceVoice = externalReferenceSelection(remote, current.referenceVoice);
   const next = {
     enabled: Object.prototype.hasOwnProperty.call(remote, 'enabled')
       ? Boolean(remote.enabled)
@@ -472,7 +506,7 @@ async function applyExternalSettings(payload, settingsRevision) {
   if (changed) await chrome.storage.local.set(next);
   if (changedReference) await syncDesktopPetSelection(referenceVoice || 'placeholder');
   lastExternalSettingsRevision = Number(settingsRevision ?? lastExternalSettingsRevision);
-  return sanitizeSettings({ ...current, ...next });
+  return rememberReferenceVoice(sanitizeSettings({ ...current, ...next }));
 }
 
 async function pushOptionSettings(settings = null) {
@@ -558,6 +592,7 @@ async function syncExternalControlPanel() {
           enabled: Boolean(localSettings.enabled),
           voiceVolume: Number(localSettings.voiceVolume),
           referenceVoice: normalizeStoredReference(localSettings.referenceVoice),
+          referenceVoiceExplicit: true,
           micConversationEnabled: Boolean(localSettings.micConversationEnabled),
           sttModel: String(localSettings.sttModel || 'small'),
           cancelGraceMs: Number(localSettings.cancelGraceMs ?? 700),
@@ -565,18 +600,23 @@ async function syncExternalControlPanel() {
         },
       });
     }
+    if (payload.settings && legacyExternalReferenceNeedsRepair(payload.settings, localSettings.referenceVoice)) {
+      const referenceVoice = normalizeStoredReference(localSettings.referenceVoice);
+      payload = await controlPanelRequest(localSettings, '/v1/control-panel/settings', {
+        method: 'POST',
+        body: { referenceVoice, referenceVoiceExplicit: true },
+      });
+    }
     let effectiveSettings = localSettings;
     if (payload.settings && Number(payload.settingsRevision) !== lastExternalSettingsRevision) {
       effectiveSettings = await applyExternalSettings(payload.settings, payload.settingsRevision);
     } else if (payload.settings) {
+      const referenceVoice = externalReferenceSelection(payload.settings, localSettings.referenceVoice);
       effectiveSettings = {
         ...localSettings,
         ...payload.settings,
-        referenceVoice: normalizeStoredReference(
-          Object.prototype.hasOwnProperty.call(payload.settings, 'referenceVoice')
-            ? payload.settings.referenceVoice
-            : localSettings.referenceVoice,
-        ),
+        voiceId: referenceVoice,
+        referenceVoice,
       };
     }
     effectiveSettings = sanitizeSettings({
@@ -691,7 +731,9 @@ function enqueue(base, front = false) {
     chunkCount: Number(base.chunkCount || 0),
     text: String(base.text || ''),
     voiceProfile: DEFAULT_SETTINGS.voiceProfile,
-    referenceVoice: base.referenceVoice === undefined ? undefined : normalizeStoredReference(base.referenceVoice),
+    referenceVoice: base.referenceVoice === undefined
+      ? (referenceSettingsLoaded ? lastKnownReferenceVoice : undefined)
+      : normalizeStoredReference(base.referenceVoice),
     voicePrompt: '',
     audioUrl: base.audioUrl ? String(base.audioUrl) : null,
   };
@@ -1006,7 +1048,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             info.lastAutoQueueSignature = autoQueueSignature;
             info.lastReadIndex = autoText ? 0 : -1;
             if (autoText && shouldQueueAutoFromTab(senderTabId)) {
-              enqueue({ mode: 'auto', reason: 'auto', tabId: senderTabId, tabTitle: info.title, messageKey, chunkIndex: 0, chunkCount: chunks.length, text: autoText, voiceProfile: DEFAULT_SETTINGS.voiceProfile, referenceVoice: undefined, voicePrompt: '' });
+              const reportedReferenceVoice = storedReferenceVoice(message);
+              enqueue({
+                mode: 'auto',
+                reason: 'auto',
+                tabId: senderTabId,
+                tabTitle: info.title,
+                messageKey,
+                chunkIndex: 0,
+                chunkCount: chunks.length,
+                text: autoText,
+                voiceProfile: DEFAULT_SETTINGS.voiceProfile,
+                referenceVoice: reportedReferenceVoice || (referenceSettingsLoaded ? lastKnownReferenceVoice : undefined),
+                voicePrompt: '',
+              });
               void playNext();
             } else if (autoText) {
               setStatus('音声入力中のため別の返答は読み上げませんでした', 'info');

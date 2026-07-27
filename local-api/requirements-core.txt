@@ -2,7 +2,7 @@ huggingface-hub==1.23.0
 soundfile==0.14.0
 descript-audiotools==0.7.2
 transformers==5.5.0
-sentencepiece==0.1.99
+sentencepiece==0.2.1
 safetensors==0.8.0
 pyyaml==6.0.3
 tqdm==4.68.3

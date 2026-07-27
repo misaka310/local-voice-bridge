@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserved the reference voice selected when each playback item was queued, distinguished an explicit `Ref=none` choice from a legacy empty value, and rejected output when the local API could not prove that the selected reference voice was applied.
+- Updated SentencePiece to 0.2.1 to resolve the reported heap-overflow vulnerability.
 - Reconnected already-open ChatGPT tabs automatically after the local Voice Bridge API or unpacked extension restarts, injecting the current content scripts when needed and restoring tab and latest-response state without auto-reading old replies.
 - Moved the microphone shortcut and STT status into the microphone button to reduce the Windows panel height.
 - Bounded generated audio to the newest 1,000 files, 1 GiB, and 14 days, pruning the oldest files at startup and after synthesis while preserving the current response.

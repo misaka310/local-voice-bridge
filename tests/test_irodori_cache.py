@@ -68,6 +68,22 @@ class IrodoriCudaCacheTests(unittest.TestCase):
 
         self.assertEqual(fake_torch.cuda.empty_cache_calls, 0)
 
+    def test_rejects_a_reference_when_the_runtime_cannot_apply_speaker_conditioning(self):
+        runtime = types.SimpleNamespace(
+            model_cfg=types.SimpleNamespace(use_speaker_condition_resolved=False)
+        )
+
+        with self.assertRaisesRegex(engine.IrodoriError, "cannot apply the selected reference voice"):
+            engine._require_reference_condition(runtime, "reference.wav")
+
+    def test_accepts_a_reference_when_speaker_conditioning_is_enabled(self):
+        runtime = types.SimpleNamespace(
+            model_cfg=types.SimpleNamespace(use_speaker_condition_resolved=True)
+        )
+
+        self.assertTrue(engine._require_reference_condition(runtime, "reference.wav"))
+        self.assertFalse(engine._require_reference_condition(runtime, None))
+
 
 if __name__ == "__main__":
     unittest.main()

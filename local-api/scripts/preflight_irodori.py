@@ -21,6 +21,7 @@ DEFAULT_CODEC = "Aratako/Semantic-DACVAE-Japanese-32dim"
 SECURITY_BASELINES = {
     "transformers": (Version("5.5.0"), Version("6")),
     "huggingface-hub": (Version("1.5.0"), Version("2")),
+    "sentencepiece": (Version("0.2.1"), Version("0.3")),
 }
 
 

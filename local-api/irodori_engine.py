@@ -134,6 +134,15 @@ def _get_runtime(*, model_cfg: dict[str, Any]) -> Any:
     return _MODEL_CACHE[key]
 
 
+def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
+    if not ref_wav:
+        return False
+    model_cfg = getattr(runtime, "model_cfg", None)
+    if not bool(getattr(model_cfg, "use_speaker_condition_resolved", False)):
+        raise IrodoriError("the active Irodori runtime cannot apply the selected reference voice")
+    return True
+
+
 def synthesize_irodori_direct(
     *,
     raw_config: dict[str, Any],
@@ -154,7 +163,7 @@ def synthesize_irodori_direct(
     ref_wav = _reference_audio_for(reference_voice, raw_config)
     caption = str(voice_prompt or cfg.get("caption") or "").strip() or None
     runtime = _get_runtime(model_cfg=cfg)
-    use_speaker = bool(runtime.model_cfg.use_speaker_condition_resolved and ref_wav)
+    use_speaker = _require_reference_condition(runtime, ref_wav)
     use_caption = bool(runtime.model_cfg.use_caption_condition and caption)
     cfg_scale_text, cfg_scale_caption, cfg_scale_speaker, _messages = resolve_cfg_scales(
         cfg_guidance_mode=str(cfg.get("cfgGuidanceMode") or "independent"),
