@@ -32,6 +32,7 @@ class SecurityBaselineTests(unittest.TestCase):
         installed = {
             "transformers": "5.5.0",
             "huggingface-hub": "1.5.0",
+            "sentencepiece": "0.2.1",
         }
         with patch.object(preflight, "package_version", side_effect=installed.__getitem__):
             self.assertTrue(preflight.security_baselines_ok())
@@ -40,6 +41,16 @@ class SecurityBaselineTests(unittest.TestCase):
         installed = {
             "transformers": "4.57.3",
             "huggingface-hub": "1.23.0",
+            "sentencepiece": "0.2.1",
+        }
+        with patch.object(preflight, "package_version", side_effect=installed.__getitem__):
+            self.assertFalse(preflight.security_baselines_ok())
+
+    def test_rejects_vulnerable_sentencepiece(self):
+        installed = {
+            "transformers": "5.5.0",
+            "huggingface-hub": "1.5.0",
+            "sentencepiece": "0.1.99",
         }
         with patch.object(preflight, "package_version", side_effect=installed.__getitem__):
             self.assertFalse(preflight.security_baselines_ok())

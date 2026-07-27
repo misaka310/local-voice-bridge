@@ -80,13 +80,19 @@ function createHarness(harnessOptions = {}) {
 
   async function fetch(url, options = {}) {
     if (String(url).endsWith('/v1/speak') && options.method === 'POST') {
-      posts.push(JSON.parse(options.body || '{}'));
+      const body = JSON.parse(options.body || '{}');
+      posts.push(body);
       if (harnessOptions.speakSucceeds) {
         return {
           ok: true,
           status: 200,
           async json() {
-            return { ok: true, audioUrl: `http://127.0.0.1:8717/audio/test-${posts.length}.wav` };
+            return {
+              ok: true,
+              audioUrl: `http://127.0.0.1:8717/audio/test-${posts.length}.wav`,
+              referenceVoice: body.referenceVoice,
+              usedReferenceAudio: harnessOptions.omitUsedReferenceAudio || !body.referenceVoice ? '' : 'applied.wav',
+            };
           },
         };
       }
@@ -151,10 +157,12 @@ function createHarness(harnessOptions = {}) {
     send,
     sendAsync,
     tabMessages,
+    setStorage(values) { Object.assign(storage, values); },
     removeTab(tabId) { tabRemovedListener(tabId); },
     activateTab(tabId) { tabActivatedListener({ tabId }); },
     updateTab(tabId, changeInfo) { tabUpdatedListener(tabId, changeInfo, {}); },
     expirePlayback() { return vm.runInContext('recoverExpiredPlayback(Date.now() + 1_000_000)', context); },
+    finishCurrentPlayback() { return vm.runInContext('finishPlayback({ playbackToken: currentToken, ok: true, stopped: false })', context); },
   };
 }
 
@@ -267,6 +275,40 @@ test('Next and Regen use the saved reference voice when legacy fields are omitte
 
   assert.deepEqual(harness.posts.map((body) => body.referenceVoice), ['sample', 'sample']);
   assert.deepEqual(harness.posts.map((body) => body.voiceId), ['sample', 'sample']);
+});
+
+test('queued Auto items keep the reference voice selected when they entered the queue', async () => {
+  const harness = createHarness({ speakSucceeds: true });
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({
+    type: 'report-chunks', messageKey: 'reply-a', chunks: ['一件目です。'], autoPreview: '一件目です。', isAuto: true,
+    voiceId: 'sample', referenceVoice: 'sample',
+  }, 101, 'Tab A');
+  harness.send({
+    type: 'report-chunks', messageKey: 'reply-b', chunks: ['二件目です。'], autoPreview: '二件目です。', isAuto: true,
+    voiceId: 'sample', referenceVoice: 'sample',
+  }, 101, 'Tab A');
+  harness.setStorage({ voiceId: 'asuka', referenceVoice: 'asuka' });
+
+  await waitFor(() => harness.tabMessages.some((entry) => entry.message.type === 'play-audio'));
+  harness.finishCurrentPlayback();
+  await waitFor(() => harness.posts.length === 2);
+
+  assert.equal(harness.posts[0].referenceVoice, 'sample');
+  assert.equal(harness.posts[1].referenceVoice, 'sample');
+  harness.send({ type: 'ui-command', cmd: 'stop' }, 101, 'Tab A');
+});
+
+test('a selected reference voice is not played when the API omits proof that it was applied', async () => {
+  const harness = createHarness({ speakSucceeds: true, omitUsedReferenceAudio: true });
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({
+    type: 'report-chunks', messageKey: 'reply-unverified', chunks: ['参照音声を検証します。'], autoPreview: '参照音声を検証します。', isAuto: true,
+  }, 101, 'Tab A');
+
+  await waitFor(() => harness.posts.length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(harness.tabMessages.some((entry) => entry.message.type === 'play-audio'), false);
 });
 
 test('desktop pet selection is forwarded to the local desktop pet API', async () => {

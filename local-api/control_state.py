@@ -12,6 +12,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": False,
     "voiceVolume": 0.6,
     "referenceVoice": "",
+    "referenceVoiceExplicit": False,
     "micConversationEnabled": False,
     "sttModel": "small",
     "cancelGraceMs": 700,
@@ -84,10 +85,16 @@ def _normalize_cancel_grace_ms(value: Any) -> int:
 
 def _normalize_settings(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
+    reference_voice = _normalize_reference_voice(raw.get("referenceVoice", raw.get("voiceId", "")))
+    if "referenceVoiceExplicit" in raw:
+        reference_voice_explicit = bool(raw.get("referenceVoiceExplicit"))
+    else:
+        reference_voice_explicit = bool(reference_voice)
     return {
         "enabled": bool(raw.get("enabled", DEFAULT_SETTINGS["enabled"])),
         "voiceVolume": _clamp_volume(raw.get("voiceVolume", DEFAULT_SETTINGS["voiceVolume"])),
-        "referenceVoice": _normalize_reference_voice(raw.get("referenceVoice", raw.get("voiceId", ""))),
+        "referenceVoice": reference_voice,
+        "referenceVoiceExplicit": reference_voice_explicit,
         "micConversationEnabled": bool(
             raw.get("micConversationEnabled", DEFAULT_SETTINGS["micConversationEnabled"])
         ),
@@ -206,6 +213,7 @@ class ControlStateStore:
                 merged["referenceVoice"] = _normalize_reference_voice(
                     payload.get("referenceVoice", payload.get("voiceId"))
                 )
+                merged["referenceVoiceExplicit"] = bool(payload.get("referenceVoiceExplicit", True))
             if "micConversationEnabled" in payload:
                 merged["micConversationEnabled"] = bool(payload.get("micConversationEnabled"))
             if "sttModel" in payload:

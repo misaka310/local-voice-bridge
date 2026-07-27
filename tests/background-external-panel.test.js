@@ -64,6 +64,7 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
       enabled: true,
       voiceVolume: 0.25,
       referenceVoice: 'asuka',
+      referenceVoiceExplicit: true,
       micConversationEnabled: true,
       sttModel: 'medium',
       cancelGraceMs: 900,
@@ -146,6 +147,7 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
           ...(Object.prototype.hasOwnProperty.call(body, 'enabled') ? { enabled: Boolean(body.enabled) } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'voiceVolume') ? { voiceVolume: Number(body.voiceVolume) } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'referenceVoice') ? { referenceVoice: String(body.referenceVoice || '') } : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, 'referenceVoiceExplicit') ? { referenceVoiceExplicit: Boolean(body.referenceVoiceExplicit) } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'micConversationEnabled') ? { micConversationEnabled: Boolean(body.micConversationEnabled) } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'sttModel') ? { sttModel: String(body.sttModel || 'small') } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'cancelGraceMs') ? { cancelGraceMs: Number(body.cancelGraceMs ?? 700) } : {}),
@@ -176,6 +178,7 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
         audioUrl: 'http://127.0.0.1:8717/audio/test.wav',
         voiceProfile: 'irodori-v3',
         referenceVoice: body.referenceVoice,
+        usedReferenceAudio: body.referenceVoice ? 'applied.wav' : '',
       });
     }
     throw new Error(`unexpected fetch: ${url}`);
@@ -377,11 +380,53 @@ test('first extension poll seeds an uninitialized external panel from existing C
     enabled: false,
     voiceVolume: 0.6,
     referenceVoice: 'sample',
+    referenceVoiceExplicit: true,
     micConversationEnabled: false,
     sttModel: 'small',
     cancelGraceMs: 700,
     initialized: true,
   });
+});
+
+test('a legacy empty external reference cannot erase a selected Chrome reference voice', async () => {
+  const harness = createHarness();
+  harness.setControl({
+    commands: [],
+    settingsRevision: 4,
+    settings: {
+      ...harness.control().settings,
+      referenceVoice: '',
+      referenceVoiceExplicit: false,
+    },
+  });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.storage.referenceVoice, 'sample');
+  assert.equal(harness.storage.voiceId, 'sample');
+  assert.ok(harness.settingsPosts.some((body) => (
+    body.referenceVoice === 'sample' && body.referenceVoiceExplicit === true
+  )));
+});
+
+test('an explicit none external reference clears the selected Chrome reference voice', async () => {
+  const harness = createHarness();
+  harness.setControl({
+    commands: [],
+    settingsRevision: 4,
+    settings: {
+      ...harness.control().settings,
+      referenceVoice: '',
+      referenceVoiceExplicit: true,
+    },
+  });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.storage.referenceVoice, '');
+  assert.equal(harness.storage.voiceId, '');
 });
 
 test('conversation events are delivered to the selected ChatGPT tab once', async () => {

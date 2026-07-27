@@ -23,6 +23,7 @@ class ControlStateStoreTests(unittest.TestCase):
             self.assertFalse(initial["initialized"])
             self.assertFalse(initial["settings"]["enabled"])
             self.assertEqual(initial["settings"]["referenceVoice"], "")
+            self.assertFalse(initial["settings"]["referenceVoiceExplicit"])
 
             updated = store.update_settings(
                 {
@@ -36,12 +37,26 @@ class ControlStateStoreTests(unittest.TestCase):
             self.assertTrue(updated["initialized"])
             self.assertEqual(updated["settings"]["voiceVolume"], 1.0)
             self.assertEqual(updated["settings"]["referenceVoice"], "asuka")
+            self.assertTrue(updated["settings"]["referenceVoiceExplicit"])
 
             reloaded = ControlStateStore(path).snapshot(now=100.0)
             self.assertTrue(reloaded["initialized"])
             self.assertTrue(reloaded["settings"]["enabled"])
             self.assertEqual(reloaded["settings"]["voiceVolume"], 1.0)
             self.assertEqual(reloaded["settings"]["referenceVoice"], "asuka")
+            self.assertTrue(reloaded["settings"]["referenceVoiceExplicit"])
+
+    def test_explicit_none_is_distinguished_from_a_legacy_empty_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "state.json"
+            store = ControlStateStore(path)
+
+            selected_none = store.update_settings({"referenceVoice": "", "initialized": True})
+
+            self.assertEqual(selected_none["settings"]["referenceVoice"], "")
+            self.assertTrue(selected_none["settings"]["referenceVoiceExplicit"])
+            reloaded = ControlStateStore(path).snapshot()
+            self.assertTrue(reloaded["settings"]["referenceVoiceExplicit"])
 
     def test_commands_are_monotonic_and_polling_does_not_replay_old_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
