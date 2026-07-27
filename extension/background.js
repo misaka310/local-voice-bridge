@@ -1,24 +1,14 @@
-const SETTINGS_VERSION = 10;
-const DEFAULT_SETTINGS = {
-  settingsVersion: SETTINGS_VERSION,
-  enabled: false,
-  apiUrl: 'http://127.0.0.1:8717/v1/speak',
-  healthUrl: 'http://127.0.0.1:8717/health',
-  voiceProfile: 'irodori-v3',
-  voiceId: '',
-  referenceVoice: '',
-  voicePrompt: '',
-  voiceVolume: 0.6,
-  previewMaxLines: 2,
-  previewMaxChars: 80,
-  previewMinChars: 40,
-  previewStableMs: 1000,
-  micConversationEnabled: false,
-  sttModel: 'small',
-  cancelGraceMs: 700,
-};
-const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
+const settingsCore = globalThis.BackgroundSettingsCore;
+if (!settingsCore) throw new Error('background-settings-core.js must be loaded before background.js');
+const {
+  DEFAULT_SETTINGS,
+  LEGACY_BROWSER_UI_STORAGE_KEYS,
+  SETTINGS_VERSION,
+  normalizeStoredReference,
+  sanitizeSettings,
+} = settingsCore;
 const CHATGPT_TAB_PATTERNS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
+const BRIDGE_CONSUMER_ID_KEY = 'bridgeConsumerId';
 
 const tabs = new Map();
 const reconnectingTabs = new Map();
@@ -36,11 +26,6 @@ let lastPlayedItem = null;
 let seq = 1;
 let lastStatusText = 'Ready';
 let lastStatusLevel = 'info';
-let externalControlPollPromise = null;
-let localApiConnected = false;
-let lastExternalCommandId = 0;
-let lastExternalConversationEventId = 0;
-let lastExternalSettingsRevision = -1;
 let lastKnownReferenceVoice = '';
 let referenceSettingsLoaded = false;
 let lastComposerFocusedTabId = null;
@@ -48,64 +33,18 @@ let activeConversationTargetTabId = null;
 let conversationPhase = 'off';
 const conversationSessionTargets = new Map();
 const conversationSessionTargetLocations = new Map();
-
-function normalizeModel(_value) {
-  return DEFAULT_SETTINGS.voiceProfile;
-}
-
-function normalizeStoredReference(value) {
-  const normalized = normalizeReferenceVoice(value);
-  if (!normalized || ['qwen3', 'qwen', 'none'].includes(normalized.toLowerCase())) return '';
-  return normalized;
-}
-function storedReferenceVoice(raw) {
-  const voiceId = normalizeStoredReference(raw && raw.voiceId);
-  if (voiceId) return voiceId;
-  return normalizeStoredReference(raw && raw.referenceVoice);
-}
+let browserRuntimeHydrated = false;
+let browserRuntimeHydrationPromise = null;
+let browserRuntimePersistTimer = null;
+let browserRuntimePersistPromise = null;
+let browserRuntimePersistDirty = false;
+let backgroundInitializationPromise = null;
 
 function rememberReferenceVoice(settings) {
   const safe = settings && typeof settings === 'object' ? settings : {};
   lastKnownReferenceVoice = normalizeStoredReference(safe.referenceVoice ?? safe.voiceId);
   referenceSettingsLoaded = true;
   return settings;
-}
-
-function clampInteger(value, fallback, minimum, maximum) {
-  if (value === '' || value === null || value === undefined) return fallback;
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(maximum, Math.max(minimum, Math.round(number)));
-}
-
-function normalizeSttModel(value) {
-  const normalized = String(value || '').trim();
-  return ['small', 'medium', 'large-v3-turbo'].includes(normalized)
-    ? normalized
-    : DEFAULT_SETTINGS.sttModel;
-}
-
-function normalizeCancelGraceMs(value) {
-  return clampInteger(value, DEFAULT_SETTINGS.cancelGraceMs, 0, 5000);
-}
-
-function sanitizeSettings(raw = {}) {
-  const sanitized = {
-    ...DEFAULT_SETTINGS,
-    ...raw,
-    settingsVersion: SETTINGS_VERSION,
-    model: DEFAULT_SETTINGS.voiceProfile,
-    voiceId: storedReferenceVoice(raw),
-    voiceProfile: normalizeModel(raw.model || raw.voiceProfile),
-    referenceVoice: storedReferenceVoice(raw),
-    voicePrompt: '',
-    previewMaxLines: clampInteger(raw.previewMaxLines, DEFAULT_SETTINGS.previewMaxLines, 1, 20),
-    previewMaxChars: clampInteger(raw.previewMaxChars, DEFAULT_SETTINGS.previewMaxChars, 40, 1000),
-    sttModel: normalizeSttModel(raw.sttModel),
-    cancelGraceMs: normalizeCancelGraceMs(raw.cancelGraceMs),
-  };
-  for (const key of LEGACY_BROWSER_UI_STORAGE_KEYS) delete sanitized[key];
-  return sanitized;
 }
 
 async function migrateSettings() {
@@ -126,7 +65,129 @@ async function getSettings() {
 }
 
 function cloneItem(item) {
-  return item ? { ...item } : null;
+  return globalThis.BackgroundRuntimeCore.cloneItem(item);
+}
+
+function browserRuntimeStatePayload() {
+  return globalThis.BackgroundRuntimeCore.createPayload({
+    tabs,
+    selectedTabId,
+    uiOwnerTabId,
+    lastComposerFocusedTabId,
+    activeConversationTargetTabId,
+    conversationSessionTargets,
+    conversationSessionTargetLocations,
+    queue,
+    currentItem,
+    lastPlayedItem,
+    seq,
+  });
+}
+
+function applyBrowserRuntimeSnapshot(value) {
+  const merged = globalThis.BackgroundRuntimeCore.mergeSnapshot(value, {
+    tabs,
+    selectedTabId,
+    uiOwnerTabId,
+    lastComposerFocusedTabId,
+    activeConversationTargetTabId,
+    conversationSessionTargets,
+    conversationSessionTargetLocations,
+    queue,
+    currentItem,
+    isPlaying,
+    lastPlayedItem,
+    seq,
+  });
+  tabs.clear();
+  for (const [tabId, info] of merged.tabs.entries()) tabs.set(tabId, info);
+  conversationSessionTargets.clear();
+  conversationSessionTargetLocations.clear();
+  for (const [sessionId, tabId] of merged.conversationSessionTargets.entries()) {
+    conversationSessionTargets.set(sessionId, tabId);
+    conversationSessionTargetLocations.set(
+      sessionId,
+      String(merged.conversationSessionTargetLocations.get(sessionId) || ''),
+    );
+  }
+  selectedTabId = merged.selectedTabId;
+  uiOwnerTabId = merged.uiOwnerTabId;
+  lastComposerFocusedTabId = merged.lastComposerFocusedTabId;
+  activeConversationTargetTabId = merged.activeConversationTargetTabId;
+  queue = merged.queue;
+  if (merged.resetPlayback) {
+    currentItem = null;
+    currentToken = null;
+    currentPlaybackTabId = null;
+    currentPlaybackDeadlineAt = 0;
+    isPlaying = false;
+    playbackPhase = 'idle';
+  }
+  lastPlayedItem = merged.lastPlayedItem;
+  seq = merged.seq;
+  ensureOwner();
+  browserRuntimeHydrated = true;
+  scheduleBrowserRuntimePersist();
+  return true;
+}
+
+async function hydrateBrowserRuntime() {
+  if (browserRuntimeHydrated) return true;
+  if (browserRuntimeHydrationPromise) return browserRuntimeHydrationPromise;
+  browserRuntimeHydrationPromise = (async () => {
+    try {
+      const settings = await getSettings();
+      const payload = await controlPanelRequest(settings, '/v1/browser-runtime');
+      if (payload.browserRuntime && payload.browserRuntime.currentItem) {
+        await stopLocalAudio().catch(() => {});
+      }
+      applyBrowserRuntimeSnapshot(payload.browserRuntime);
+      if (queue.length && !isPlaying) void playNext();
+      return true;
+    } catch (_error) {
+      browserRuntimeHydrated = false;
+      return false;
+    }
+  })();
+  try {
+    return await browserRuntimeHydrationPromise;
+  } finally {
+    browserRuntimeHydrationPromise = null;
+  }
+}
+
+async function flushBrowserRuntimeState() {
+  if (!browserRuntimeHydrated) return;
+  browserRuntimePersistDirty = true;
+  if (browserRuntimePersistPromise) return browserRuntimePersistPromise;
+  browserRuntimePersistPromise = (async () => {
+    while (browserRuntimePersistDirty) {
+      browserRuntimePersistDirty = false;
+      const settings = await getSettings();
+      await controlPanelRequest(settings, '/v1/browser-runtime', {
+        method: 'POST',
+        body: browserRuntimeStatePayload(),
+      });
+    }
+  })();
+  try {
+    await browserRuntimePersistPromise;
+  } finally {
+    browserRuntimePersistPromise = null;
+  }
+}
+
+function scheduleBrowserRuntimePersist() {
+  if (!browserRuntimeHydrated) return;
+  browserRuntimePersistDirty = true;
+  if (browserRuntimePersistTimer) return;
+  browserRuntimePersistTimer = setTimeout(() => {
+    browserRuntimePersistTimer = null;
+    void flushBrowserRuntimeState().catch(() => {});
+  }, 25);
+  if (browserRuntimePersistTimer && typeof browserRuntimePersistTimer.unref === 'function') {
+    browserRuntimePersistTimer.unref();
+  }
 }
 
 function setStatus(text, level = 'info') {
@@ -222,7 +283,9 @@ async function deliverVoiceTranscript(targetTabId, payload, settings) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await chrome.tabs.sendMessage(targetTabId, { type: 'voice-transcript', payload });
-      if (response && response.ok === true) return { ok: true };
+      if (response && response.ok === true) {
+        return { ok: true, alreadyApplied: Boolean(response.alreadyApplied) };
+      }
       lastReason = String(response && (response.reason || response.error) || 'message-delivery-failed');
     } catch (_error) {
       lastReason = 'message-delivery-failed';
@@ -304,6 +367,7 @@ function statePayload(forTabId = null) {
 }
 
 function broadcastState() {
+  scheduleBrowserRuntimePersist();
   for (const tabId of tabs.keys()) {
     chrome.tabs.sendMessage(tabId, { type: 'state-update', payload: statePayload(tabId) }).catch(() => {});
   }
@@ -324,7 +388,19 @@ async function speak(text, requestId, voiceProfile, referenceVoice, voicePrompt)
   const response = await fetch(settings.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, requestId, source: 'chatgpt-web', model: pickedProfile, voiceProfile: pickedProfile, voiceId: pickedReferenceVoice, referenceVoice: pickedReferenceVoice, voicePrompt: pickedVoicePrompt, instruct: pickedVoicePrompt }),
+    body: JSON.stringify({
+      text,
+      requestId,
+      source: 'chatgpt-web',
+      model: pickedProfile,
+      voiceProfile: pickedProfile,
+      voiceId: pickedReferenceVoice,
+      referenceVoice: pickedReferenceVoice,
+      voicePrompt: pickedVoicePrompt,
+      instruct: pickedVoicePrompt,
+      voiceVolume: Number(settings.voiceVolume),
+      playLocal: true,
+    }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -445,6 +521,22 @@ async function controlPanelRequest(settings, pathname, options = {}) {
   return payload;
 }
 
+async function replayLocalAudio(text = '') {
+  const settings = await getSettings();
+  return controlPanelRequest(settings, '/v1/playback/replay', {
+    method: 'POST',
+    body: {
+      text: String(text || ''),
+      voiceVolume: Number(settings.voiceVolume),
+    },
+  });
+}
+
+async function stopLocalAudio() {
+  const settings = await getSettings();
+  return controlPanelRequest(settings, '/v1/playback/stop', { method: 'POST', body: {} });
+}
+
 async function postConversationState(payload) {
   const settings = await getSettings();
   const safe = payload && typeof payload === 'object' ? payload : {};
@@ -460,69 +552,6 @@ async function postConversationState(payload) {
   });
 }
 
-function externalReferenceSelection(remote, fallbackValue = '') {
-  const safe = remote && typeof remote === 'object' ? remote : {};
-  const hasReference = Object.prototype.hasOwnProperty.call(safe, 'voiceId')
-    || Object.prototype.hasOwnProperty.call(safe, 'referenceVoice');
-  if (!hasReference) return normalizeStoredReference(fallbackValue);
-  const referenceVoice = storedReferenceVoice(safe);
-  const explicit = Boolean(safe.referenceVoiceExplicit);
-  return referenceVoice || explicit ? referenceVoice : normalizeStoredReference(fallbackValue);
-}
-
-function legacyExternalReferenceNeedsRepair(remote, fallbackValue = '') {
-  const safe = remote && typeof remote === 'object' ? remote : {};
-  const hasReference = Object.prototype.hasOwnProperty.call(safe, 'voiceId')
-    || Object.prototype.hasOwnProperty.call(safe, 'referenceVoice');
-  return Boolean(hasReference
-    && !storedReferenceVoice(safe)
-    && !safe.referenceVoiceExplicit
-    && normalizeStoredReference(fallbackValue));
-}
-
-async function applyExternalSettings(payload, settingsRevision) {
-  const remote = payload && typeof payload === 'object' ? payload : {};
-  const current = await getSettings();
-  const referenceVoice = externalReferenceSelection(remote, current.referenceVoice);
-  const next = {
-    enabled: Object.prototype.hasOwnProperty.call(remote, 'enabled')
-      ? Boolean(remote.enabled)
-      : Boolean(current.enabled),
-    voiceVolume: Object.prototype.hasOwnProperty.call(remote, 'voiceVolume')
-      ? Math.min(1, Math.max(0, Number(remote.voiceVolume) || 0))
-      : Number(current.voiceVolume),
-    voiceId: referenceVoice,
-    referenceVoice,
-    micConversationEnabled: Object.prototype.hasOwnProperty.call(remote, 'micConversationEnabled')
-      ? Boolean(remote.micConversationEnabled)
-      : Boolean(current.micConversationEnabled),
-  };
-  const changedReference = normalizeStoredReference(current.referenceVoice) !== referenceVoice;
-  const changed = Boolean(current.enabled) !== next.enabled
-    || Number(current.voiceVolume) !== next.voiceVolume
-    || changedReference
-    || normalizeStoredReference(current.voiceId) !== referenceVoice
-    || Boolean(current.micConversationEnabled) !== next.micConversationEnabled;
-  if (changed) await chrome.storage.local.set(next);
-  if (changedReference) await syncDesktopPetSelection(referenceVoice || 'placeholder');
-  lastExternalSettingsRevision = Number(settingsRevision ?? lastExternalSettingsRevision);
-  return rememberReferenceVoice(sanitizeSettings({ ...current, ...next }));
-}
-
-async function pushOptionSettings(settings = null) {
-  const current = settings || await getSettings();
-  const payload = await controlPanelRequest(current, '/v1/control-panel/settings', {
-    method: 'POST',
-    body: {
-      sttModel: normalizeSttModel(current.sttModel),
-      cancelGraceMs: normalizeCancelGraceMs(current.cancelGraceMs),
-    },
-  });
-  const revision = Number(payload.settingsRevision);
-  if (Number.isFinite(revision)) lastExternalSettingsRevision = revision;
-  return payload;
-}
-
 async function reconnectChatGptTab(tab) {
   const tabId = Number(tab && tab.id);
   if (!Number.isInteger(tabId) || tabId <= 0) return false;
@@ -536,7 +565,7 @@ async function reconnectChatGptTab(tab) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['prompt-input-core.js', 'content.js'],
+        files: ['prompt-input-core.js', 'delivery-id-core.js', 'content.js'],
       });
       const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
       return Boolean(response && response.ok === true);
@@ -559,7 +588,13 @@ async function reconnectOpenChatGptTabs() {
   } catch (_error) {
     return;
   }
+  const openTabIds = new Set(openTabs.map((tab) => Number(tab && tab.id)).filter((id) => Number.isInteger(id) && id > 0));
+  for (const tabId of Array.from(tabs.keys())) {
+    if (!openTabIds.has(tabId)) tabs.delete(tabId);
+  }
+  ensureOwner();
   await Promise.all(openTabs.map((tab) => reconnectChatGptTab(tab)));
+  broadcastState();
 }
 
 function externalStateSnapshot() {
@@ -577,146 +612,42 @@ function externalStateSnapshot() {
   };
 }
 
-async function syncExternalControlPanel() {
-  recoverExpiredPlayback(Date.now());
-  if (externalControlPollPromise) return externalControlPollPromise;
-  externalControlPollPromise = (async () => {
-    const localSettings = await getSettings();
-    let payload = await controlPanelRequest(localSettings, '/v1/control-panel/poll', {
-      search: `?after=${lastExternalCommandId}`,
-    });
-    if (!payload.initialized) {
-      payload = await controlPanelRequest(localSettings, '/v1/control-panel/settings', {
-        method: 'POST',
-        body: {
-          enabled: Boolean(localSettings.enabled),
-          voiceVolume: Number(localSettings.voiceVolume),
-          referenceVoice: normalizeStoredReference(localSettings.referenceVoice),
-          referenceVoiceExplicit: true,
-          micConversationEnabled: Boolean(localSettings.micConversationEnabled),
-          sttModel: String(localSettings.sttModel || 'small'),
-          cancelGraceMs: Number(localSettings.cancelGraceMs ?? 700),
-          initialized: true,
-        },
-      });
-    }
-    if (payload.settings && legacyExternalReferenceNeedsRepair(payload.settings, localSettings.referenceVoice)) {
-      const referenceVoice = normalizeStoredReference(localSettings.referenceVoice);
-      payload = await controlPanelRequest(localSettings, '/v1/control-panel/settings', {
-        method: 'POST',
-        body: { referenceVoice, referenceVoiceExplicit: true },
-      });
-    }
-    let effectiveSettings = localSettings;
-    if (payload.settings && Number(payload.settingsRevision) !== lastExternalSettingsRevision) {
-      effectiveSettings = await applyExternalSettings(payload.settings, payload.settingsRevision);
-    } else if (payload.settings) {
-      const referenceVoice = externalReferenceSelection(payload.settings, localSettings.referenceVoice);
-      effectiveSettings = {
-        ...localSettings,
-        ...payload.settings,
-        voiceId: referenceVoice,
-        referenceVoice,
-      };
-    }
-    effectiveSettings = sanitizeSettings({
-      ...effectiveSettings,
-      sttModel: localSettings.sttModel,
-      cancelGraceMs: localSettings.cancelGraceMs,
-    });
-    if (payload.settings && (normalizeSttModel(payload.settings.sttModel) !== effectiveSettings.sttModel
-      || normalizeCancelGraceMs(payload.settings.cancelGraceMs) !== effectiveSettings.cancelGraceMs)) {
-      await pushOptionSettings(effectiveSettings);
-    }
-    const conversation = payload.conversation && typeof payload.conversation === 'object' ? payload.conversation : {};
-    conversationPhase = String(conversation.phase || conversationPhase || 'off');
-    const commands = Array.isArray(payload.commands) ? payload.commands : [];
-    const referenceVoice = normalizeStoredReference(effectiveSettings.referenceVoice);
-    for (const item of commands.sort((a, b) => Number(a.id || 0) - Number(b.id || 0))) {
-      const commandId = Number(item.id || 0);
-      if (!commandId || commandId <= lastExternalCommandId) continue;
-      executeUiCommand(String(item.command || ''), null, { voiceId: referenceVoice, referenceVoice });
-      lastExternalCommandId = commandId;
-    }
-    const conversationEvents = Array.isArray(payload.conversationEvents) ? payload.conversationEvents : [];
-    ensureOwner();
-    for (const item of conversationEvents.sort((a, b) => Number(a.id || 0) - Number(b.id || 0))) {
-      const eventId = Number(item.id || 0);
-      if (!eventId || eventId <= lastExternalConversationEventId) continue;
-      const type = String(item.type || '');
-      const eventPayload = item.payload && typeof item.payload === 'object' ? item.payload : {};
-      const sessionId = Number(eventPayload.sessionId || 0);
-      if (type === 'cancel_pending') {
-        const target = await captureConversationTarget();
-        const targetTabId = target ? target.tabId : null;
-        if (sessionId) {
-          conversationSessionTargets.set(sessionId, targetTabId || 0);
-          conversationSessionTargetLocations.set(sessionId, conversationLocationKey(target && target.url));
-        }
-        activeConversationTargetTabId = targetTabId;
-        await Promise.all(Array.from(tabs.keys()).map((tabId) => (
-          chrome.tabs.sendMessage(tabId, { type: 'cancel-voice-send', payload: eventPayload }).catch(() => {})
-        )));
-      } else if (type === 'transcript') {
-        const hasSessionTarget = Boolean(sessionId && conversationSessionTargets.has(sessionId));
-        let targetTabId = hasSessionTarget
-          ? conversationSessionTargets.get(sessionId)
-          : activeConversationTargetTabId;
+const externalControlSync = globalThis.BackgroundControlSync.create({
+  chrome,
+  crypto,
+  settingsCore,
+  consumerIdStorageKey: BRIDGE_CONSUMER_ID_KEY,
+  tabs,
+  conversationSessionTargets,
+  conversationSessionTargetLocations,
+  getSettings,
+  rememberReferenceVoice,
+  controlPanelRequest,
+  syncDesktopPetSelection,
+  hydrateBrowserRuntime,
+  recoverExpiredPlayback,
+  executeUiCommand,
+  flushBrowserRuntimeState,
+  captureConversationTarget,
+  conversationLocationKey,
+  conversationTargetStatus,
+  deliverVoiceTranscript,
+  postConversationState,
+  ensureOwner,
+  reconnectOpenChatGptTabs,
+  externalStateSnapshot,
+  getConversationPhase: () => conversationPhase,
+  setConversationPhase: (value) => { conversationPhase = value; },
+  getActiveConversationTargetTabId: () => activeConversationTargetTabId,
+  setActiveConversationTargetTabId: (value) => { activeConversationTargetTabId = value; },
+});
 
-        if (!hasSessionTarget && !targetTabId) {
-          const fallbackTarget = await captureConversationTarget();
-          targetTabId = fallbackTarget ? fallbackTarget.tabId : null;
-        }
-        const expectedLocation = hasSessionTarget
-          ? String(conversationSessionTargetLocations.get(sessionId) || '')
-          : '';
-        if (targetTabId && tabs.has(targetTabId)) {
-          activeConversationTargetTabId = targetTabId;
-          const currentTarget = expectedLocation ? await conversationTargetStatus(targetTabId) : null;
-          if (expectedLocation && (!currentTarget || !currentTarget.ok
-            || conversationLocationKey(currentTarget.url) !== expectedLocation)) {
-            await postConversationState({
-              phase: 'error',
-              statusText: '録音開始後にChatGPTのページが変わったため送信しませんでした',
-              sttModel: effectiveSettings.sttModel || 'small',
-              error: 'conversation-target-page-changed',
-            }).catch(() => {});
-          } else {
-            await deliverVoiceTranscript(targetTabId, eventPayload, effectiveSettings);
-          }
-        } else {
-          await postConversationState({
-            phase: 'error',
-            statusText: '音声入力先のChatGPTタブを確認できませんでした',
-            sttModel: effectiveSettings.sttModel || 'small',
-            error: 'conversation-target-not-found',
-          }).catch(() => {});
-        }
-      }
-      if (type === 'transcript' && sessionId) {
-        conversationSessionTargets.delete(sessionId);
-        conversationSessionTargetLocations.delete(sessionId);
-      }
-      lastExternalConversationEventId = eventId;
-    }
-    const state = externalStateSnapshot();
-    await controlPanelRequest(await getSettings(), '/v1/control-panel/state', {
-      method: 'POST',
-      body: state,
-    });
-    const recovered = !localApiConnected;
-    localApiConnected = true;
-    if (recovered) await reconnectOpenChatGptTabs();
-    return state;
-  })();
-  try {
-    return await externalControlPollPromise;
-  } catch (error) {
-    localApiConnected = false;
-    throw error;
-  } finally {
-    externalControlPollPromise = null;
-  }
+async function pushOptionSettings(settings = null) {
+  return externalControlSync.pushOptionSettings(settings);
+}
+
+async function syncExternalControlPanel() {
+  return externalControlSync.synchronize();
 }
 
 function enqueue(base, front = false) {
@@ -786,6 +717,7 @@ function abandonCurrentPlayback(reason, level = 'warn') {
   const playbackToken = currentToken;
   const playbackTabId = currentPlaybackTabId;
   clearCurrentPlayback();
+  void stopLocalAudio().catch(() => {});
   if (playbackTabId) {
     chrome.tabs.sendMessage(playbackTabId, { type: 'stop-audio', payload: { playbackToken } }).catch(() => {});
   }
@@ -863,23 +795,42 @@ async function playNext() {
   currentItem = item;
   const playbackToken = crypto.randomUUID();
   currentToken = playbackToken;
-  currentPlaybackTabId = uiOwnerTabId;
+  currentPlaybackTabId = null;
   setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
   broadcastState();
   try {
-    if (!item.audioUrl) {
-      const payload = await speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt);
+    await flushBrowserRuntimeState();
+    let payload;
+    if (item.audioUrl) {
+      payload = await replayLocalAudio(item.text);
+    } else {
+      payload = await speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt);
       item.audioUrl = payload.audioUrl;
-      item.usedReferenceAudio = String(payload.usedReferenceAudio || "");
-      item.voiceProfile = String(payload.voiceProfile || item.voiceProfile || "");
-      item.referenceVoice = String(payload.referenceVoice || item.referenceVoice || "");
+      item.usedReferenceAudio = String(payload.usedReferenceAudio || '');
+      item.voiceProfile = String(payload.voiceProfile || item.voiceProfile || '');
+      item.referenceVoice = String(payload.referenceVoice || item.referenceVoice || '');
     }
     if (!isPlaying || currentToken !== playbackToken || currentItem !== item) return;
+    if (payload && payload.playedLocally === true) {
+      finishPlayback({
+        playbackToken,
+        ok: !payload.stopped && payload.playbackCompleted !== false,
+        stopped: Boolean(payload.stopped),
+        error: payload.error || '',
+      });
+      return;
+    }
+
+    // Compatibility with an older local API during an in-place upgrade.
+    currentPlaybackTabId = uiOwnerTabId;
     playbackPhase = 'playing';
-    setStatus(`Playing chunk ${chunkLabel(item)}`, 'info');
+    setStatus(`Playing chunk ${chunkLabel(item)} · Ref ${item.referenceVoice || 'none'}`, 'info');
     armPlaybackWatchdog(playbackLeaseMs(0));
     broadcastState();
-    await chrome.tabs.sendMessage(currentPlaybackTabId, { type: 'play-audio', payload: { url: item.audioUrl, text: item.text, playbackToken, item: cloneItem(item) } });
+    await chrome.tabs.sendMessage(currentPlaybackTabId, {
+      type: 'play-audio',
+      payload: { url: item.audioUrl, text: item.text, playbackToken, item: cloneItem(item) },
+    });
   } catch (error) {
     if (!isPlaying || currentToken !== playbackToken || currentItem !== item) return;
     clearCurrentPlayback();
@@ -916,6 +867,7 @@ function executeUiCommand(cmd, senderTabId, params = {}) {
     queue = [];
     const playbackTabId = currentPlaybackTabId || uiOwnerTabId;
     const playbackToken = currentToken;
+    void stopLocalAudio().catch(() => {});
     if (playbackTabId) chrome.tabs.sendMessage(playbackTabId, { type: 'stop-audio', payload: { playbackToken } }).catch(() => {});
     isPlaying = false;
     playbackPhase = 'idle';
@@ -947,15 +899,29 @@ function executeUiCommand(cmd, senderTabId, params = {}) {
   return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
 }
 
+async function initializeBackgroundRuntime() {
+  if (backgroundInitializationPromise) return backgroundInitializationPromise;
+  backgroundInitializationPromise = (async () => {
+    await migrateSettings();
+    await hydrateBrowserRuntime();
+    await reconnectOpenChatGptTabs();
+    if (queue.length && !isPlaying) void playNext();
+    return true;
+  })();
+  try {
+    return await backgroundInitializationPromise;
+  } finally {
+    backgroundInitializationPromise = null;
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  void migrateSettings();
-  void reconnectOpenChatGptTabs();
+  void initializeBackgroundRuntime();
 });
 chrome.runtime.onStartup.addListener(() => {
-  void migrateSettings();
-  void reconnectOpenChatGptTabs();
+  void initializeBackgroundRuntime();
 });
-void reconnectOpenChatGptTabs();
+void initializeBackgroundRuntime();
 chrome.tabs.onRemoved.addListener((tabId) => {
   const ownedCurrentPlayback = isPlaying && currentPlaybackTabId === tabId;
   tabs.delete(tabId);
@@ -1048,20 +1014,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             info.lastAutoQueueSignature = autoQueueSignature;
             info.lastReadIndex = autoText ? 0 : -1;
             if (autoText && shouldQueueAutoFromTab(senderTabId)) {
-              const reportedReferenceVoice = storedReferenceVoice(message);
-              enqueue({
-                mode: 'auto',
-                reason: 'auto',
-                tabId: senderTabId,
-                tabTitle: info.title,
-                messageKey,
-                chunkIndex: 0,
-                chunkCount: chunks.length,
-                text: autoText,
-                voiceProfile: DEFAULT_SETTINGS.voiceProfile,
-                referenceVoice: reportedReferenceVoice || (referenceSettingsLoaded ? lastKnownReferenceVoice : undefined),
-                voicePrompt: '',
-              });
+              enqueue({ mode: 'auto', reason: 'auto', tabId: senderTabId, tabTitle: info.title, messageKey, chunkIndex: 0, chunkCount: chunks.length, text: autoText, voiceProfile: DEFAULT_SETTINGS.voiceProfile, referenceVoice: undefined, voicePrompt: '' });
               void playNext();
             } else if (autoText) {
               setStatus('音声入力中のため別の返答は読み上げませんでした', 'info');
@@ -1136,8 +1089,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ui-command') {
     const params = message.params && typeof message.params === 'object' ? message.params : {};
-    sendResponse(executeUiCommand(message.cmd, senderTabId, params));
-    return false;
+    const result = executeUiCommand(message.cmd, senderTabId, params);
+    flushBrowserRuntimeState()
+      .then(() => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
   }
   return false;
 });

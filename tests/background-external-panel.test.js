@@ -8,6 +8,10 @@ const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const BACKGROUND_PATH = path.join(ROOT, 'extension', 'background.js');
+const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
+const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
+const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
+const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 
 function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -29,8 +33,16 @@ function response(body, status = 200) {
   };
 }
 
-function createHarness({ initialized = true, openTabs = [], missingContentScriptTabs = [] } = {}) {
-  const storage = {
+function createHarness({
+  initialized = true,
+  openTabs = [],
+  missingContentScriptTabs = [],
+  storage: sharedStorage = null,
+  browserRuntime: initialBrowserRuntime = null,
+  browserRuntimeError: initialBrowserRuntimeError = null,
+  browserRuntimePostError: initialBrowserRuntimePostError = null,
+} = {}) {
+  const storage = sharedStorage || {
     enabled: false,
     apiUrl: 'http://127.0.0.1:8717/v1/speak',
     healthUrl: 'http://127.0.0.1:8717/health',
@@ -43,6 +55,7 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
     cancelGraceMs: 700,
   };
   const speakPosts = [];
+  const stopPosts = [];
   const petPosts = [];
   const statePosts = [];
   const conversationStatePosts = [];
@@ -52,7 +65,23 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
   const injectedTabs = new Set();
   const missingContentScripts = new Set(missingContentScriptTabs.map(Number));
   const tabMessageResponders = new Map();
+  const registeredTabs = new Map();
+  const acknowledged = new Map();
+  const ackPosts = [];
+  const browserRuntimePosts = [];
+  let browserRuntime = initialBrowserRuntime || {
+    tabs: [],
+    selectedTabId: 0,
+    uiOwnerTabId: 0,
+    queue: [],
+    currentItem: null,
+    lastPlayedItem: null,
+    seq: 1,
+  };
   let pollError = null;
+  let ackError = null;
+  let browserRuntimeError = initialBrowserRuntimeError ? String(initialBrowserRuntimeError) : null;
+  let browserRuntimePostError = initialBrowserRuntimePostError ? String(initialBrowserRuntimePostError) : null;
   let runtimeListener = null;
   let tabsRemovedListener = null;
   let tabsUpdatedListener = null;
@@ -99,7 +128,8 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
       onActivated: { addListener() {} },
       onUpdated: { addListener(listener) { tabsUpdatedListener = listener; } },
       async query() {
-        return openTabs.map((tab) => ({ ...tab }));
+        const source = openTabs.length ? openTabs : Array.from(registeredTabs.values());
+        return source.map((tab) => ({ ...tab }));
       },
       async sendMessage(tabId, message) {
         sentMessages.push({ tabId, message });
@@ -127,13 +157,38 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
 
   async function fetch(url, options = {}) {
     const target = new URL(String(url));
+    if (target.pathname === '/v1/browser-runtime' && (!options.method || options.method === 'GET')) {
+      if (browserRuntimeError) throw new Error(browserRuntimeError);
+      return response({ ok: true, browserRuntime });
+    }
+    if (target.pathname === '/v1/browser-runtime' && options.method === 'POST') {
+      if (browserRuntimePostError) throw new Error(browserRuntimePostError);
+      browserRuntime = JSON.parse(options.body || '{}');
+      browserRuntimePosts.push(browserRuntime);
+      return response({ ok: true, browserRuntime });
+    }
     if (target.pathname === '/v1/control-panel/poll') {
       if (pollError) throw new Error(pollError);
       const after = Number(target.searchParams.get('after') || 0);
+      const afterEvent = Number(target.searchParams.get('afterEvent') || 0);
+      const consumer = target.searchParams.get('consumer') || 'legacy';
+      const cursor = acknowledged.get(consumer) || { command: 0, event: 0 };
       return response({
         ...control,
-        commands: control.commands.filter((item) => item.id > after),
+        commands: control.commands.filter((item) => item.id > Math.max(after, cursor.command)),
+        conversationEvents: control.conversationEvents.filter((item) => item.id > Math.max(afterEvent, cursor.event)),
       });
+    }
+    if (target.pathname === '/v1/control-panel/ack' && options.method === 'POST') {
+      if (ackError) throw new Error(ackError);
+      const body = JSON.parse(options.body || '{}');
+      ackPosts.push(body);
+      const consumer = String(body.consumerId || 'legacy');
+      const cursor = acknowledged.get(consumer) || { command: 0, event: 0 };
+      if (Object.prototype.hasOwnProperty.call(body, 'commandId')) cursor.command = Math.max(cursor.command, Number(body.commandId) || 0);
+      if (Object.prototype.hasOwnProperty.call(body, 'conversationEventId')) cursor.event = Math.max(cursor.event, Number(body.conversationEventId) || 0);
+      acknowledged.set(consumer, cursor);
+      return response({ ok: true, consumerId: consumer, commandId: cursor.command, conversationEventId: cursor.event });
     }
     if (target.pathname === '/v1/control-panel/settings' && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}');
@@ -170,6 +225,11 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
       petPosts.push(body);
       return response({ ok: true, selectedPetId: body.petId });
     }
+    if (target.pathname === '/v1/playback/stop' && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}');
+      stopPosts.push(body);
+      return response({ ok: true, stopping: true });
+    }
     if (target.pathname === '/v1/speak' && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}');
       speakPosts.push(body);
@@ -184,21 +244,42 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
     throw new Error(`unexpected fetch: ${url}`);
   }
 
-  const context = vm.createContext({
-    chrome,
-    console,
-    crypto: { randomUUID: () => 'playback-id' },
-    fetch,
-    setTimeout,
-    clearTimeout,
-    URL,
-    Uint8Array,
-    btoa: (value) => Buffer.from(value, 'binary').toString('base64'),
-  });
-  vm.runInContext(fs.readFileSync(BACKGROUND_PATH, 'utf8'), context, { filename: BACKGROUND_PATH });
+  let backgroundContext = null;
+
+  function bootBackground() {
+    runtimeListener = null;
+    backgroundContext = vm.createContext({
+      chrome,
+      console,
+      crypto: { randomUUID: () => 'playback-id' },
+      fetch,
+      setTimeout,
+      clearTimeout,
+      URL,
+      Uint8Array,
+      btoa: (value) => Buffer.from(value, 'binary').toString('base64'),
+    });
+    for (const dependencyPath of [
+      BACKGROUND_CORE_PATH,
+      BACKGROUND_SETTINGS_CORE_PATH,
+      BACKGROUND_RUNTIME_CORE_PATH,
+      BACKGROUND_CONTROL_SYNC_PATH,
+    ]) {
+      vm.runInContext(
+        fs.readFileSync(dependencyPath, 'utf8'),
+        backgroundContext,
+        { filename: dependencyPath },
+      );
+    }
+    vm.runInContext(fs.readFileSync(BACKGROUND_PATH, 'utf8'), backgroundContext, { filename: BACKGROUND_PATH });
+  }
+  bootBackground();
   assert.equal(typeof runtimeListener, 'function');
 
   function send(message, tabId = 101, title = 'Tab A') {
+    if (message && message.type === 'register-tab') {
+      registeredTabs.set(tabId, { id: tabId, title, url: `https://chatgpt.com/c/${tabId}` });
+    }
     let value;
     runtimeListener(message, {
       tab: { id: tabId, title, url: `https://chatgpt.com/c/${tabId}`, active: true },
@@ -207,6 +288,9 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
   }
 
   function sendAsync(message, tabId = 101, title = 'Tab A') {
+    if (message && message.type === 'register-tab') {
+      registeredTabs.set(tabId, { id: tabId, title, url: `https://chatgpt.com/c/${tabId}` });
+    }
     return new Promise((resolve) => {
       runtimeListener(message, {
         tab: { id: tabId, title, url: `https://chatgpt.com/c/${tabId}`, active: true },
@@ -218,8 +302,19 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
     control: () => control,
     setControl(next) { control = { ...control, ...next }; },
     setPollError(error) { pollError = error ? String(error) : null; },
+    setAckError(error) { ackError = error ? String(error) : null; },
+    setBrowserRuntimeError(error) { browserRuntimeError = error ? String(error) : null; },
+    setBrowserRuntimePostError(error) { browserRuntimePostError = error ? String(error) : null; },
+    backgroundState() {
+      return vm.runInContext('({ isPlaying, playbackPhase, statusText: lastStatusText, queueSize: queue.length, currentItem })', backgroundContext);
+    },
     setTabResponder(tabId, responder) { tabMessageResponders.set(tabId, responder); },
-    removeTab(tabId) { tabsRemovedListener(tabId); },
+    reloadBackground() { bootBackground(); },
+    ready() { return vm.runInContext('initializeBackgroundRuntime()', backgroundContext); },
+    ackPosts,
+    browserRuntime: () => browserRuntime,
+    browserRuntimePosts,
+    removeTab(tabId) { registeredTabs.delete(tabId); tabsRemovedListener(tabId); },
     reloadTab(tabId) { tabsUpdatedListener(tabId, { status: 'loading' }); },
     conversationStatePosts,
     injectedScripts,
@@ -227,6 +322,7 @@ function createHarness({ initialized = true, openTabs = [], missingContentScript
     sentMessages,
     settingsPosts,
     speakPosts,
+    stopPosts,
     statePosts,
     storage,
     send,
@@ -278,7 +374,7 @@ test('missing receivers are injected into already-open ChatGPT tabs before recon
   await waitFor(() => harness.injectedScripts.length === 1);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
     target: { tabId: 303 },
-    files: ['prompt-input-core.js', 'content.js'],
+    files: ['prompt-input-core.js', 'delivery-id-core.js', 'content.js'],
   });
   await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
 });
@@ -301,6 +397,181 @@ test('an existing reconnect receiver failure does not inject a duplicate content
     harness.sentMessages.filter((entry) => entry.tabId === 404 && entry.message.type === 'bridge-reconnect').length >= 1,
   );
   assert.equal(harness.injectedScripts.length, 0);
+});
+
+test('service-worker startup restores the latest response without auto-reading it', async () => {
+  const harness = createHarness({
+    openTabs: [{ id: 101, title: 'Tab A', url: 'https://chatgpt.com/c/101' }],
+    browserRuntime: {
+      tabs: [
+        {
+          id: 101,
+          title: 'Tab A',
+          url: 'https://chatgpt.com/c/101',
+          lastReadIndex: 0,
+          lastAutoQueueSignature: 'reply-restored\u0000最初です。',
+          lastAssistantMessage: {
+            messageKey: 'reply-restored',
+            chunks: ['最初です。', '復元した続きです。'],
+            capturedAt: 10,
+          },
+        },
+      ],
+      selectedTabId: 101,
+      uiOwnerTabId: 101,
+      queue: [],
+      currentItem: null,
+      lastPlayedItem: null,
+      seq: 5,
+    },
+  });
+
+  await waitFor(() => harness.sentMessages.some((entry) => entry.message.type === 'bridge-reconnect'));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(harness.speakPosts.length, 0);
+
+  harness.send({ type: 'ui-command', cmd: 'next', params: {} }, 101, 'Tab A');
+  await waitFor(() => harness.speakPosts.length === 1);
+  assert.equal(harness.speakPosts[0].text, '復元した続きです。');
+});
+
+test('browser-runtime persistence failure releases playback instead of wedging the queue', async () => {
+  const harness = createHarness({ browserRuntimePostError: 'state file unavailable' });
+  await harness.ready();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({
+    type: 'report-chunks',
+    messageKey: 'reply-persist-failure',
+    chunks: ['保存できない場合です。'],
+    autoPreview: '保存できない場合です。',
+    isAuto: false,
+  }, 101, 'Tab A');
+
+  harness.send({ type: 'ui-command', cmd: 'next', params: {} }, 101, 'Tab A');
+
+  await waitFor(() => harness.backgroundState().statusText.startsWith('Playback failed:'));
+  assert.equal(harness.backgroundState().isPlaying, false);
+  assert.equal(harness.backgroundState().playbackPhase, 'idle');
+  assert.equal(harness.speakPosts.length, 0);
+});
+
+test('service-worker restart stops orphan playback and resumes the persisted current item first', async () => {
+  const harness = createHarness({
+    openTabs: [{ id: 101, title: 'Restored Tab', url: 'https://chatgpt.com/c/101' }],
+    browserRuntime: {
+      tabs: [
+        {
+          id: 101,
+          title: 'Restored Tab',
+          url: 'https://chatgpt.com/c/101',
+          lastReadIndex: 0,
+          lastAutoQueueSignature: 'reply-current\u0000生成中でした。',
+          lastAssistantMessage: {
+            messageKey: 'reply-current',
+            chunks: ['生成中でした。', '待機中です。'],
+            capturedAt: 10,
+          },
+        },
+      ],
+      selectedTabId: 101,
+      uiOwnerTabId: 101,
+      queue: [
+        {
+          id: 'q-pending-2',
+          mode: 'next',
+          reason: 'next',
+          tabId: 101,
+          tabTitle: 'Restored Tab',
+          messageKey: 'reply-current',
+          chunkIndex: 1,
+          chunkCount: 2,
+          text: '待機中です。',
+          voiceProfile: 'irodori-v3',
+          referenceVoice: 'sample',
+          voicePrompt: '',
+          audioUrl: null,
+        },
+      ],
+      currentItem: {
+        id: 'q-current-1',
+        mode: 'auto',
+        reason: 'auto',
+        tabId: 101,
+        tabTitle: 'Restored Tab',
+        messageKey: 'reply-current',
+        chunkIndex: 0,
+        chunkCount: 2,
+        text: '生成中でした。',
+        voiceProfile: 'irodori-v3',
+        referenceVoice: 'sample',
+        voicePrompt: '',
+        audioUrl: null,
+      },
+      lastPlayedItem: null,
+      seq: 3,
+    },
+  });
+  harness.setControl({ commands: [], conversationEvents: [] });
+
+  await harness.ready();
+
+  await waitFor(() => harness.stopPosts.length === 1 && harness.speakPosts.length === 1);
+  assert.equal(harness.speakPosts[0].text, '生成中でした。');
+});
+
+test('API recovery retries browser-runtime hydration and resumes the persisted queue', async () => {
+  const harness = createHarness({
+    browserRuntimeError: 'local API unavailable',
+    browserRuntime: {
+      tabs: [
+        {
+          id: 101,
+          title: 'Restored Tab',
+          url: 'https://chatgpt.com/c/101',
+          lastReadIndex: 0,
+          lastAutoQueueSignature: 'reply-restored\u0000復元キューです。',
+          lastAssistantMessage: {
+            messageKey: 'reply-restored',
+            chunks: ['復元キューです。'],
+            capturedAt: 10,
+          },
+        },
+      ],
+      selectedTabId: 101,
+      uiOwnerTabId: 101,
+      queue: [
+        {
+          id: 'q-restored-1',
+          mode: 'auto',
+          reason: 'auto',
+          tabId: 101,
+          tabTitle: 'Restored Tab',
+          messageKey: 'reply-restored',
+          chunkIndex: 0,
+          chunkCount: 1,
+          text: '復元キューです。',
+          voiceProfile: 'irodori-v3',
+          referenceVoice: 'sample',
+          voicePrompt: '',
+          audioUrl: null,
+        },
+      ],
+      currentItem: null,
+      lastPlayedItem: null,
+      seq: 2,
+    },
+  });
+  harness.setControl({ commands: [], conversationEvents: [] });
+
+  await harness.ready();
+  assert.equal(harness.speakPosts.length, 0);
+
+  harness.setBrowserRuntimeError(null);
+  const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Restored Tab');
+
+  assert.equal(recovered.ok, true);
+  await waitFor(() => harness.speakPosts.length === 1);
+  assert.equal(harness.speakPosts[0].text, '復元キューです。');
 });
 
 test('external panel poll applies settings, executes each command once, and posts global state', async () => {
@@ -410,23 +681,57 @@ test('a legacy empty external reference cannot erase a selected Chrome reference
   )));
 });
 
-test('an explicit none external reference clears the selected Chrome reference voice', async () => {
+test('durable poll uses a stored consumer, independent event cursor, and ACKs only after handling', async () => {
   const harness = createHarness();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.setTabResponder(101, (message) => (
+    message.type === 'voice-transcript'
+      ? { ok: true, alreadyApplied: true }
+      : { ok: true, composerAvailable: true, composerFocused: true, documentFocused: true, visible: true, url: 'https://chatgpt.com/c/101' }
+  ));
   harness.setControl({
-    commands: [],
-    settingsRevision: 4,
-    settings: {
-      ...harness.control().settings,
-      referenceVoice: '',
-      referenceVoiceExplicit: true,
-    },
+    commands: [{ id: 7, command: 'next' }],
+    conversationEvents: [{
+      id: 11,
+      type: 'transcript',
+      payload: { sessionId: 5, text: '再送されても一度だけ', deliveryId: 'delivery-11', cancelGraceMs: 0 },
+    }],
   });
 
   const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
 
   assert.equal(result.ok, true);
-  assert.equal(harness.storage.referenceVoice, '');
-  assert.equal(harness.storage.voiceId, '');
+  assert.equal(harness.storage.bridgeConsumerId, 'playback-id');
+  assert.deepEqual(harness.ackPosts, [
+    { consumerId: 'playback-id', commandId: 7 },
+    { consumerId: 'playback-id', conversationEventId: 11 },
+  ]);
+  const transcript = harness.sentMessages.find(({ message }) => message.type === 'voice-transcript');
+  assert.equal(transcript.message.payload.deliveryId, 'delivery-11');
+
+  await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(harness.sentMessages.filter(({ message }) => message.type === 'voice-transcript').length, 1);
+});
+
+test('failed ACK leaves a command retryable and an acknowledged item survives a service-worker restart', async () => {
+  const harness = createHarness();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.setControl({ commands: [{ id: 9, command: 'stop' }], conversationEvents: [] });
+  harness.setAckError('ack temporarily unavailable');
+
+  const failed = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(failed.ok, false);
+  assert.equal(harness.ackPosts.length, 0);
+
+  harness.setAckError(null);
+  const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(recovered.ok, true);
+  assert.deepEqual(harness.ackPosts.at(-1), { consumerId: 'playback-id', commandId: 9 });
+
+  harness.reloadBackground();
+  const afterRestart = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(afterRestart.ok, true);
+  assert.equal(harness.ackPosts.filter((item) => item.commandId === 9).length, 1);
 });
 
 test('conversation events are delivered to the selected ChatGPT tab once', async () => {
@@ -451,6 +756,73 @@ test('conversation events are delivered to the selected ChatGPT tab once', async
     { tabId: 101, type: 'voice-transcript' },
   ]);
   assert.equal(conversationMessages[1].message.payload.text, '音声入力です');
+});
+
+test('captured conversation target survives a service-worker restart before transcript delivery', async () => {
+  const sharedStorage = {};
+  const harness = createHarness({
+    storage: sharedStorage,
+    openTabs: [
+      { id: 101, title: 'Tab A', url: 'https://chatgpt.com/c/101' },
+      { id: 202, title: 'Tab B', url: 'https://chatgpt.com/c/202' },
+    ],
+  });
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({ type: 'register-tab', title: 'Tab B' }, 202, 'Tab B');
+  harness.setTabResponder(101, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: false, documentFocused: true, visible: true, url: 'https://chatgpt.com/c/101' };
+    }
+    return { ok: true };
+  });
+  harness.setTabResponder(202, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: true, documentFocused: true, visible: true, url: 'https://chatgpt.com/c/202' };
+    }
+    return { ok: true };
+  });
+  harness.setControl({
+    commands: [],
+    conversationEvents: [{ id: 1, type: 'cancel_pending', payload: { sessionId: 77 } }],
+  });
+
+  const captured = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(captured.ok, true);
+  await waitFor(() => (
+    Array.isArray(harness.browserRuntime().conversationSessions)
+    && harness.browserRuntime().conversationSessions.some((item) => item.sessionId === 77 && item.tabId === 202)
+  ));
+
+  harness.reloadBackground();
+  await harness.ready();
+  harness.setTabResponder(101, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: true, documentFocused: true, visible: true, url: 'https://chatgpt.com/c/101' };
+    }
+    return { ok: true };
+  });
+  harness.setTabResponder(202, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: false, documentFocused: true, visible: true, url: 'https://chatgpt.com/c/202' };
+    }
+    return { ok: true };
+  });
+  harness.setControl({
+    commands: [],
+    conversationEvents: [
+      {
+        id: 2,
+        type: 'transcript',
+        payload: { sessionId: 77, text: '再起動後も固定先です', deliveryId: 'delivery-session-77', cancelGraceMs: 700 },
+      },
+    ],
+  });
+
+  const delivered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(delivered.ok, true);
+  const transcriptMessages = harness.sentMessages.filter((entry) => entry.message.type === 'voice-transcript');
+  assert.equal(transcriptMessages.at(-1).tabId, 202);
+  assert.equal(transcriptMessages.at(-1).message.payload.deliveryId, 'delivery-session-77');
 });
 
 test('conversation transcript stays on the tab whose composer was focused when recording started', async () => {
@@ -711,6 +1083,7 @@ test('content conversation state is posted to the loopback service without trans
 
 test('options page pushes STT model and send grace to the local runtime', async () => {
   const harness = createHarness();
+  await harness.ready();
   harness.storage.sttModel = 'large-v3-turbo';
   harness.storage.cancelGraceMs = 1500;
 

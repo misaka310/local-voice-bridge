@@ -13,6 +13,8 @@ const TEST_MODULES = [
   'tests.test_conversation_controller',
   'tests.test_preflight_versions',
   'tests.test_irodori_cache',
+  'tests.test_voice_runtime',
+  'tests.test_runtime_readiness',
   'tests.test_desktop_pet_config',
   'tests.test_desktop_pet',
   'tests.test_tray_controller',

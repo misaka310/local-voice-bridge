@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Preserved the reference voice selected when each playback item was queued, distinguished an explicit `Ref=none` choice from a legacy empty value, and rejected output when the local API could not prove that the selected reference voice was applied.
+- Split persistent settings, browser runtime state, durable ACK delivery, HTTP I/O, runtime readiness, and browser restore rules into focused modules, and added a CI architecture gate that blocks duplicated responsibilities and monolith growth.
+- Preserved the reference voice selected when each playback item was queued, distinguished an explicit `Ref=none` choice from a legacy empty value, rejected output when the local API could not prove that the selected reference voice was applied, and exposed the applied reference in playback status.
+- Made control commands and pending microphone transcript delivery durable across API and extension service-worker restarts, using per-consumer acknowledgements, stable delivery IDs, bounded local persistence, and duplicate-insertion protection.
+- Moved synthesis and playback into one local runtime worker, prepared Irodori during server startup, persisted tab/latest-response/queue state, and exposed structured loading, ready, failed, and repair-required status.
 - Updated SentencePiece to 0.2.1 to resolve the reported heap-overflow vulnerability.
 - Reconnected already-open ChatGPT tabs automatically after the local Voice Bridge API or unpacked extension restarts, injecting the current content scripts when needed and restoring tab and latest-response state without auto-reading old replies.
 - Moved the microphone shortcut and STT status into the microphone button to reduce the Windows panel height.

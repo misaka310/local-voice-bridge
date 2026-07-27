@@ -2,7 +2,8 @@
 'use strict';
 
 // Deterministic local substitute for CI and the browser demo. It never loads
-// Python, CUDA, a model, or a reference voice.
+// Python, CUDA, a model, a real audio device, or a reference voice.
+const crypto = require('crypto');
 const http = require('http');
 
 const host = '127.0.0.1';
@@ -10,6 +11,18 @@ const port = Number(process.env.MOCK_VOICE_PORT || 8717);
 const events = [];
 const referenceVoices = [{ id: '', label: 'none' }, { id: 'sample', label: 'sample' }];
 let control;
+
+function emptyBrowserRuntime() {
+  return {
+    tabs: [],
+    selectedTabId: 0,
+    uiOwnerTabId: 0,
+    queue: [],
+    currentItem: null,
+    lastPlayedItem: null,
+    seq: 1,
+  };
+}
 
 function resetControl() {
   control = {
@@ -19,14 +32,17 @@ function resetControl() {
       enabled: false,
       voiceVolume: 0.6,
       referenceVoice: '',
+      referenceVoiceExplicit: false,
       micConversationEnabled: false,
       sttModel: 'small',
       cancelGraceMs: 700,
     },
     commands: [],
+    consumerAcks: {},
     nextCommandId: 1,
     conversationEvents: [],
     nextConversationEventId: 1,
+    browserRuntime: emptyBrowserRuntime(),
     conversation: {
       phase: 'off',
       statusText: 'マイク会話オフ',
@@ -44,13 +60,15 @@ function resetControl() {
       playbackPhase: 'idle',
       replayAvailable: false,
       tabsCount: 0,
+      loadedVersion: '',
     },
   };
 }
 resetControl();
 
-// A short valid PCM WAV. A zero-byte/invalid blob would let a mock pass while
-// the extension's real Audio element never reaches its completion state.
+// A short valid PCM WAV retained for compatibility tests of an older browser
+// playback client. The current bridge reports local playback completion without
+// asking a ChatGPT tab to fetch this file.
 const wav = Buffer.alloc(44 + 8000);
 wav.write('RIFF', 0);
 wav.writeUInt32LE(wav.length - 8, 4);
@@ -68,7 +86,11 @@ wav.fill(128, 44);
 
 function json(res, status, value) {
   const body = Buffer.from(JSON.stringify(value));
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': body.length,
+    'Cache-Control': 'no-store',
+  });
   res.end(body);
 }
 
@@ -78,9 +100,43 @@ function readJson(req, res, callback) {
   req.on('data', (chunk) => { raw += chunk; });
   req.on('end', () => {
     let body = {};
-    try { body = JSON.parse(raw || '{}'); } catch (_) { return json(res, 400, { ok: false, error: 'invalid JSON' }); }
+    try {
+      body = JSON.parse(raw || '{}');
+    } catch (_) {
+      json(res, 400, { ok: false, error: 'invalid JSON' });
+      return;
+    }
     callback(body);
   });
+}
+
+function normalizeConsumerId(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 64);
+  return normalized || 'legacy';
+}
+
+function consumerCursor(value, replayExisting) {
+  const id = normalizeConsumerId(value);
+  if (!control.consumerAcks[id]) {
+    control.consumerAcks[id] = {
+      command: replayExisting || id === 'legacy' ? 0 : control.nextCommandId - 1,
+      conversationEvent: replayExisting || id === 'legacy' ? 0 : control.nextConversationEventId - 1,
+    };
+  }
+  return { id, cursor: control.consumerAcks[id] };
+}
+
+function compactAcknowledged() {
+  const cursors = Object.values(control.consumerAcks);
+  if (!cursors.length) return;
+  const commandFloor = Math.min(...cursors.map((item) => Number(item.command || 0)));
+  const eventFloor = Math.min(...cursors.map((item) => Number(item.conversationEvent || 0)));
+  control.commands = control.commands.filter((item) => item.id > commandFloor);
+  control.conversationEvents = control.conversationEvents.filter((item) => item.id > eventFloor);
 }
 
 function controlSnapshot(extra = {}) {
@@ -94,29 +150,87 @@ function controlSnapshot(extra = {}) {
     lastCommandId: control.nextCommandId - 1,
     lastConversationEventId: control.nextConversationEventId - 1,
     referenceVoices,
+    voiceRuntime: {
+      readiness: 'ready',
+      ready: true,
+      detail: { runtime: 'mock' },
+      error: '',
+      repairRequired: false,
+      dependencies: { sounddevice: true, soundfile: true },
+      phase: control.extension.playbackPhase || 'idle',
+      queueSize: control.extension.queueSize || 0,
+      currentText: control.extension.currentText || '',
+      lastOperation: '',
+      replayAvailable: control.extension.replayAvailable,
+      startedAt: 1,
+    },
+    readiness: {
+      process: 'ready',
+      dependencies: 'ready',
+      browserExtension: control.extension.connected ? 'ready' : 'waiting',
+      tabs: control.extension.tabsCount,
+      deviceOrModel: 'ready',
+      lastOperation: '',
+      repairRequired: false,
+      ready: Boolean(control.extension.connected && control.extension.tabsCount > 0),
+    },
     ...extra,
   };
 }
 
+function record(method, pathname, body = undefined) {
+  events.push({ method, path: pathname, body, responseStatus: 200, at: Date.now() });
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
-  if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, engine: 'mock', runtime: 'mock', referenceVoices });
-  if (req.method === 'GET' && url.pathname === '/v1/reference-voices') return json(res, 200, { ok: true, voices: referenceVoices });
-  if (req.method === 'GET' && url.pathname === '/v1/control-panel') return json(res, 200, controlSnapshot());
+
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return json(res, 200, {
+      ok: true,
+      engine: 'mock',
+      runtime: 'mock',
+      referenceVoices,
+      voiceRuntime: controlSnapshot().voiceRuntime,
+      readiness: controlSnapshot().readiness,
+    });
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/reference-voices') {
+    return json(res, 200, { ok: true, voices: referenceVoices });
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/control-panel') {
+    return json(res, 200, controlSnapshot());
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/browser-runtime') {
+    return json(res, 200, { ok: true, browserRuntime: { ...control.browserRuntime } });
+  }
   if (req.method === 'GET' && url.pathname === '/v1/control-panel/poll') {
     const after = Number(url.searchParams.get('after') || 0);
-    const commands = control.commands.filter((item) => item.id > after);
-    const claimedIds = new Set(commands.map((item) => item.id));
-    if (claimedIds.size) control.commands = control.commands.filter((item) => !claimedIds.has(item.id));
-    const conversationEvents = control.conversationEvents.splice(0);
+    const afterEvent = Number(url.searchParams.get('afterEvent') || 0);
+    const replayExisting = url.searchParams.get('replayExisting') === '1';
+    const consumer = consumerCursor(url.searchParams.get('consumer'), replayExisting);
+    const commands = control.commands.filter(
+      (item) => item.id > Math.max(after, Number(consumer.cursor.command || 0)),
+    );
+    const conversationEvents = control.conversationEvents.filter(
+      (item) => item.id > Math.max(afterEvent, Number(consumer.cursor.conversationEvent || 0)),
+    );
     return json(res, 200, controlSnapshot({ commands, conversationEvents }));
   }
   if (req.method === 'GET' && url.pathname === '/audio/mock.wav') {
-    events.push({ method: 'GET', path: url.pathname, responseStatus: 200, at: Date.now() });
-    res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wav.length, 'Cache-Control': 'no-store' });
-    return res.end(wav);
+    record('GET', url.pathname);
+    res.writeHead(200, {
+      'Content-Type': 'audio/wav',
+      'Content-Length': wav.length,
+      'Cache-Control': 'no-store',
+    });
+    res.end(wav);
+    return;
   }
-  if (req.method === 'GET' && url.pathname === '/__test/events') return json(res, 200, { ok: true, events });
+  if (req.method === 'GET' && url.pathname === '/__test/events') {
+    return json(res, 200, { ok: true, events });
+  }
+
   if (req.method === 'POST' && url.pathname === '/__test/reset') {
     events.length = 0;
     resetControl();
@@ -125,9 +239,17 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/v1/control-panel/settings') {
     return readJson(req, res, (body) => {
       if (Object.prototype.hasOwnProperty.call(body, 'enabled')) control.settings.enabled = Boolean(body.enabled);
-      if (Object.prototype.hasOwnProperty.call(body, 'voiceVolume')) control.settings.voiceVolume = Math.min(1, Math.max(0, Number(body.voiceVolume) || 0));
-      if (Object.prototype.hasOwnProperty.call(body, 'referenceVoice') || Object.prototype.hasOwnProperty.call(body, 'voiceId')) {
+      if (Object.prototype.hasOwnProperty.call(body, 'voiceVolume')) {
+        control.settings.voiceVolume = Math.min(1, Math.max(0, Number(body.voiceVolume) || 0));
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'referenceVoice')
+        || Object.prototype.hasOwnProperty.call(body, 'voiceId')) {
         control.settings.referenceVoice = String(body.referenceVoice ?? body.voiceId ?? '').trim();
+        control.settings.referenceVoiceExplicit = Object.prototype.hasOwnProperty.call(body, 'referenceVoiceExplicit')
+          ? Boolean(body.referenceVoiceExplicit)
+          : true;
+      } else if (Object.prototype.hasOwnProperty.call(body, 'referenceVoiceExplicit')) {
+        control.settings.referenceVoiceExplicit = Boolean(body.referenceVoiceExplicit);
       }
       if (Object.prototype.hasOwnProperty.call(body, 'micConversationEnabled')) {
         control.settings.micConversationEnabled = Boolean(body.micConversationEnabled);
@@ -141,24 +263,57 @@ const server = http.createServer((req, res) => {
       }
       control.initialized = true;
       control.settingsRevision += 1;
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, body);
       return json(res, 200, controlSnapshot());
     });
   }
   if (req.method === 'POST' && url.pathname === '/v1/control-panel/command') {
     return readJson(req, res, (body) => {
       const command = String(body.command || '').trim().toLowerCase();
-      if (!['next', 'regen', 'replay', 'stop'].includes(command)) return json(res, 400, { ok: false, error: 'unsupported command' });
+      if (!['next', 'regen', 'replay', 'stop'].includes(command)) {
+        return json(res, 400, { ok: false, error: 'unsupported command' });
+      }
       const item = { id: control.nextCommandId++, command, createdAt: Date.now() / 1000 };
       control.commands.push(item);
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, body);
       return json(res, 200, { ok: true, command: item });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/control-panel/ack') {
+    return readJson(req, res, (body) => {
+      const hasCommand = Object.prototype.hasOwnProperty.call(body, 'commandId');
+      const hasEvent = Object.prototype.hasOwnProperty.call(body, 'conversationEventId');
+      if (!hasCommand && !hasEvent) {
+        return json(res, 400, { ok: false, error: 'commandId or conversationEventId is required' });
+      }
+      const consumer = consumerCursor(body.consumerId, true);
+      const result = { ok: true, consumerId: consumer.id };
+      if (hasCommand) {
+        consumer.cursor.command = Math.max(Number(consumer.cursor.command || 0), Number(body.commandId || 0));
+        result.commandId = consumer.cursor.command;
+      }
+      if (hasEvent) {
+        consumer.cursor.conversationEvent = Math.max(
+          Number(consumer.cursor.conversationEvent || 0),
+          Number(body.conversationEventId || 0),
+        );
+        result.conversationEventId = consumer.cursor.conversationEvent;
+      }
+      compactAcknowledged();
+      record('POST', url.pathname, body);
+      return json(res, 200, result);
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/browser-runtime') {
+    return readJson(req, res, (body) => {
+      control.browserRuntime = { ...emptyBrowserRuntime(), ...body };
+      return json(res, 200, { ok: true, browserRuntime: control.browserRuntime });
     });
   }
   if (req.method === 'POST' && url.pathname === '/v1/control-panel/state') {
     return readJson(req, res, (body) => {
       control.extension = { ...control.extension, ...body, connected: true };
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, body);
       return json(res, 200, { ok: true, extension: control.extension });
     });
   }
@@ -172,7 +327,7 @@ const server = http.createServer((req, res) => {
         sttModel: String(body.sttModel || control.settings.sttModel || 'small'),
         error: String(body.error || ''),
       };
-      events.push({ method: 'POST', path: url.pathname, body: control.conversation, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, control.conversation);
       return json(res, 200, { ok: true, conversation: control.conversation });
     });
   }
@@ -180,30 +335,76 @@ const server = http.createServer((req, res) => {
     return readJson(req, res, (body) => {
       const type = String(body.type || '').trim();
       const payload = body.payload && typeof body.payload === 'object' ? body.payload : {};
-      if (!['cancel_pending', 'transcript'].includes(type)) return json(res, 400, { ok: false, error: 'unsupported conversation event' });
-      if (type === 'transcript' && !String(payload.text || '').trim()) return json(res, 400, { ok: false, error: 'transcript text is required' });
-      const item = { id: control.nextConversationEventId++, type, payload, createdAt: Date.now() / 1000 };
+      if (!['cancel_pending', 'transcript'].includes(type)) {
+        return json(res, 400, { ok: false, error: 'unsupported conversation event' });
+      }
+      if (type === 'transcript' && !String(payload.text || '').trim()) {
+        return json(res, 400, { ok: false, error: 'transcript text is required' });
+      }
+      const safePayload = type === 'transcript'
+        ? { ...payload, deliveryId: String(payload.deliveryId || crypto.randomUUID()) }
+        : { ...payload };
+      const item = {
+        id: control.nextConversationEventId++,
+        type,
+        payload: safePayload,
+        createdAt: Date.now() / 1000,
+      };
       control.conversationEvents.push(item);
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, body);
       return json(res, 200, { ok: true, event: item });
     });
   }
   if (req.method === 'POST' && url.pathname === '/v1/desktop-pet') {
     return readJson(req, res, (body) => {
       const selectedPetId = String(body.petId || 'placeholder').trim() || 'placeholder';
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
+      record('POST', url.pathname, body);
       return json(res, 200, { ok: true, selectedPetId, visible: true });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/playback/stop') {
+    return readJson(req, res, (body) => {
+      record('POST', url.pathname, body);
+      return json(res, 200, { ok: true, stopping: true });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/playback/replay') {
+    return readJson(req, res, (body) => {
+      record('POST', url.pathname, body);
+      return json(res, 200, {
+        ok: true,
+        audioUrl: `http://${host}:${port}/audio/mock.wav`,
+        playedLocally: true,
+        playbackCompleted: true,
+        stopped: false,
+      });
     });
   }
   if (req.method === 'POST' && url.pathname === '/v1/speak') {
     return readJson(req, res, (body) => {
       const referenceVoice = String(body.voiceId || body.referenceVoice || '').trim();
-      events.push({ method: 'POST', path: url.pathname, body, responseStatus: 200, at: Date.now() });
-      return json(res, 200, { ok: true, engine: 'mock', runtime: 'mock', model: 'irodori-v3', voiceId: referenceVoice, voiceProfile: 'irodori-v3', referenceVoice, usedReferenceAudio: Boolean(referenceVoice), audioUrl: `http://${host}:${port}/audio/mock.wav` });
+      record('POST', url.pathname, body);
+      return json(res, 200, {
+        ok: true,
+        engine: 'mock',
+        runtime: 'mock',
+        model: 'irodori-v3',
+        voiceId: referenceVoice,
+        voiceProfile: 'irodori-v3',
+        referenceVoice,
+        usedReferenceAudio: referenceVoice ? 'mock-reference.wav' : '',
+        audioUrl: `http://${host}:${port}/audio/mock.wav`,
+        playedLocally: Boolean(body.playLocal),
+        playbackCompleted: Boolean(body.playLocal),
+        stopped: false,
+      });
     });
   }
+
   return json(res, 404, { ok: false, error: 'not found' });
 });
 
 server.listen(port, host, () => console.log(`Mock Voice API listening on http://${host}:${port}`));
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => server.close(() => process.exit(0)));
+}

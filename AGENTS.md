@@ -45,6 +45,18 @@ Before modifying behavior in `extension/content.js`, `extension/background.js`, 
 4. If the change affects user-visible behavior, stop and ask the user first.
 5. Add or update tests that preserve the documented behavior.
 
+## Architecture boundaries for AI changes
+
+The focused modules and `npm run check:architecture` are part of the product safety contract, not optional cleanup.
+
+- Keep `local-api/control_state.py`, `local-api/server.py`, and `extension/background.js` as coordinators. Do not add a new persistence schema, delivery cursor, retry loop, HTTP serializer, settings normalizer, or model lifecycle directly to them.
+- Put settings and input normalization in `state_normalization.py` or `background-settings-core.js`.
+- Put durable command/event delivery and ACK behavior in `durable_outbox.py` or `background-control-sync.js`.
+- Put browser persisted-state schemas and merge/restore rules in `browser_runtime_state.py` or `background-runtime-core.js`.
+- Put HTTP JSON/socket behavior in `http_io.py`, readiness composition in `runtime_readiness.py`, and synthesis/playback serialization in `voice_runtime.py`.
+- Do not weaken line caps, remove required-module checks, or change tests to accept an accidental behavior merely to make CI pass. A required new responsibility must be extracted into a focused module with direct tests.
+- Run `npm run check:architecture` and `npm run test:ci` before claiming completion. For changes to persistence, ACK/retry, Service Worker recovery, queue restoration, or transcript routing, require two consecutive full CI passes; a rerun-only pass after an unexplained failure is not completion.
+
 ## Existing accident-prevention behavior to keep
 
 These protections are allowed and should be preserved unless the user asks otherwise:

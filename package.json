@@ -5,9 +5,10 @@
   "scripts": {
     "build:launcher": "node scripts/run-launcher-build.js",
     "check:public": "node scripts/run-public-check.js",
+    "check:architecture": "node scripts/check-architecture.js",
     "test:python": "node scripts/run-python-tests.js",
     "test:background-core": "node scripts/run-background-core-tests.js",
-    "test:background": "node scripts/run-background-core-tests.js && node --test tests/background-reference-queue.test.js tests/background-external-panel.test.js tests/options-page.test.js tests/prompt-input-core.test.js",
+    "test:background": "node scripts/run-background-tests.js",
     "test:e2e:mock": "node scripts/run-mock-e2e.js",
     "test:e2e:real": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --workers=1",
     "test:ci": "node scripts/run-ci.js",

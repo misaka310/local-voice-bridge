@@ -19,10 +19,11 @@ function prepareTestExtension() {
   fs.cpSync(SOURCE_EXTENSION, EXTENSION_DIR, { recursive: true });
   const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.host_permissions = [
+  manifest.host_permissions = [...new Set([
+    ...(Array.isArray(manifest.host_permissions) ? manifest.host_permissions : []),
     `http://127.0.0.1:${MOCK_PORT}/*`,
     `http://localhost:${MOCK_PORT}/*`,
-  ];
+  ])];
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
 }
 
@@ -117,14 +118,15 @@ async function sendConversationEvent(type, payload) {
   return body;
 }
 
-async function waitForCounts(postCount, getCount) {
+async function waitForCounts(postCount, playbackCount) {
   await expect.poll(async () => {
     const events = await apiEvents();
     return {
       posts: events.filter((event) => event.method === 'POST' && event.path === '/v1/speak').length,
-      gets: events.filter((event) => event.method === 'GET' && event.path === '/audio/mock.wav').length,
+      playbacks: events.filter((event) => event.method === 'POST'
+        && ['/v1/speak', '/v1/playback/replay'].includes(event.path)).length,
     };
-  }, { timeout: 30000 }).toEqual({ posts: postCount, gets: getCount });
+  }, { timeout: 30000 }).toEqual({ posts: postCount, playbacks: playbackCount });
 }
 
 async function waitForControlReady(tabsCount = 1) {
