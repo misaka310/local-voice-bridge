@@ -7,11 +7,20 @@
 - `LocalVoiceBridge.exe`: 既存の`local-api/.venv`と`pythonw.exe`を使い、通知領域アプリを起動する小さなランチャー
 - `local-api/tray_controller.py`: Windows小窓、デスクトップペット、APIプロセス、通知領域、自動起動を管理
 - `local-api/control_panel.py`: `Ref`、`Volume`、`Auto`、`Next`、`Regen`、`Replay`、状態、現在文章、キュー数を表示する常時最前面の小窓
-- `local-api/control_state.py`: 小窓設定、拡張機能の状態、1回だけ消費する操作コマンドを保存・仲介
+- `local-api/control_state.py`: 設定、ブラウザ状態、配信outboxを組み合わせて保存する薄い調整層
+- `local-api/state_normalization.py`: 設定・拡張状態・マイク状態の入力境界と既定値
+- `local-api/browser_runtime_state.py`: タブ・最新返答・キュー・録音開始時送信先の永続スキーマ
+- `local-api/durable_outbox.py`: コマンドと文字起こしイベントの非破壊poll、consumer別ACK、再配信、容量制限
+- `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
+- `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
-- `extension/content.js`: 各ChatGPTタブの返答検知、プレビュー作成、音声再生を担当。Chrome内に操作パネルやペットは表示しない
-- `extension/background.js`: 全ChatGPTタブ共通の再生キュー、ローカルAPI呼び出し、外部パネル同期、音声再生ホストの選択を担当
-- `local-api/server.py`: Irodori v3 direct音声生成、音声配信、参照音声一覧、外部パネルAPI、ペット選択同期を担当
+- `extension/content.js`: 各ChatGPTタブの返答検知、プレビュー作成、入力欄への文字起こし反映、delivery IDの重複防止を担当。音声は再生しない
+- `extension/background.js`: タブ登録、共通キュー、再生進行、各専用モジュールの接続だけを担当
+- `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
+- `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
+- `extension/background-control-sync.js`: 安定consumer ID、control-panel poll / ACK、再配信カーソル、外部設定同期、録音開始時の送信先への文字起こし配送を担当
+- `local-api/server.py`: 永続状態API、Irodori v3 direct、ローカル再生、参照音声一覧、外部パネルAPI、ペット選択同期を担当
+- `local-api/voice_runtime.py`: 起動時モデル準備と、生成・再生・Replay・Stopを1本のワーカーで直列化
 - `local-api/conversation_controller.py`: 右Ctrl＋`＼ / _`の録音状態、ローカルSTT、ChatGPT送信に加え、対応するYouTube Dictation Pause Controlへの入力元別状態通知を担当
 
 ## Windows Local Voice小窓
@@ -31,13 +40,16 @@
 
 ```text
 GET  /v1/control-panel
-GET  /v1/control-panel/poll?after=<command-id>
+GET  /v1/control-panel/poll?consumer=<id>&after=<command-id>&afterEvent=<event-id>
+POST /v1/control-panel/ack
+GET  /v1/browser-runtime
+POST /v1/browser-runtime
 POST /v1/control-panel/settings
 POST /v1/control-panel/command
 POST /v1/control-panel/state
 ```
 
-設定は永続化されます。Next、Regen、Replay、Stopのコマンドは拡張機能が取得した時点で消費され、Chrome再起動後に古い操作が再実行されません。
+設定・未処理コマンド・文字起こしイベント・ブラウザ共通キューは永続化されます。pollでは削除せず、安定consumer IDから処理成功後のACKを受けて初めて配信済みになります。ACK失敗やService Worker終了時は同じIDで再配信され、文字起こしは`deliveryId`で二重挿入を防ぎます。
 
 ## 返答検知と全タブAuto
 
@@ -54,13 +66,14 @@ Autoの対象は、最後に触った1タブだけではありません。開い
 
 ```text
 各ChatGPT content.js
-  -> background.js の共通キュー
-  -> POST http://127.0.0.1:8717/v1/speak
-  -> GET  http://127.0.0.1:8717/audio/<file>
-  -> 登録済みChatGPTタブの Audio 要素
+  -> background.js がローカル永続キューへ同期
+  -> POST http://127.0.0.1:8717/v1/speak { playLocal: true }
+  -> voice_runtime.py の単一ワーカーで生成
+  -> 同じワーカーがPCの音声デバイスで再生完了まで待機
+  -> 次のキュー項目へ進む
 ```
 
-`uiOwnerTabId`は音声を再生するブラウザタブとフォーカス由来の手動操作先を決める内部値です。Autoの検出対象を制限する値ではありません。分割表示の定期通知だけでは所有タブを移動せず、実際のフォーカス・ポインター操作でのみ更新します。
+`uiOwnerTabId`と`selectedTabId`は手動操作の対象返答を決める内部値です。音声再生先ではありません。Autoの検出対象も制限しません。タブを閉じても生成・再生はローカルワーカー上で継続し、APIまたはService Workerの再起動後は永続状態からタブ・最新返答・待機キューを復元します。
 
 ## YouTube停止状態の直接通知
 
@@ -118,14 +131,20 @@ Windows側:
 - 外部小窓の設定と位置
 - ペットの選択IDと位置
 - 拡張機能から受け取った直近状態
+- 登録タブ、選択タブ、最新返答、Auto / Next境界、待機キュー、Replay対象、録音開始時の送信先セッション
+- 未ACKコマンド・文字起こしイベントとconsumer別ACK位置
 
 Voice、Tab、Petの独立選択設定は保存しません。
+
+## 変更時の設計ゲート
+
+`npm run check:architecture`は、責務分離に必要なモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`control_state.py`、`server.py`、`background.js`へ新しい責務を直接追加して上限を超える変更は、別モジュールへ切り出さない限りCIで失敗します。
 
 ## テスト
 
 - Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
-- background単体テスト: 全タブ共通キュー、外部設定反映、コマンド重複防止、Ref・ペット同期
-- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー
+- background単体テスト: 全タブ共通キュー、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
+- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク文字起こし
 - real E2E: 専用loopbackポートでIrodori v3 direct、Next、実参照音声・ペット同期、複数タブ共通キュー
 
 エージェント実行のブラウザ検証では`voiceVolume=0`と`--mute-audio`を使用します。

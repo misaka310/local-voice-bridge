@@ -20,7 +20,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["prompt-input-core.js", "content.js"],
+      "js": ["prompt-input-core.js", "delivery-id-core.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

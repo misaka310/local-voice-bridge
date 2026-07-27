@@ -23,9 +23,12 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 from control_state import ControlStateStore
 from desktop_pet_config import discover_available_pets
-from irodori_engine import IrodoriError, cache_hint, synthesize_irodori_direct
+from http_io import ResponseWriteError, is_normal_client_disconnect, json_response, request_json
+from irodori_engine import IrodoriError, cache_hint, prepare_irodori_direct, synthesize_irodori_direct
 from maintenance import audio_retention_policy, prune_generated_audio
+from runtime_readiness import enrich_snapshot, runtime_snapshot, structured_readiness
 from server_logging import configure_server_process_logging
+from voice_runtime import VoiceRuntime, VoiceRuntimeError
 
 ROOT = Path(__file__).resolve().parent
 APP_ROOT = ROOT.parent
@@ -43,6 +46,7 @@ EXTENSION_MANIFEST_PATH = ROOT.parent / "extension" / "manifest.json"
 CONTROL_STATE = ControlStateStore(
     Path(os.environ.get("LOCAL_VOICE_CONTROL_STATE") or CONTROL_PANEL_STATE_PATH).expanduser().resolve()
 )
+VOICE_RUNTIME: VoiceRuntime | None = None
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
 TEXT_FILES = ("voice.txt", "text.txt", "transcript.txt")
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -220,23 +224,6 @@ def reference_voices_dir(config: dict[str, Any]) -> Path:
     return resolve_path(config.get("referenceVoicesDir", "./reference/voices"))
 
 
-def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
-    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
-
-
-def request_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length", "0") or "0")
-    raw = handler.rfile.read(length) if length > 0 else b"{}"
-    parsed = json.loads(raw.decode("utf-8"))
-    if not isinstance(parsed, dict):
-        raise BridgeError("request JSON must be object")
-    return parsed
-
 
 def normalize_desktop_pet_id(value: Any) -> str:
     pet_id = str(value or "").strip().lower()
@@ -339,6 +326,57 @@ def reference_voice_list(config: dict[str, Any]) -> list[dict[str, str]]:
     return [{"id": "", "label": "none"}] + [{"id": str(k), "label": str(v.get("label") or k)} for k, v in voices.items()]
 
 
+def build_voice_runtime(config: dict[str, Any]) -> VoiceRuntime:
+    runtime_config = copy.deepcopy(config)
+    runtime_config["referenceVoices"] = scan_reference_voices(config)
+    selected_model = "irodori-v3"
+
+    def prepare() -> dict[str, Any]:
+        return prepare_irodori_direct(
+            raw_config=runtime_config,
+            model_config=model_config(config, selected_model),
+        )
+
+    def synthesize(payload: dict[str, Any]) -> tuple[Path, str]:
+        source_file, used_reference_audio = synthesize_irodori_direct(
+            raw_config=runtime_config,
+            model_config=model_config(config, selected_model),
+            output_dir=output_dir(config),
+            text=sanitize_text(payload.get("text")),
+            request_id=str(payload.get("requestId") or "") or None,
+            reference_voice=normalize_reference_id(
+                payload.get("voiceId") or payload.get("referenceVoice") or ""
+            )
+            or None,
+            voice_prompt=str(payload.get("voicePrompt") or payload.get("instruct") or "").strip(),
+        )
+        cleanup = prune_audio(config, preserve=(source_file,))
+        if cleanup.deleted_files:
+            print(
+                f"[maintenance] removed {cleanup.deleted_files} generated audio files "
+                f"({cleanup.deleted_bytes} bytes); remaining={cleanup.remaining_files} files/{cleanup.remaining_bytes} bytes"
+            )
+        return source_file, used_reference_audio
+
+    return VoiceRuntime(prepare_fn=prepare, synthesize_fn=synthesize)
+
+
+def voice_runtime_for(handler: BaseHTTPRequestHandler | None = None) -> VoiceRuntime | None:
+    if handler is not None:
+        runtime = getattr(getattr(handler, "server", None), "voice_runtime", None)
+        if runtime is not None:
+            return runtime
+    return VOICE_RUNTIME
+
+
+def voice_runtime_snapshot(handler: BaseHTTPRequestHandler | None = None) -> dict[str, Any]:
+    return runtime_snapshot(voice_runtime_for(handler))
+
+
+def enrich_runtime_snapshot(payload: dict[str, Any], handler: BaseHTTPRequestHandler | None = None) -> dict[str, Any]:
+    return enrich_snapshot(enrich_control_snapshot(payload), voice_runtime_snapshot(handler))
+
+
 def normalize_reference_id(value: Any) -> str:
     voice_id = str(value or "").strip()
     if voice_id.lower() in {"none", "qwen3", "qwen"}:
@@ -357,19 +395,43 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/v1/control-panel":
             try:
-                payload = enrich_control_snapshot(CONTROL_STATE.snapshot())
+                payload = enrich_runtime_snapshot(CONTROL_STATE.snapshot(), self)
                 payload["referenceVoices"] = reference_voice_list(load_config())
                 json_response(self, HTTPStatus.OK, payload)
+            except ResponseWriteError:
+                return
             except Exception as exc:
                 json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/v1/control-panel/poll":
             try:
-                values = parse_qs(parsed.query).get("after", ["0"])
-                after_id = int(values[0] or 0)
-                json_response(self, HTTPStatus.OK, enrich_control_snapshot(CONTROL_STATE.poll(after_id)))
+                query = parse_qs(parsed.query)
+                after_command_id = int(query.get("after", ["0"])[0] or 0)
+                after_event_id = int(query.get("afterEvent", ["0"])[0] or 0)
+                consumer_id = query.get("consumer", [None])[0]
+                replay_existing = query.get("replayExisting", [""])[0] == "1"
+                json_response(
+                    self,
+                    HTTPStatus.OK,
+                    enrich_runtime_snapshot(
+                        CONTROL_STATE.poll(
+                            after_command_id,
+                            after_event_id=after_event_id,
+                            consumer_id=consumer_id,
+                            replay_existing=replay_existing,
+                        ),
+                        self,
+                    ),
+                )
             except (TypeError, ValueError) as exc:
                 json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/v1/browser-runtime":
+            json_response(
+                self,
+                HTTPStatus.OK,
+                {"ok": True, "browserRuntime": CONTROL_STATE.browser_runtime_snapshot()},
+            )
             return
         if parsed.path == "/v1/desktop-pet":
             try:
@@ -384,6 +446,8 @@ class Handler(BaseHTTPRequestHandler):
                         "pets": desktop_pet_list(),
                     },
                 )
+            except ResponseWriteError:
+                return
             except Exception as exc:
                 json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
             return
@@ -405,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
                     "audioRetention": audio_retention_policy(config),
                     "pathsExposed": False,
                 }
+                runtime = voice_runtime_snapshot(self)
+                payload["voiceRuntime"] = runtime
+                payload["readiness"] = structured_readiness(CONTROL_STATE.snapshot().get("extension"), runtime)
                 json_response(self, HTTPStatus.OK, payload)
                 return
             if parsed.path == "/v1/models":
@@ -417,6 +484,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.serve_audio(config, parsed.path[len("/audio/"):])
                 return
             json_response(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+        except ResponseWriteError:
+            return
         except Exception as exc:
             json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
 
@@ -446,6 +515,41 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, HTTPStatus.OK, {"ok": True, "command": command})
             except (json.JSONDecodeError, ValueError) as exc:
                 json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError) as exc:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
+            return
+        if path == "/v1/control-panel/ack":
+            try:
+                payload = request_json(self)
+                has_command = "commandId" in payload
+                has_event = "conversationEventId" in payload
+                if not has_command and not has_event:
+                    raise ValueError("commandId or conversationEventId is required")
+                consumer_id = payload.get("consumerId")
+                result: dict[str, Any] = {"ok": True, "consumerId": str(consumer_id or "legacy")}
+                if has_command:
+                    result["commandId"] = CONTROL_STATE.acknowledge_commands(
+                        payload.get("commandId"), consumer_id=consumer_id
+                    )
+                if has_event:
+                    result["conversationEventId"] = CONTROL_STATE.acknowledge_conversation_events(
+                        payload.get("conversationEventId"), consumer_id=consumer_id
+                    )
+                json_response(self, HTTPStatus.OK, result)
+            except (json.JSONDecodeError, ValueError) as exc:
+                json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError) as exc:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
+            return
+        if path == "/v1/browser-runtime":
+            try:
+                payload = request_json(self)
+                browser_runtime = CONTROL_STATE.update_browser_runtime(payload)
+                json_response(self, HTTPStatus.OK, {"ok": True, "browserRuntime": browser_runtime})
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError) as exc:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
             return
         if path == "/v1/control-panel/state":
             try:
@@ -472,6 +576,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, HTTPStatus.OK, {"ok": True, "event": event})
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError) as exc:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
             return
         if path == "/v1/desktop-pet":
             try:
@@ -489,6 +595,32 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
                 json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
             return
+        if path == "/v1/playback/stop":
+            runtime = voice_runtime_for(self)
+            if runtime is None:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "voice runtime is not started"})
+                return
+            json_response(self, HTTPStatus.OK, runtime.stop_playback())
+            return
+        if path == "/v1/playback/replay":
+            try:
+                payload = request_json(self)
+                runtime = voice_runtime_for(self)
+                if runtime is None:
+                    raise VoiceRuntimeError("voice runtime is not started")
+                volume = min(1.0, max(0.0, float(payload.get("voiceVolume", 0.6))))
+                result = runtime.replay(volume=volume, text=str(payload.get("text") or ""))
+                source_file = Path(result["path"])
+                config = load_config()
+                result_payload = {
+                    "ok": True,
+                    "audioUrl": f"{str(config.get('publicBaseUrl')).rstrip('/')}/audio/{source_file.name}",
+                    **{key: value for key, value in result.items() if key != "path"},
+                }
+                json_response(self, HTTPStatus.OK, result_payload)
+            except (ValueError, json.JSONDecodeError, VoiceRuntimeError) as exc:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
+            return
         if path != "/v1/speak":
             json_response(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
@@ -500,6 +632,49 @@ class Handler(BaseHTTPRequestHandler):
             model = "irodori-v3"
             voice_id = normalize_reference_id(payload.get("voiceId") or payload.get("referenceVoice") or "")
             voice_prompt = str(payload.get("voicePrompt") or payload.get("instruct") or "").strip()
+            runtime = voice_runtime_for(self)
+            if runtime is not None:
+                play_local = bool(payload.get("playLocal"))
+                try:
+                    voice_volume = min(1.0, max(0.0, float(payload.get("voiceVolume", 0.6))))
+                except (TypeError, ValueError):
+                    voice_volume = 0.6
+                runtime_result = runtime.synthesize(
+                    {
+                        **payload,
+                        "text": text,
+                        "requestId": request_id,
+                        "voiceId": voice_id,
+                        "referenceVoice": voice_id,
+                        "voicePrompt": voice_prompt,
+                    },
+                    text=text,
+                    volume=voice_volume,
+                    play_local=play_local,
+                )
+                source_file = Path(runtime_result["path"])
+                audio_url = f"{str(config.get('publicBaseUrl')).rstrip('/')}/audio/{source_file.name}"
+                json_response(
+                    self,
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "engine": "irodori_direct",
+                        "runtime": "irodori_direct",
+                        "model": model,
+                        "voiceId": voice_id,
+                        "voiceProfile": model,
+                        "referenceVoice": voice_id,
+                        "usedReferenceAudio": str(runtime_result.get("usedReferenceAudio") or ""),
+                        "requestId": request_id,
+                        "audioUrl": audio_url,
+                        "textLength": len(text),
+                        "playedLocally": bool(runtime_result.get("playedLocally")),
+                        "playbackCompleted": bool(runtime_result.get("playbackCompleted")),
+                        "stopped": bool(runtime_result.get("stopped")),
+                    },
+                )
+                return
             runtime_config = copy.deepcopy(config)
             runtime_config["referenceVoices"] = scan_reference_voices(config)
             source_file, used_reference_audio = synthesize_irodori_direct(
@@ -519,25 +694,36 @@ class Handler(BaseHTTPRequestHandler):
                 )
             audio_url = f"{str(config.get('publicBaseUrl')).rstrip('/')}/audio/{source_file.name}"
             json_response(self, HTTPStatus.OK, {"ok": True, "engine": "irodori_direct", "runtime": "irodori_direct", "model": model, "voiceId": voice_id, "voiceProfile": model, "referenceVoice": voice_id, "usedReferenceAudio": used_reference_audio, "requestId": request_id, "audioUrl": audio_url, "textLength": len(text)})
+        except VoiceRuntimeError as exc:
+            print(f"[TTS ERROR] {exc}", file=sys.stderr)
+            json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
         except (BridgeError, IrodoriError) as exc:
             print(f"[TTS ERROR] {exc}", file=sys.stderr)
             json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+        except ResponseWriteError:
+            return
         except Exception as exc:
             print(f"[TTS ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
             json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": str(exc)})
 
-    def serve_audio(self, config: dict[str, Any], name: str) -> None:
+    def serve_audio(self, config: dict[str, Any], name: str) -> bool:
         path = output_dir(config) / Path(unquote(name)).name
         if not path.exists() or not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
             json_response(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "audio not found"})
-            return
+            return True
         data = path.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", mimetypes.guess_type(str(path))[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mimetypes.guess_type(str(path))[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError as exc:
+            if is_normal_client_disconnect(exc):
+                return False
+            raise ResponseWriteError("audio response write failed") from exc
+        return True
 
     def log_message(self, fmt: str, *args: Any) -> None:
         try:
@@ -549,6 +735,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    global VOICE_RUNTIME
     configure_server_process_logging()
     control_nonce = uuid.uuid4().hex
     try:
@@ -556,6 +743,8 @@ def main() -> int:
         output_dir(config).mkdir(parents=True, exist_ok=True)
         reference_voices_dir(config).mkdir(parents=True, exist_ok=True)
         cleanup = prune_audio(config)
+        VOICE_RUNTIME = build_voice_runtime(config)
+        VOICE_RUNTIME.start()
     except Exception as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)
         return 2
@@ -572,10 +761,13 @@ def main() -> int:
     print(f"cacheHint={cache_hint()}")
     httpd = ThreadingHTTPServer((host, port), Handler)
     setattr(httpd, "shutdown_token", control_nonce)
+    setattr(httpd, "voice_runtime", VOICE_RUNTIME)
     try:
         write_instance_state(control_nonce)
     except Exception as exc:
         httpd.server_close()
+        if VOICE_RUNTIME is not None:
+            VOICE_RUNTIME.close()
         print(f"[FATAL] could not write server instance state: {exc}", file=sys.stderr)
         return 2
     try:
@@ -585,6 +777,8 @@ def main() -> int:
         pass
     finally:
         httpd.server_close()
+        if VOICE_RUNTIME is not None:
+            VOICE_RUNTIME.close()
         remove_instance_state(control_nonce)
     return 0
 

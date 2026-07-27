@@ -114,6 +114,109 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertTrue(panel.replay_button.isEnabled())
             panel.shutdown()
 
+    def test_model_loading_is_not_reported_as_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def loading_snapshot() -> dict[str, object]:
+                payload = original()
+                payload["readiness"] = {
+                    "deviceOrModel": "loading",
+                    "repairRequired": False,
+                    "tabs": 3,
+                    "ready": False,
+                }
+                payload["voiceRuntime"] = {
+                    "readiness": "loading",
+                    "repairRequired": False,
+                    "queueSize": 1,
+                    "replayAvailable": False,
+                }
+                return payload
+
+            client.get_snapshot = loading_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+            )
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertEqual(panel.status_label.text(), "音声モデルを準備中")
+            self.assertIn("初回起動時", panel.current_text_label.toolTip())
+            self.assertTrue(panel.next_button.isEnabled())
+            self.assertFalse(panel.replay_button.isEnabled())
+            self.assertIn("Queue 2", panel.queue_label.text())
+            panel.shutdown()
+
+    def test_runtime_failure_requires_repair_and_disables_voice_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def failed_snapshot() -> dict[str, object]:
+                payload = original()
+                payload["readiness"] = {
+                    "deviceOrModel": "failed",
+                    "repairRequired": True,
+                    "tabs": 3,
+                    "ready": False,
+                }
+                payload["voiceRuntime"] = {
+                    "readiness": "failed",
+                    "repairRequired": True,
+                    "error": "transformers is required",
+                    "queueSize": 0,
+                    "replayAvailable": True,
+                }
+                return payload
+
+            client.get_snapshot = failed_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+            )
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertEqual(panel.status_label.text(), "音声ランタイムの修復が必要")
+            self.assertIn("transformers is required", panel.current_text_label.toolTip())
+            self.assertFalse(panel.next_button.isEnabled())
+            self.assertFalse(panel.regen_button.isEnabled())
+            self.assertFalse(panel.replay_button.isEnabled())
+            panel.shutdown()
+
+    def test_playing_status_shows_the_reference_voice_that_was_applied(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def playing_snapshot() -> dict[str, object]:
+                payload = original()
+                settings = dict(payload["settings"])
+                settings["micConversationEnabled"] = False
+                payload["settings"] = settings
+                extension = dict(payload["extension"])
+                extension["statusText"] = "Playing chunk 1/2 · Ref asuka"
+                payload["extension"] = extension
+                return payload
+
+            client.get_snapshot = playing_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+            )
+
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertEqual(panel.status_label.text(), "Playing chunk 1/2 · Ref asuka")
+            panel.shutdown()
+
     def test_disconnected_extension_requests_extension_reload_not_chatgpt_tab_reload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = FakeControlClient()

@@ -8,6 +8,10 @@ const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const BACKGROUND_PATH = path.join(ROOT, 'extension', 'background.js');
+const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
+const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
+const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
+const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 
 function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -24,6 +28,7 @@ function waitFor(predicate, timeoutMs = 2000) {
 function createHarness(harnessOptions = {}) {
   const posts = [];
   const petPosts = [];
+  const playbackPosts = [];
   const tabMessages = [];
   const storage = {
     enabled: true,
@@ -92,11 +97,41 @@ function createHarness(harnessOptions = {}) {
               audioUrl: `http://127.0.0.1:8717/audio/test-${posts.length}.wav`,
               referenceVoice: body.referenceVoice,
               usedReferenceAudio: harnessOptions.omitUsedReferenceAudio || !body.referenceVoice ? '' : 'applied.wav',
+              ...(harnessOptions.localPlayback ? {
+                playedLocally: true,
+                playbackCompleted: true,
+                stopped: false,
+              } : {}),
             };
           },
         };
       }
       throw new Error('captured request');
+    }
+    if (String(url).endsWith('/v1/playback/replay') && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}');
+      playbackPosts.push({ type: 'replay', body });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            audioUrl: 'http://127.0.0.1:8717/audio/replay.wav',
+            playedLocally: true,
+            playbackCompleted: true,
+            stopped: false,
+          };
+        },
+      };
+    }
+    if (String(url).endsWith('/v1/playback/stop') && options.method === 'POST') {
+      playbackPosts.push({ type: 'stop', body: JSON.parse(options.body || '{}') });
+      return {
+        ok: true,
+        status: 200,
+        async json() { return { ok: true, stopping: true }; },
+      };
     }
     if (String(url).endsWith('/v1/desktop-pet') && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}');
@@ -123,6 +158,18 @@ function createHarness(harnessOptions = {}) {
     Uint8Array,
     btoa: (value) => Buffer.from(value, 'binary').toString('base64'),
   });
+  for (const dependencyPath of [
+    BACKGROUND_CORE_PATH,
+    BACKGROUND_SETTINGS_CORE_PATH,
+    BACKGROUND_RUNTIME_CORE_PATH,
+    BACKGROUND_CONTROL_SYNC_PATH,
+  ]) {
+    vm.runInContext(
+      fs.readFileSync(dependencyPath, 'utf8'),
+      context,
+      { filename: dependencyPath },
+    );
+  }
   vm.runInContext(fs.readFileSync(BACKGROUND_PATH, 'utf8'), context, { filename: BACKGROUND_PATH });
   assert.equal(typeof runtimeListener, 'function');
 
@@ -153,6 +200,7 @@ function createHarness(harnessOptions = {}) {
 
   return {
     petPosts,
+    playbackPosts,
     posts,
     send,
     sendAsync,
@@ -282,18 +330,16 @@ test('queued Auto items keep the reference voice selected when they entered the 
   harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
   harness.send({
     type: 'report-chunks', messageKey: 'reply-a', chunks: ['一件目です。'], autoPreview: '一件目です。', isAuto: true,
-    voiceId: 'sample', referenceVoice: 'sample',
   }, 101, 'Tab A');
+  await waitFor(() => harness.tabMessages.some((entry) => entry.message.type === 'play-audio'));
+
   harness.send({
     type: 'report-chunks', messageKey: 'reply-b', chunks: ['二件目です。'], autoPreview: '二件目です。', isAuto: true,
-    voiceId: 'sample', referenceVoice: 'sample',
   }, 101, 'Tab A');
   harness.setStorage({ voiceId: 'asuka', referenceVoice: 'asuka' });
-
-  await waitFor(() => harness.tabMessages.some((entry) => entry.message.type === 'play-audio'));
   harness.finishCurrentPlayback();
-  await waitFor(() => harness.posts.length === 2);
 
+  await waitFor(() => harness.posts.length === 2);
   assert.equal(harness.posts[0].referenceVoice, 'sample');
   assert.equal(harness.posts[1].referenceVoice, 'sample');
   harness.send({ type: 'ui-command', cmd: 'stop' }, 101, 'Tab A');
@@ -323,6 +369,25 @@ test('desktop pet selection is forwarded to the local desktop pet API', async ()
   assert.equal(response.ok, true);
   assert.equal(response.payload.ok, true);
   assert.equal(response.payload.selectedPetId, 'misaka');
+});
+
+test('local playback does not use a ChatGPT tab and survives its closure', async () => {
+  const harness = createHarness({ speakSucceeds: true, localPlayback: true });
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({
+    type: 'report-chunks', messageKey: 'reply-local', chunks: ['ローカル再生です。'], autoPreview: 'ローカル再生です。', isAuto: true,
+  }, 101, 'Tab A');
+
+  await waitFor(() => harness.posts.length === 1);
+  await waitFor(() => harness.tabMessages.some((entry) => (
+    entry.message.type === 'state-update' && entry.message.payload.replayAvailable === true
+  )));
+  harness.removeTab(101);
+
+  assert.equal(harness.posts[0].playLocal, true);
+  assert.equal(harness.posts[0].voiceVolume, 0.6);
+  assert.equal(harness.tabMessages.some((entry) => entry.message.type === 'play-audio'), false);
+  assert.equal(harness.playbackPosts.some((entry) => entry.type === 'stop'), false);
 });
 
 test('closing the playback owner releases the queue and continues on another ChatGPT tab', async () => {

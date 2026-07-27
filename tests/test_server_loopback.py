@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import errno
 import importlib.util
 import json
 import os
@@ -30,6 +31,7 @@ def load_server_module():
 
     fake_engine.IrodoriError = FakeIrodoriError
     fake_engine.cache_hint = lambda: "test"
+    fake_engine.prepare_irodori_direct = lambda **_: {"modelDevice": "test"}
     fake_engine.synthesize_irodori_direct = lambda **_: (_ for _ in ()).throw(AssertionError("not called"))
     sys.modules["irodori_engine"] = fake_engine
 
@@ -42,6 +44,62 @@ def load_server_module():
 
 
 server = load_server_module()
+
+
+class FakeVoiceRuntime:
+    def __init__(self, audio_path: Path) -> None:
+        self.audio_path = Path(audio_path)
+        self.synthesize_calls: list[dict[str, object]] = []
+        self.replay_calls: list[dict[str, object]] = []
+        self.stop_calls = 0
+
+    def synthesize(self, payload, *, text, volume, play_local, timeout=None):
+        self.synthesize_calls.append(
+            {
+                "payload": dict(payload),
+                "text": text,
+                "volume": volume,
+                "playLocal": play_local,
+                "timeout": timeout,
+            }
+        )
+        return {
+            "path": self.audio_path,
+            "usedReferenceAudio": "reference.wav",
+            "playedLocally": bool(play_local),
+            "playbackCompleted": bool(play_local),
+            "stopped": False,
+        }
+
+    def replay(self, path=None, *, volume=0.6, text="", timeout=None):
+        self.replay_calls.append({"path": path, "volume": volume, "text": text, "timeout": timeout})
+        return {
+            "path": self.audio_path,
+            "usedReferenceAudio": "reference.wav",
+            "playedLocally": True,
+            "playbackCompleted": True,
+            "stopped": False,
+        }
+
+    def stop_playback(self):
+        self.stop_calls += 1
+        return {"ok": True, "stopping": True}
+
+    def snapshot(self):
+        return {
+            "readiness": "ready",
+            "ready": True,
+            "detail": {"modelDevice": "cuda", "modelPrecision": "bf16"},
+            "error": "",
+            "repairRequired": False,
+            "dependencies": {"sounddevice": True, "soundfile": True},
+            "phase": "idle",
+            "queueSize": 0,
+            "currentText": "",
+            "lastOperation": "synthesize:complete",
+            "replayAvailable": True,
+            "startedAt": 1.0,
+        }
 
 
 class LoopbackConfigTests(unittest.TestCase):
@@ -376,7 +434,218 @@ class LoopbackConfigTests(unittest.TestCase):
                 if original_store is not None:
                     server.CONTROL_STATE = original_store
 
-    def test_conversation_state_and_transcript_event_endpoints_are_one_shot(self):
+    def test_browser_runtime_endpoint_persists_authoritative_tab_and_queue_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store = getattr(server, "CONTROL_STATE", None)
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                payload = {
+                    "tabs": [
+                        {
+                            "id": 101,
+                            "title": "Tab A",
+                            "url": "https://chatgpt.com/c/101",
+                            "lastReadIndex": 0,
+                            "lastAutoQueueSignature": "reply-1\u0000preview",
+                            "lastAssistantMessage": {
+                                "messageKey": "reply-1",
+                                "chunks": ["最初です。", "続きです。"],
+                                "capturedAt": 10,
+                            },
+                        }
+                    ],
+                    "selectedTabId": 101,
+                    "uiOwnerTabId": 101,
+                    "queue": [
+                        {
+                            "id": 4,
+                            "mode": "next",
+                            "tabId": 101,
+                            "messageKey": "reply-1",
+                            "chunkIndex": 1,
+                            "chunkCount": 2,
+                            "text": "続きです。",
+                            "referenceVoice": "asuka",
+                        }
+                    ],
+                    "seq": 5,
+                }
+                request = urllib.request.Request(
+                    f"{base}/v1/browser-runtime",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    saved = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(saved["browserRuntime"]["queue"][0]["text"], "続きです。")
+
+                with urllib.request.urlopen(f"{base}/v1/browser-runtime", timeout=5) as response:
+                    restored = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(restored["browserRuntime"]["tabs"][0]["lastAssistantMessage"]["messageKey"], "reply-1")
+                self.assertEqual(restored["browserRuntime"]["selectedTabId"], 101)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                if original_store is not None:
+                    server.CONTROL_STATE = original_store
+
+    def test_local_voice_runtime_handles_speak_replay_stop_and_health(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "local-runtime.wav"
+            audio_path.write_bytes(b"RIFF")
+            runtime = FakeVoiceRuntime(audio_path)
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            setattr(httpd, "voice_runtime", runtime)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                speak = urllib.request.Request(
+                    f"{base}/v1/speak",
+                    data=json.dumps(
+                        {
+                            "text": "ローカル再生テスト",
+                            "requestId": "runtime-test",
+                            "playLocal": True,
+                            "voiceVolume": 0.25,
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(speak, timeout=5) as response:
+                    spoken = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(spoken["playedLocally"])
+                self.assertTrue(spoken["playbackCompleted"])
+                self.assertEqual(runtime.synthesize_calls[0]["volume"], 0.25)
+                self.assertTrue(runtime.synthesize_calls[0]["playLocal"])
+
+                compatibility_speak = urllib.request.Request(
+                    f"{base}/v1/speak",
+                    data=json.dumps({"text": "互換クライアント"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(compatibility_speak, timeout=5) as response:
+                    compatibility = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(compatibility["playedLocally"])
+                self.assertFalse(runtime.synthesize_calls[1]["playLocal"])
+
+                replay = urllib.request.Request(
+                    f"{base}/v1/playback/replay",
+                    data=json.dumps({"voiceVolume": 0.75, "text": "再生"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(replay, timeout=5) as response:
+                    replayed = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(replayed["playedLocally"])
+                self.assertEqual(runtime.replay_calls[0]["volume"], 0.75)
+
+                stop = urllib.request.Request(
+                    f"{base}/v1/playback/stop",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(stop, timeout=5) as response:
+                    stopped = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(stopped["stopping"])
+                self.assertEqual(runtime.stop_calls, 1)
+
+                with urllib.request.urlopen(f"{base}/health", timeout=5) as response:
+                    health = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(health["voiceRuntime"]["readiness"], "ready")
+                self.assertEqual(health["readiness"]["deviceOrModel"], "ready")
+                self.assertEqual(health["readiness"]["dependencies"], "ready")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+
+    def test_control_panel_poll_and_ack_are_non_destructive_and_use_independent_cursors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store = getattr(server, "CONTROL_STATE", None)
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                command = server.CONTROL_STATE.enqueue_command("next")
+                event = server.CONTROL_STATE.enqueue_conversation_event("cancel_pending", {"sessionId": 2})
+                poll_url = f"{base}/v1/control-panel/poll?consumer=panel&after=0&afterEvent=0&replayExisting=1"
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
+                    first = json.loads(response.read().decode("utf-8"))
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
+                    second = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(first["commands"], second["commands"])
+                self.assertEqual(first["conversationEvents"], second["conversationEvents"])
+                self.assertEqual(first["commands"][0]["id"], command["id"])
+                self.assertEqual(first["conversationEvents"][0]["id"], event["id"])
+
+                ack = urllib.request.Request(
+                    f"{base}/v1/control-panel/ack",
+                    data=json.dumps({"consumerId": "panel", "commandId": command["id"]}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(ack, timeout=5) as response:
+                    ack_payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(ack_payload["commandId"], command["id"])
+                self.assertNotIn("conversationEventId", ack_payload)
+
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
+                    after_command_ack = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(after_command_ack["commands"], [])
+                self.assertEqual([item["id"] for item in after_command_ack["conversationEvents"]], [event["id"]])
+
+                bad_ack = urllib.request.Request(
+                    f"{base}/v1/control-panel/ack",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(bad_ack, timeout=5)
+                self.assertEqual(error.exception.code, 400)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                if original_store is not None:
+                    server.CONTROL_STATE = original_store
+
+    def test_json_response_swallows_normal_client_disconnect_without_retrying(self):
+        class BrokenWriter:
+            def write(self, _data):
+                raise BrokenPipeError(errno.EPIPE, "broken pipe")
+
+        class FakeHandler:
+            def __init__(self):
+                self.wfile = BrokenWriter()
+                self.responses = 0
+
+            def send_response(self, _status):
+                self.responses += 1
+
+            def send_header(self, _key, _value):
+                pass
+
+            def end_headers(self):
+                pass
+
+        handler = FakeHandler()
+        self.assertFalse(server.json_response(handler, 200, {"ok": True}))
+        self.assertEqual(handler.responses, 1)
+
+    def test_conversation_state_and_transcript_event_endpoints_remain_pending_until_acknowledged(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             original_store = getattr(server, "CONTROL_STATE", None)
             server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
@@ -412,18 +681,105 @@ class LoopbackConfigTests(unittest.TestCase):
                     event_payload = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(event_payload["event"]["type"], "transcript")
 
-                with urllib.request.urlopen(f"{base}/v1/control-panel/poll?after=0", timeout=5) as response:
+                poll_url = f"{base}/v1/control-panel/poll?consumer=legacy&after=0&afterEvent=0"
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
                     first_poll = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(first_poll["conversationEvents"][0]["payload"]["text"], "テスト送信")
-                with urllib.request.urlopen(f"{base}/v1/control-panel/poll?after=0", timeout=5) as response:
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
                     second_poll = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(second_poll["conversationEvents"], [])
+                self.assertEqual(second_poll["conversationEvents"], first_poll["conversationEvents"])
+
+                ack_request = urllib.request.Request(
+                    f"{base}/v1/control-panel/ack",
+                    data=json.dumps({"consumerId": "legacy", "conversationEventId": first_poll["conversationEvents"][0]["id"]}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(ack_request, timeout=5) as response:
+                    self.assertEqual(json.loads(response.read().decode("utf-8"))["conversationEventId"], 1)
+                with urllib.request.urlopen(poll_url, timeout=5) as response:
+                    acknowledged_poll = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(acknowledged_poll["conversationEvents"], [])
             finally:
                 httpd.shutdown()
                 httpd.server_close()
                 thread.join(timeout=5)
                 if original_store is not None:
                     server.CONTROL_STATE = original_store
+
+
+    def test_full_outboxes_return_service_unavailable_json(self):
+        class FullOutboxStore:
+            def enqueue_command(self, _command):
+                raise RuntimeError("command outbox is full")
+
+            def enqueue_conversation_event(self, _event_type, _payload):
+                raise RuntimeError("conversation event outbox is full")
+
+            def acknowledge_commands(self, _command_id, *, consumer_id=None):
+                raise OSError("ack state file unavailable")
+
+            def update_browser_runtime(self, _payload):
+                raise OSError("browser runtime state file unavailable")
+
+        original_store = server.CONTROL_STATE
+        server.CONTROL_STATE = FullOutboxStore()
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        try:
+            requests = [
+                (
+                    urllib.request.Request(
+                        f"{base}/v1/control-panel/command",
+                        data=json.dumps({"command": "next"}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    ),
+                    "outbox is full",
+                ),
+                (
+                    urllib.request.Request(
+                        f"{base}/v1/conversation/event",
+                        data=json.dumps({"type": "cancel_pending", "payload": {"sessionId": 1}}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    ),
+                    "outbox is full",
+                ),
+                (
+                    urllib.request.Request(
+                        f"{base}/v1/control-panel/ack",
+                        data=json.dumps({"consumerId": "extension", "commandId": 1}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    ),
+                    "ack state file unavailable",
+                ),
+                (
+                    urllib.request.Request(
+                        f"{base}/v1/browser-runtime",
+                        data=json.dumps({"tabs": []}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    ),
+                    "browser runtime state file unavailable",
+                ),
+            ]
+            for request, expected_error in requests:
+                with self.subTest(url=request.full_url):
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        urllib.request.urlopen(request, timeout=5)
+                    self.assertEqual(error.exception.code, 503)
+                    payload = json.loads(error.exception.read().decode("utf-8"))
+                    self.assertFalse(payload["ok"])
+                    self.assertIn(expected_error, payload["error"])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+            server.CONTROL_STATE = original_store
 
 
 if __name__ == "__main__":

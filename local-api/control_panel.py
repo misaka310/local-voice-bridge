@@ -331,6 +331,8 @@ class LocalVoiceControlPanel(QWidget):
         extension = snapshot.get("extension") if isinstance(snapshot.get("extension"), dict) else {}
         conversation = snapshot.get("conversation") if isinstance(snapshot.get("conversation"), dict) else {}
         components = snapshot.get("components") if isinstance(snapshot.get("components"), dict) else {}
+        readiness = snapshot.get("readiness") if isinstance(snapshot.get("readiness"), dict) else {}
+        voice_runtime = snapshot.get("voiceRuntime") if isinstance(snapshot.get("voiceRuntime"), dict) else {}
         voices = snapshot.get("referenceVoices") if isinstance(snapshot.get("referenceVoices"), list) else []
         reference_voice = str(settings.get("referenceVoice") or "")
 
@@ -345,15 +347,37 @@ class LocalVoiceControlPanel(QWidget):
             self._updating_controls = False
 
         connected = bool(extension.get("connected"))
-        if connected:
-            status = str(extension.get("statusText") or "Ready")
-            phase = str(extension.get("playbackPhase") or "idle")
-            if phase == "generating":
-                status = "Generating"
-            elif phase == "playing":
-                status = "Playing"
+        model_state = str(readiness.get("deviceOrModel") or voice_runtime.get("readiness") or "").strip().lower()
+        repair_required = bool(readiness.get("repairRequired") or voice_runtime.get("repairRequired"))
+        runtime_error = str(voice_runtime.get("error") or "").strip()
+        runtime_blocked = repair_required or model_state == "failed"
+        runtime_loading = model_state in {"loading", "not_started"}
+
+        if runtime_blocked:
+            self.status_label.setText("音声ランタイムの修復が必要")
+            self._set_current_text(
+                runtime_error
+                or "setup-voice-env.cmd を再実行し、依存関係と音声モデルを修復してください。"
+            )
+        elif runtime_loading:
+            self.status_label.setText("音声モデルを準備中")
+            self._set_current_text("初回起動時の音声モデル準備中です。完了後に自動で利用可能になります。")
+        elif connected:
+            status = str(extension.get("statusText") or "").strip()
+            phase = str(extension.get("playbackPhase") or voice_runtime.get("phase") or "idle")
+            if not status:
+                if phase == "generating":
+                    status = "Generating"
+                elif phase == "playing":
+                    status = "Playing"
+                else:
+                    status = "Ready"
             self.status_label.setText(status)
-            current_text = str(extension.get("currentText") or "No assistant response yet")
+            current_text = str(
+                extension.get("currentText")
+                or voice_runtime.get("currentText")
+                or "No assistant response yet"
+            )
             self._set_current_text(current_text)
         else:
             self.status_label.setText("拡張機能を再読み込みしてください")
@@ -370,7 +394,7 @@ class LocalVoiceControlPanel(QWidget):
                 "読み上げ + マイク会話を追加してください",
             )
         elif mic_enabled:
-            if connected:
+            if connected and not runtime_blocked and not runtime_loading:
                 self.status_label.setText(str(conversation.get("statusText") or "待機中（右Ctrl＋＼ 長押し）"))
             device = str(conversation.get("sttDevice") or "未ロード")
             device_label = "CUDA" if device.lower() == "cuda" else "CPU fallback" if device.lower() == "cpu" else device
@@ -388,12 +412,18 @@ class LocalVoiceControlPanel(QWidget):
                 visible_detail="右Ctrl＋＼ 長押し",
             )
 
-        queue_size = max(0, int(extension.get("queueSize") or 0))
-        tabs_count = max(0, int(extension.get("tabsCount") or 0))
+        queue_size = max(
+            0,
+            int(extension.get("queueSize") or 0),
+            int(voice_runtime.get("queueSize") or 0),
+        )
+        tabs_count = max(0, int(extension.get("tabsCount") or readiness.get("tabs") or 0))
+        replay_available = bool(extension.get("replayAvailable") or voice_runtime.get("replayAvailable"))
         self.queue_label.setText(f"Queue {queue_size} · {tabs_count} tabs")
-        self.next_button.setEnabled(connected)
-        self.regen_button.setEnabled(connected)
-        self.replay_button.setEnabled(connected and bool(extension.get("replayAvailable")))
+        controls_available = connected and not runtime_blocked
+        self.next_button.setEnabled(controls_available)
+        self.regen_button.setEnabled(controls_available)
+        self.replay_button.setEnabled(controls_available and not runtime_loading and replay_available)
 
         if bool(extension.get("updateRequired")):
             loaded = str(extension.get("loadedVersion") or "旧版")

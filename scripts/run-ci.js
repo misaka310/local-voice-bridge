@@ -8,9 +8,9 @@ const ROOT = path.resolve(__dirname, '..');
 const node = process.execPath;
 const steps = [
   [node, ['scripts/run-public-check.js']],
+  [node, ['scripts/check-architecture.js']],
   [node, ['scripts/run-python-tests.js']],
-  [node, ['scripts/run-background-core-tests.js']],
-  [node, ['--test', 'tests/background-reference-queue.test.js', 'tests/background-external-panel.test.js', 'tests/options-page.test.js']],
+  [node, ['scripts/run-background-tests.js']],
   [node, ['scripts/run-mock-e2e.js']],
 ];
 

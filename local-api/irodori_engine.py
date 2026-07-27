@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from ffmpeg_env import configure_ffmpeg_dll_path
 
 _MODEL_CACHE: dict[tuple[Any, ...], Any] = {}
+_MODEL_CACHE_LOCK = threading.RLock()
 
 
 class IrodoriError(RuntimeError):
@@ -106,32 +108,77 @@ def _reference_audio_for(reference_voice: str | None, config: dict[str, Any]) ->
 
 def _get_runtime(*, model_cfg: dict[str, Any]) -> Any:
     configure_ffmpeg_dll_path()
-    import torch
-    from huggingface_hub import hf_hub_download
-    from irodori_tts.inference_runtime import InferenceRuntime, RuntimeKey
+    with _MODEL_CACHE_LOCK:
+        import torch
+        from huggingface_hub import hf_hub_download
+        from irodori_tts.inference_runtime import InferenceRuntime, RuntimeKey
 
-    repo_id = str(model_cfg.get("hfCheckpoint") or model_cfg.get("model") or "Aratako/Irodori-TTS-500M-v3")
-    codec_repo = str(model_cfg.get("codecRepo") or "Aratako/Semantic-DACVAE-Japanese-32dim")
-    checkpoint = hf_hub_download(repo_id=repo_id, filename=str(model_cfg.get("checkpointFile") or "model.safetensors"))
-    require_cuda = _bool(model_cfg.get("requireCuda"), True)
-    model_device = _resolve_device(torch, str(model_cfg.get("modelDevice") or "auto"), require_cuda=require_cuda)
-    codec_device = _resolve_device(torch, str(model_cfg.get("codecDevice") or model_device), require_cuda=require_cuda)
-    model_precision = _pick_precision(torch, model_device, str(model_cfg.get("modelPrecision") or "auto"))
-    codec_precision = _pick_precision(torch, codec_device, str(model_cfg.get("codecPrecision") or model_precision))
-    key = (checkpoint, model_device, codec_repo, model_precision, codec_device, codec_precision, bool(model_cfg.get("compileModel", False)), bool(model_cfg.get("compileDynamic", False)))
-    if key not in _MODEL_CACHE:
-        runtime_key = RuntimeKey(
-            checkpoint=checkpoint,
-            model_device=model_device,
-            codec_repo=codec_repo,
-            model_precision=model_precision,
-            codec_device=codec_device,
-            codec_precision=codec_precision,
-            compile_model=bool(model_cfg.get("compileModel", False)),
-            compile_dynamic=bool(model_cfg.get("compileDynamic", False)),
+        repo_id = str(model_cfg.get("hfCheckpoint") or model_cfg.get("model") or "Aratako/Irodori-TTS-500M-v3")
+        codec_repo = str(model_cfg.get("codecRepo") or "Aratako/Semantic-DACVAE-Japanese-32dim")
+        checkpoint = hf_hub_download(
+            repo_id=repo_id,
+            filename=str(model_cfg.get("checkpointFile") or "model.safetensors"),
         )
-        _MODEL_CACHE[key] = InferenceRuntime.from_key(runtime_key)
-    return _MODEL_CACHE[key]
+        require_cuda = _bool(model_cfg.get("requireCuda"), True)
+        model_device = _resolve_device(
+            torch,
+            str(model_cfg.get("modelDevice") or "auto"),
+            require_cuda=require_cuda,
+        )
+        codec_device = _resolve_device(
+            torch,
+            str(model_cfg.get("codecDevice") or model_device),
+            require_cuda=require_cuda,
+        )
+        model_precision = _pick_precision(torch, model_device, str(model_cfg.get("modelPrecision") or "auto"))
+        codec_precision = _pick_precision(torch, codec_device, str(model_cfg.get("codecPrecision") or model_precision))
+        key = (
+            checkpoint,
+            model_device,
+            codec_repo,
+            model_precision,
+            codec_device,
+            codec_precision,
+            bool(model_cfg.get("compileModel", False)),
+            bool(model_cfg.get("compileDynamic", False)),
+        )
+        if key not in _MODEL_CACHE:
+            runtime_key = RuntimeKey(
+                checkpoint=checkpoint,
+                model_device=model_device,
+                codec_repo=codec_repo,
+                model_precision=model_precision,
+                codec_device=codec_device,
+                codec_precision=codec_precision,
+                compile_model=bool(model_cfg.get("compileModel", False)),
+                compile_dynamic=bool(model_cfg.get("compileDynamic", False)),
+            )
+            _MODEL_CACHE[key] = InferenceRuntime.from_key(runtime_key)
+        return _MODEL_CACHE[key]
+
+
+def prepare_irodori_direct(*, raw_config: dict[str, Any], model_config: dict[str, Any]) -> dict[str, Any]:
+    cfg = dict(raw_config.get("irodori") or {})
+    cfg.update(model_config or {})
+    runtime = _get_runtime(model_cfg=cfg)
+    return {
+        "modelDevice": str(getattr(runtime, "model_device", "")),
+        "codecDevice": str(getattr(runtime, "codec_device", "")),
+        "modelPrecision": str(getattr(runtime, "model_precision", "")),
+        "codecPrecision": str(getattr(runtime, "codec_precision", "")),
+        "speakerConditioning": bool(
+            getattr(getattr(runtime, "model_cfg", None), "use_speaker_condition_resolved", False)
+        ),
+    }
+
+
+def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
+    if not ref_wav:
+        return False
+    model_cfg = getattr(runtime, "model_cfg", None)
+    if not bool(getattr(model_cfg, "use_speaker_condition_resolved", False)):
+        raise IrodoriError("the active Irodori runtime cannot apply the selected reference voice")
+    return True
 
 
 def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:

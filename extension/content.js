@@ -45,6 +45,7 @@
   let isUiOwner = null;
   let completionMarkerPending = false;
   let baseDocumentTitle = '';
+  let deliveryLedger = null;
 
   function normalizeText(text) {
     return String(text || '')
@@ -804,6 +805,17 @@
     };
   }
 
+  function appliedDeliveryLedger() {
+    if (deliveryLedger) return deliveryLedger;
+    const api = globalThis.LocalVoiceDeliveryIds;
+    if (!api || typeof api.createLedger !== 'function') return null;
+    deliveryLedger = api.createLedger(sessionStorage, {
+      key: 'localVoiceAppliedDeliveryIds',
+      limit: 128,
+    });
+    return deliveryLedger;
+  }
+
   function ensurePendingSendController() {
     if (pendingSendController) return pendingSendController;
     const api = globalThis.LocalVoicePromptInput;
@@ -882,12 +894,19 @@
           return false;
         }
         const payload = message.payload || {};
+        const deliveryId = String(payload.deliveryId || '').trim();
+        const ledger = appliedDeliveryLedger();
+        if (deliveryId && ledger && ledger.has(deliveryId)) {
+          sendResponse({ ok: true, alreadyApplied: true });
+          return false;
+        }
         settings.cancelGraceMs = Math.max(0, Math.min(5000, Number(payload.cancelGraceMs) || 0));
         const result = controller.start({
           sessionId: Number(payload.sessionId) || 0,
           text: String(payload.text || ''),
           graceMs: settings.cancelGraceMs,
         });
+        if (result && result.ok === true && deliveryId && ledger) ledger.mark(deliveryId);
         sendResponse(result);
         return false;
       }
