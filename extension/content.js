@@ -54,6 +54,7 @@
   let completionMarkerPending = false;
   let baseDocumentTitle = '';
   let deliveryLedger = null;
+  const textCore = globalThis.ContentTextCore;
 
   function normalizeText(text) {
     return String(text || '')
@@ -274,10 +275,13 @@
     let text = normalizeText(fullText);
     if (!text) return [];
     text = text.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/\n{2,}/g, '\n');
-    return text
+    const lines = text
       .split('\n')
       .map((line) => normalizeMarkdownLine(line))
       .filter((line) => Boolean(line) && !isTransientAssistantStatus(line));
+    return textCore.coalesceOrphanLines(lines, {
+      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+    });
   }
 
   function buildPreviewSourceText(fullText, options = {}) {
@@ -318,12 +322,48 @@
   function stableDelayForPreview(preview) {
     const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
     const stableMs = Number(settings.previewStableMs || DEFAULT_SETTINGS.previewStableMs);
-    return preview.length >= minChars ? stableMs : stableMs + 400;
+    return textCore.stableDelayForPreview(preview, { minChars, stableMs });
   }
 
   function shouldSendNow(preview, now, item) {
     if (!preview.length) return false;
+    if (isResponseGenerating() && preview.length <= 2 && !textCore.hasTerminalPunctuation(preview)) return false;
     return now - item.lastChangedAt >= stableDelayForPreview(preview);
+  }
+
+  function schedulePendingAutoSend(node, item, preview) {
+    if (item.idleTimer) clearTimeout(item.idleTimer);
+    const generationRetryMs = isResponseGenerating() ? 500 : 0;
+    const remainingMs = Math.max(50, generationRetryMs, stableDelayForPreview(preview) - (Date.now() - item.lastChangedAt) + 50);
+    item.idleTimer = setTimeout(() => {
+      item.idleTimer = null;
+      if (item.sent) return;
+      const latest = extractAssistantText(node);
+      if (!latest) return;
+      if (latest !== item.lastText) {
+        processNode(node);
+        return;
+      }
+      const pendingChunks = splitSpeakChunks(latest, {
+        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
+        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
+        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+      });
+      const pendingPreview = extractAutoPreview(latest, {
+        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
+        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
+        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+      });
+      if (!pendingPreview) return;
+      if (!shouldSendNow(pendingPreview, Date.now(), item)) {
+        schedulePendingAutoSend(node, item, pendingPreview);
+        return;
+      }
+      item.sent = true;
+      node.dataset[AUTO_SENT_FLAG] = '1';
+      void reportChunks({ node, text: latest, messageKey: item.key, chunks: pendingChunks, autoPreview: pendingPreview, capturedAt: Date.now() }, Boolean(enabled && settings.enabled));
+      maybeMarkResponseCompleted(node, item, latest);
+    }, remainingMs);
   }
 
   function getAssistantNodes() {
@@ -509,6 +549,7 @@
     const text = extractAssistantText(node);
     if (!text) return;
     const item = ensureElementState(node, text);
+    if (isResponseGenerating()) item.generationObserved = true;
     if (item.sent) {
       if (text === item.lastText) {
         maybeMarkResponseCompleted(node, item, text);
@@ -568,29 +609,7 @@
       maybeMarkResponseCompleted(node, item, text);
       return;
     }
-    if (item.idleTimer) clearTimeout(item.idleTimer);
-    item.idleTimer = setTimeout(() => {
-      if (item.sent) return;
-      const latest = extractAssistantText(node);
-      if (latest !== item.lastText) return;
-      const pendingChunks = splitSpeakChunks(latest, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      const pendingPreview = extractAutoPreview(latest, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      if (!pendingPreview) return;
-      if (shouldSendNow(pendingPreview, Date.now(), item)) {
-        item.sent = true;
-        node.dataset[AUTO_SENT_FLAG] = '1';
-        void reportChunks({ node, text: latest, messageKey: item.key, chunks: pendingChunks, autoPreview: pendingPreview, capturedAt: Date.now() }, Boolean(enabled && settings.enabled));
-        maybeMarkResponseCompleted(node, item, latest);
-      }
-    }, stableDelayForPreview(preview) + 50);
+    schedulePendingAutoSend(node, item, preview);
   }
 
   function inspectLatestAssistant() {

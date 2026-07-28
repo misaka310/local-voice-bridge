@@ -72,6 +72,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "codecPrecision": "auto",
         "requireCuda": True,
         "numSteps": 16,
+        "referenceNumSteps": 32,
+        "cfgScaleSpeaker": 6.0,
         "tScheduleMode": "sway",
         "swayCoeff": -1.0,
         "durationScale": 1.0,

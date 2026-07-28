@@ -395,7 +395,7 @@ test('missing receivers are injected into already-open ChatGPT tabs before recon
   await waitFor(() => harness.injectedScripts.length === 1);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
     target: { tabId: 303 },
-    files: ['prompt-input-core.js', 'delivery-id-core.js', 'content.js'],
+    files: ['prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
   });
   await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
 });
