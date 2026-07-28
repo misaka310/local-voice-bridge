@@ -73,6 +73,27 @@ class DependencyAuditTests(unittest.TestCase):
         with patch.object(audit.subprocess, "run", return_value=completed):
             self.assertEqual(audit.audit_pip_check(), [])
 
+    def test_rejects_missing_hf_xet_in_standalone_audit(self):
+        installed = dict(audit.EXPECTED_EXACT_VERSIONS)
+        installed.pop("hf-xet")
+        for package_name, (minimum, _maximum) in audit.EXPECTED_VERSION_RANGES.items():
+            installed[package_name] = str(minimum)
+
+        def installed_version(package_name: str) -> str:
+            if package_name == "hf-xet":
+                raise PackageNotFoundError(package_name)
+            return installed[package_name]
+
+        with (
+            patch.object(audit, "version", side_effect=installed_version),
+            patch.object(
+                audit,
+                "direct_url_commit",
+                side_effect=audit.EXPECTED_VCS_COMMITS.__getitem__,
+            ),
+        ):
+            self.assertIn("missing package: hf-xet", audit.audit_versions())
+
     def test_rejects_vulnerable_sentencepiece_in_standalone_audit(self):
         installed = dict(audit.EXPECTED_EXACT_VERSIONS)
         installed["sentencepiece"] = "0.1.99"
