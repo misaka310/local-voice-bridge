@@ -16,6 +16,7 @@ EXPECTED_VCS_COMMITS = {
 EXPECTED_EXACT_VERSIONS = {
     "transformers": "5.5.0",
     "huggingface-hub": "1.23.0",
+    "sentencepiece": "0.2.1",
     "PySide6": "6.11.1",
     "torchcodec": "0.14.0",
 }
@@ -26,6 +27,7 @@ EXPECTED_VERSION_RANGES = {
 ALLOWED_PIP_CHECK_FRAGMENTS = (
     "descript-audiotools 0.7.2 has requirement protobuf<3.20",
     "irodori-tts 0.1.0 has requirement huggingface-hub<1.0",
+    "irodori-tts 0.1.0 has requirement sentencepiece<0.2",
     "irodori-tts 0.1.0 has requirement torchcodec<0.11.0",
     "irodori-tts 0.1.0 has requirement transformers<5",
 )
