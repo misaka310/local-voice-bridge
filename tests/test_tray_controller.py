@@ -213,6 +213,7 @@ class TrayControllerContractTests(unittest.TestCase):
         stt = (ROOT / "local-api" / "requirements-stt.txt").read_text(encoding="utf-8")
         bundle = (ROOT / "local-api" / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn("PySide6==", core)
+        self.assertIn("hf-xet==1.5.1", core)
         self.assertNotIn("faster-whisper", core)
         self.assertIn("faster-whisper", stt)
         self.assertIn("requirements-core.txt", bundle)

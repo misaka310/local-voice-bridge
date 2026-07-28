@@ -16,6 +16,7 @@ EXPECTED_VCS_COMMITS = {
 EXPECTED_EXACT_VERSIONS = {
     "transformers": "5.5.0",
     "huggingface-hub": "1.23.0",
+    "hf-xet": "1.5.1",
     "sentencepiece": "0.2.1",
     "PySide6": "6.11.1",
     "torchcodec": "0.14.0",
