@@ -25,6 +25,14 @@
   const COMPLETION_FAVICON_DATA_URL = `data:image/svg+xml,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   )}`;
+  const RESPONSE_GENERATING_SELECTOR = [
+    '[data-testid="stop-button"]',
+    'button[aria-label="Stop generating"]',
+    'button[aria-label="Stop streaming"]',
+    'button[aria-label="生成を停止"]',
+    'button[aria-label="応答を停止"]',
+    'button[aria-label="ストリーミングを停止"]',
+  ].join(',');
   const DEFAULT_PET_ID = 'placeholder';
   const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
 
@@ -70,12 +78,15 @@
   }
 
   async function isTabActivelyViewed() {
-    let tabActive = document.visibilityState === 'visible';
     try {
-      const attention = await runtimeMessage('tab-attention-state');
-      if (attention && typeof attention.active === 'boolean') tabActive = attention.active;
-    } catch (_error) {}
-    return tabActive && document.hasFocus();
+      const attention = await Promise.race([
+        runtimeMessage('tab-attention-state'),
+        new Promise((resolve) => window.setTimeout(() => resolve(null), 500)),
+      ]);
+      return Boolean(attention && attention.active && document.hasFocus());
+    } catch (_error) {
+      return false;
+    }
   }
 
   function persistCompletionMarkerState() {
@@ -126,23 +137,15 @@
     setCompletionMarkerPending(false);
   }
 
-  async function markResponseCompleted() {
-    if (await isTabActivelyViewed()) {
-      clearCompletionMarker();
-      return;
-    }
+  function markResponseCompleted() {
     setCompletionMarkerPending(true);
+    void isTabActivelyViewed().then((active) => {
+      if (active) clearCompletionMarker();
+    });
   }
 
   function isResponseGenerating() {
-    return Boolean(document.querySelector([
-      '[data-testid="stop-button"]',
-      'button[aria-label="Stop generating"]',
-      'button[aria-label="Stop streaming"]',
-      'button[aria-label="生成を停止"]',
-      'button[aria-label="応答を停止"]',
-      'button[aria-label="ストリーミングを停止"]',
-    ].join(',')));
+    return Boolean(document.querySelector(RESPONSE_GENERATING_SELECTOR));
   }
 
   function isTransientAssistantStatus(text) {
@@ -480,7 +483,7 @@
     });
     if (!preview) return;
     const stableMs = stableDelayForPreview(preview);
-    const requiredStableMs = item.generationObserved ? stableMs : Math.max(stableMs, 1800);
+    const requiredStableMs = item.generationObserved ? 0 : Math.max(stableMs, 1800);
     const remainingMs = requiredStableMs - (Date.now() - item.lastChangedAt);
     if (remainingMs > 0) {
       if (item.completionTimer) clearTimeout(item.completionTimer);
@@ -596,7 +599,21 @@
     processNode(nodes[nodes.length - 1]);
   }
 
-  function scheduleInspect() {
+  function removedNodeContainsGenerationControl(node) {
+    if (!node || node.nodeType !== 1) return false;
+    return node.matches(RESPONSE_GENERATING_SELECTOR)
+      || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));
+  }
+
+  function scheduleInspect(mutations = []) {
+    const generationEnded = mutations.some((mutation) => Array.from(mutation.removedNodes || [])
+      .some(removedNodeContainsGenerationControl));
+    if (generationEnded) {
+      if (inspectTimer) clearTimeout(inspectTimer);
+      inspectTimer = null;
+      inspectLatestAssistant();
+      return;
+    }
     if (inspectTimer) return;
     inspectTimer = setTimeout(() => {
       inspectTimer = null;

@@ -414,29 +414,58 @@ test('a completed reply marks its background tab until the user focuses it', asy
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
     await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
 
-    await foregroundPage.bringToFront();
-    await backgroundPage.evaluate(() => {
-      const stopButton = document.createElement('button');
-      stopButton.dataset.testid = 'stop-button';
-      stopButton.textContent = 'Stop generating';
-      document.body.append(stopButton);
-
-      const turn = document.createElement('article');
-      turn.dataset.testid = 'conversation-turn-assistant-completion-marker';
-      const reply = document.createElement('div');
-      reply.dataset.messageAuthorRole = 'assistant';
-      reply.dataset.messageId = 'completion-marker-reply';
-      reply.textContent = 'バックグラウンドタブで完了した返答です。';
-      turn.append(reply);
-      document.querySelector('#chat').append(turn);
+    const extensionId = new URL(worker.url()).host;
+    const controllerPage = await context.newPage();
+    await controllerPage.goto(`chrome-extension://${extensionId}/options.html`);
+    const { backgroundTabId, foregroundTabId } = await controllerPage.evaluate(async () => {
+      const [backgroundTab] = await chrome.tabs.query({ url: 'https://chatgpt.com/c/completion-marker-0' });
+      const [foregroundTab] = await chrome.tabs.query({ url: 'https://chatgpt.com/c/completion-marker-1' });
+      return {
+        backgroundTabId: backgroundTab && backgroundTab.id,
+        foregroundTabId: foregroundTab && foregroundTab.id,
+      };
     });
+    expect(backgroundTabId).toBeTruthy();
+    expect(foregroundTabId).toBeTruthy();
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.tabs.update(tabId, { active: true });
+    }, foregroundTabId);
+    await expect.poll(async () => controllerPage.evaluate(async () => {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return activeTab && activeTab.url;
+    }), { timeout: 10000 }).toContain('/completion-marker-1');
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const stopButton = document.createElement('button');
+          stopButton.dataset.testid = 'stop-button';
+          stopButton.textContent = 'Stop generating';
+          document.body.append(stopButton);
+
+          const turn = document.createElement('article');
+          turn.dataset.testid = 'conversation-turn-assistant-completion-marker';
+          const reply = document.createElement('div');
+          reply.dataset.messageAuthorRole = 'assistant';
+          reply.dataset.messageId = 'completion-marker-reply';
+          reply.textContent = 'バックグラウンドタブで完了した返答です。';
+          turn.append(reply);
+          document.querySelector('#chat').append(turn);
+        },
+      });
+    }, backgroundTabId);
 
     await waitForCounts(1, 1);
-    await backgroundPage.waitForTimeout(1200);
+    await wait(1200);
     expect(await backgroundPage.title()).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
 
-    await backgroundPage.evaluate(() => document.querySelector('[data-testid="stop-button"]')?.remove());
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => document.querySelector('[data-testid="stop-button"]')?.remove(),
+      });
+    }, backgroundTabId);
     await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('● Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
     expect(await foregroundPage.title()).toBe('Local Voice Demo Fixture');

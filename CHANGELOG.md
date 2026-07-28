@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed background-tab completion markers to use the live Chrome tab state and react immediately when response generation ends.
+- Isolated real Irodori E2E runs with per-test state files, authenticated shutdown, and ownership checks so tests cannot stop or overwrite the normal Local Voice Bridge runtime.
 - Split persistent settings, browser runtime state, durable ACK delivery, HTTP I/O, runtime readiness, and browser restore rules into focused modules, and added a CI architecture gate that blocks duplicated responsibilities and monolith growth.
 - Preserved the reference voice selected when each playback item was queued, distinguished an explicit `Ref=none` choice from a legacy empty value, rejected output when the local API could not prove that the selected reference voice was applied, and exposed the applied reference in playback status.
 - Made control commands and pending microphone transcript delivery durable across API and extension service-worker restarts, using per-consumer acknowledgements, stable delivery IDs, bounded local persistence, and duplicate-insertion protection.

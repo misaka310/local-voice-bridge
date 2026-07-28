@@ -963,8 +963,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const senderTabId = sender.tab ? sender.tab.id : null;
 
   if (message.type === 'tab-attention-state') {
-    sendResponse({ ok: true, payload: { active: Boolean(sender.tab && sender.tab.active) } });
-    return false;
+    if (!senderTabId) {
+      sendResponse({ ok: true, payload: { active: false } });
+      return false;
+    }
+    chrome.tabs.get(senderTabId)
+      .then((tab) => sendResponse({ ok: true, payload: { active: Boolean(tab && tab.active) } }))
+      .catch(() => sendResponse({ ok: true, payload: { active: false } }));
+    return true;
   }
 
   if (message.type === 'register-tab') {

@@ -12,6 +12,8 @@ const EXTENSION_DIR = path.join(os.tmpdir(), `local-voice-extension-real-${proce
 const EXTENSION_ARG = EXTENSION_DIR.replaceAll('\\', '/');
 const CONTROL_STATE = path.join(os.tmpdir(), `local-voice-control-state-${process.pid}-${Date.now()}.json`);
 const PET_STATE = path.join(os.tmpdir(), `local-voice-pet-state-${process.pid}-${Date.now()}.json`);
+const INSTANCE_STATE = path.join(os.tmpdir(), `local-voice-instance-state-${process.pid}-${Date.now()}.json`);
+const API_LEASE = path.join(os.tmpdir(), `local-voice-real-e2e-${API_PORT}.json`);
 const AUDIO_DIR = path.join(ROOT, 'local-api', 'runtime', 'audio');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let apiProcess = null;
@@ -27,18 +29,100 @@ function prepareTestExtension() {
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
 }
 
-async function healthy() {
+async function healthPayload() {
   try {
     const response = await fetch(`${API_BASE}/health`);
     const body = await response.json();
-    return response.ok && body.ok === true && body.runtime === 'irodori_direct';
+    return response.ok && body.ok === true && body.runtime === 'irodori_direct' ? body : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function healthy() {
+  return Boolean(await healthPayload());
+}
+
+function readApiLease() {
+  try {
+    return JSON.parse(fs.readFileSync(API_LEASE, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function readInstanceState(filename) {
+  try {
+    return JSON.parse(fs.readFileSync(filename, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function processAlive(pid) {
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) return false;
+  try {
+    process.kill(Number(pid), 0);
+    return true;
   } catch (_) {
     return false;
   }
 }
 
+async function removeFileWithRetries(filename) {
+  if (!filename) return;
+  let lastError = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      fs.rmSync(filename, { force: true });
+      return;
+    } catch (error) {
+      if (!error || !['EBUSY', 'EPERM'].includes(error.code)) throw error;
+      lastError = error;
+      await wait(100);
+    }
+  }
+  throw lastError;
+}
+
+function matchingApiLease(lease, health, instanceState = readInstanceState(lease && lease.instanceState)) {
+  return Boolean(
+    lease
+    && health
+    && instanceState
+    && lease.root === ROOT
+    && Number(lease.port) === API_PORT
+    && String(lease.instanceId || '') === String(health.instanceId || '')
+    && String(instanceState.instanceId || '') === String(health.instanceId || '')
+    && Number(lease.pid) === Number(instanceState.pid)
+    && String(instanceState.shutdownToken || '')
+    && processAlive(Number(instanceState.pid)),
+  );
+}
+
+function writeApiLease(instanceState, health) {
+  fs.writeFileSync(API_LEASE, JSON.stringify({
+    root: ROOT,
+    port: API_PORT,
+    pid: Number(instanceState.pid),
+    instanceId: String(health.instanceId || ''),
+    instanceState: INSTANCE_STATE,
+    controlState: CONTROL_STATE,
+    petState: PET_STATE,
+  }), 'utf8');
+}
+
 async function startApi() {
-  if (await healthy()) throw new Error(`test port ${API_PORT} is already in use`);
+  const existingHealth = await healthPayload();
+  if (existingHealth) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const lease = readApiLease();
+      if (matchingApiLease(lease, existingHealth)) return null;
+      await wait(100);
+    }
+    throw new Error(`test port ${API_PORT} is already in use by an unrelated API`);
+  }
+  fs.rmSync(API_LEASE, { force: true });
   const python = path.join(ROOT, 'local-api', '.venv', 'Scripts', 'python.exe');
   if (!fs.existsSync(python)) throw new Error(`missing venv python: ${python}`);
   const proc = spawn(python, ['server.py'], {
@@ -49,6 +133,7 @@ async function startApi() {
       LOCAL_VOICE_PUBLIC_BASE_URL: API_BASE,
       LOCAL_VOICE_CONTROL_STATE: CONTROL_STATE,
       LOCAL_VOICE_DESKTOP_PET_SETTINGS: PET_STATE,
+      LOCAL_VOICE_INSTANCE_STATE: INSTANCE_STATE,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -56,12 +141,54 @@ async function startApi() {
   proc.stderr.on('data', (data) => process.stderr.write(`[local-api] ${data}`));
   const until = Date.now() + 45000;
   while (Date.now() < until) {
-    if (await healthy()) return proc;
+    const health = await healthPayload();
+    if (health) {
+      const instanceState = readInstanceState(INSTANCE_STATE);
+      if (instanceState
+        && String(instanceState.instanceId || '') === String(health.instanceId || '')
+        && String(instanceState.shutdownToken || '')
+        && processAlive(Number(instanceState.pid))) {
+        writeApiLease(instanceState, health);
+        return proc;
+      }
+    }
     if (proc.exitCode !== null) break;
     await wait(500);
   }
   if (proc.exitCode === null) proc.kill();
+  fs.rmSync(API_LEASE, { force: true });
   throw new Error('local API did not become healthy');
+}
+
+async function stopOwnedApi() {
+  const lease = readApiLease();
+  const health = await healthPayload();
+  const instanceState = readInstanceState(lease && lease.instanceState);
+  if (matchingApiLease(lease, health, instanceState)) {
+    const response = await fetch(`${API_BASE}/v1/admin/shutdown`, {
+      method: 'POST',
+      headers: { 'X-Local-Voice-Token': String(instanceState.shutdownToken) },
+    });
+    if (!response.ok) throw new Error(`owned local API refused shutdown: HTTP ${response.status}`);
+    const until = Date.now() + 15000;
+    while (Date.now() < until && await healthy()) await wait(100);
+    if (await healthy()) {
+      if (apiProcess && apiProcess.exitCode === null) apiProcess.kill();
+      throw new Error(`owned local API did not stop on port ${API_PORT}`);
+    }
+  }
+  for (const filename of new Set([
+    CONTROL_STATE,
+    PET_STATE,
+    INSTANCE_STATE,
+    lease && lease.instanceState,
+    lease && lease.controlState,
+    lease && lease.petState,
+  ])) {
+    await removeFileWithRetries(filename);
+  }
+  await removeFileWithRetries(API_LEASE);
+  apiProcess = null;
 }
 
 function listAudioFiles() {
@@ -173,17 +300,21 @@ function multiChunkHtml() {
   return singleReplyHtml(text, 'multi-reply');
 }
 
-test.beforeAll(async () => {
+test.beforeAll(() => {
   prepareTestExtension();
   initialAudioFiles = listAudioFiles();
+});
+
+test.beforeEach(async () => {
   apiProcess = await startApi();
 });
 
-test.afterAll(async () => {
-  if (apiProcess && apiProcess.exitCode === null) apiProcess.kill();
+test.afterEach(async () => {
+  await stopOwnedApi();
+});
+
+test.afterAll(() => {
   fs.rmSync(EXTENSION_DIR, { recursive: true, force: true });
-  fs.rmSync(CONTROL_STATE, { force: true });
-  fs.rmSync(PET_STATE, { force: true });
   for (const name of listAudioFiles()) {
     if (!initialAudioFiles.has(name)) fs.rmSync(path.join(AUDIO_DIR, name), { force: true });
   }
@@ -205,10 +336,13 @@ test('external Auto generates, fetches, and finishes one real Irodori reply', as
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: '' });
     await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
-    const before = listAudioFiles().size;
+    const before = listAudioFiles();
     await page.locator('#add').click();
     await waitForPlayed(message.slice(0, 20));
-    await expect.poll(() => listAudioFiles().size, { timeout: 180000 }).toBeGreaterThan(before);
+    await expect.poll(
+      () => Array.from(listAudioFiles()).filter((name) => !before.has(name)).length,
+      { timeout: 180000 },
+    ).toBeGreaterThanOrEqual(1);
   } finally {
     await context.close().catch(() => {});
     fs.rmSync(profile, { recursive: true, force: true });
@@ -287,11 +421,14 @@ test('two ChatGPT tabs both feed the same real Irodori Auto queue', async () => 
     await waitForControlReady(2);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: '' });
     await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
-    const before = listAudioFiles().size;
+    const before = listAudioFiles();
     await pages[0].locator('#add').click();
     await pages[1].locator('#add').click();
     await waitForPlayed(secondText.slice(0, 18));
-    await expect.poll(() => listAudioFiles().size, { timeout: 300000 }).toBeGreaterThanOrEqual(before + 2);
+    await expect.poll(
+      () => Array.from(listAudioFiles()).filter((name) => !before.has(name)).length,
+      { timeout: 300000 },
+    ).toBeGreaterThanOrEqual(2);
     expect((await controlSnapshot()).extension.tabsCount).toBe(2);
   } finally {
     await context.close().catch(() => {});

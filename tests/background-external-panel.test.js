@@ -131,6 +131,12 @@ function createHarness({
         const source = openTabs.length ? openTabs : Array.from(registeredTabs.values());
         return source.map((tab) => ({ ...tab }));
       },
+      async get(tabId) {
+        const source = openTabs.length ? openTabs : Array.from(registeredTabs.values());
+        const tab = source.find((item) => Number(item.id) === Number(tabId));
+        if (!tab) throw new Error(`No tab with id: ${tabId}`);
+        return { ...tab };
+      },
       async sendMessage(tabId, message) {
         sentMessages.push({ tabId, message });
         if (message.type === 'bridge-reconnect'
@@ -329,6 +335,21 @@ function createHarness({
     sendAsync,
   };
 }
+
+test('tab attention uses the live Chrome tab state instead of a stale sender snapshot', async () => {
+  const harness = createHarness({
+    openTabs: [{
+      id: 101,
+      title: 'Tab A',
+      url: 'https://chatgpt.com/c/101',
+      active: false,
+    }],
+  });
+
+  const responseValue = await harness.sendAsync({ type: 'tab-attention-state' }, 101);
+  assert.equal(responseValue.ok, true);
+  assert.equal(responseValue.payload.active, false);
+});
 
 test('recovering the local API asks every already-open ChatGPT tab to reconnect', async () => {
   const harness = createHarness({
