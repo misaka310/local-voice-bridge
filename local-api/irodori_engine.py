@@ -190,6 +190,13 @@ def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
     return True
 
 
+def _sampling_quality(cfg: dict[str, Any], *, use_reference: bool) -> tuple[int, float]:
+    default_steps = int(cfg.get("numSteps", 16))
+    steps = int(cfg.get("referenceNumSteps", 32)) if use_reference else default_steps
+    speaker_scale = float(cfg.get("cfgScaleSpeaker", 6.0 if use_reference else 5.0))
+    return steps, speaker_scale
+
+
 def synthesize_irodori_direct(
     *,
     raw_config: dict[str, Any],
@@ -211,12 +218,13 @@ def synthesize_irodori_direct(
     caption = str(voice_prompt or cfg.get("caption") or "").strip() or None
     runtime = _get_runtime(model_cfg=cfg)
     use_speaker = _require_reference_condition(runtime, ref_wav)
+    num_steps, cfg_scale_speaker_requested = _sampling_quality(cfg, use_reference=use_speaker)
     use_caption = bool(runtime.model_cfg.use_caption_condition and caption)
     cfg_scale_text, cfg_scale_caption, cfg_scale_speaker, _messages = resolve_cfg_scales(
         cfg_guidance_mode=str(cfg.get("cfgGuidanceMode") or "independent"),
         cfg_scale_text=float(cfg.get("cfgScaleText", 3.0)),
         cfg_scale_caption=float(cfg.get("cfgScaleCaption", 3.0)),
-        cfg_scale_speaker=float(cfg.get("cfgScaleSpeaker", 5.0)),
+        cfg_scale_speaker=cfg_scale_speaker_requested,
         cfg_scale=None,
         use_caption_condition=use_caption,
         use_speaker_condition=use_speaker,
@@ -226,7 +234,7 @@ def synthesize_irodori_direct(
         caption=caption,
         ref_wav=ref_wav,
         no_ref=not bool(ref_wav),
-        num_steps=int(cfg.get("numSteps", 16)),
+        num_steps=num_steps,
         t_schedule_mode=str(cfg.get("tScheduleMode") or "sway"),
         sway_coeff=float(cfg.get("swayCoeff", -1.0)),
         duration_scale=float(cfg.get("durationScale", 1.0)),

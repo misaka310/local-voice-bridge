@@ -565,7 +565,7 @@ async function reconnectChatGptTab(tab) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['prompt-input-core.js', 'delivery-id-core.js', 'content.js'],
+        files: ['prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
       });
       const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
       return Boolean(response && response.ok === true);

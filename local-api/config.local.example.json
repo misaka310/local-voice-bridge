@@ -1,6 +1,8 @@
 {
   "irodori": {
     "requireCuda": true,
-    "numSteps": 16
+    "numSteps": 16,
+    "referenceNumSteps": 32,
+    "cfgScaleSpeaker": 6.0
   }
 }

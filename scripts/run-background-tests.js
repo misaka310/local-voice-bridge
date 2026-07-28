@@ -36,6 +36,7 @@ if (status === 0) {
     '--test',
     'tests/background-reference-queue.test.js',
     'tests/background-external-panel.test.js',
+    'tests/content-text-core.test.js',
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
     'tests/prompt-input-core.test.js',

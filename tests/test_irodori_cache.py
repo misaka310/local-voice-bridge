@@ -85,5 +85,15 @@ class IrodoriCudaCacheTests(unittest.TestCase):
         self.assertFalse(engine._require_reference_condition(runtime, None))
 
 
+    def test_reference_requests_use_the_quality_sampling_profile(self):
+        self.assertEqual(engine._sampling_quality({}, use_reference=False), (16, 5.0))
+        self.assertEqual(engine._sampling_quality({}, use_reference=True), (32, 6.0))
+
+    def test_reference_sampling_profile_can_be_overridden(self):
+        config = {"numSteps": 20, "referenceNumSteps": 40, "cfgScaleSpeaker": 7.0}
+        self.assertEqual(engine._sampling_quality(config, use_reference=False), (20, 7.0))
+        self.assertEqual(engine._sampling_quality(config, use_reference=True), (40, 7.0))
+
+
 if __name__ == "__main__":
     unittest.main()

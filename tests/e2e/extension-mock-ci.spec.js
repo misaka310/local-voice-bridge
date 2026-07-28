@@ -352,6 +352,55 @@ test('Next uses the completed streaming reply instead of the short Auto preview 
   }
 });
 
+test('Auto does not finalize a one-character streaming fragment and repairs the completed word', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/one-character-stream', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+
+    await page.evaluate(() => {
+      const stopButton = document.createElement('button');
+      stopButton.dataset.testid = 'stop-button';
+      stopButton.textContent = 'Stop generating';
+      document.body.append(stopButton);
+      const reply = document.createElement('div');
+      reply.dataset.messageAuthorRole = 'assistant';
+      reply.dataset.messageId = 'one-character-stream-reply';
+      reply.textContent = '完';
+      document.querySelector('#chat').append(reply);
+    });
+    await page.waitForTimeout(1800);
+    expect((await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && event.body.text === '完')).toBe(false);
+
+    await page.evaluate(() => {
+      document.querySelector('[data-message-id="one-character-stream-reply"]').textContent =
+        '完\n了状態 最初から再点検しました。';
+    });
+    await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && event.body.text === '完了状態 最初から再点検しました。'), { timeout: 30000 }).toBe(true);
+  } finally {
+    await context.close().catch(() => {});
+    if (api) api.kill();
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
 test('all ChatGPT tabs continue to enqueue into one Auto queue without an in-page panel', async () => {
   test.setTimeout(90000);
   const api = await startMock();
