@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Allowed the documented Irodori `sentencepiece<0.2` metadata conflict while still enforcing the security-fixed `sentencepiece==0.2.1` runtime baseline.
 - Fixed background-tab completion markers to use the live Chrome tab state and react immediately when response generation ends.
 - Isolated real Irodori E2E runs with per-test state files, authenticated shutdown, and ownership checks so tests cannot stop or overwrite the normal Local Voice Bridge runtime.
 - Split persistent settings, browser runtime state, durable ACK delivery, HTTP I/O, runtime readiness, and browser restore rules into focused modules, and added a CI architecture gate that blocks duplicated responsibilities and monolith growth.
