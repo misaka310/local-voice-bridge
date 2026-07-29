@@ -28,13 +28,17 @@ def runtime_snapshot(runtime: Any | None) -> dict[str, Any]:
 def structured_readiness(extension: dict[str, Any] | None, runtime: dict[str, Any]) -> dict[str, Any]:
     extension_state = extension if isinstance(extension, dict) else {}
     connected = bool(extension_state.get("connected"))
+    update_required = bool(extension_state.get("updateRequired"))
     try:
         tabs_count = max(0, int(extension_state.get("tabsCount") or 0))
     except (TypeError, ValueError):
         tabs_count = 0
     dependencies = runtime.get("dependencies") if isinstance(runtime.get("dependencies"), dict) else {}
     dependencies_ready = bool(dependencies) and all(bool(value) for value in dependencies.values())
-    browser_state = "ready" if connected and tabs_count > 0 else "waiting"
+    if update_required:
+        browser_state = "reload_required"
+    else:
+        browser_state = "ready" if connected and tabs_count > 0 else "waiting"
     return {
         "process": "ready",
         "dependencies": "ready" if dependencies_ready else "failed",

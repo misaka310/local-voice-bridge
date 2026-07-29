@@ -495,6 +495,39 @@ class LoopbackConfigTests(unittest.TestCase):
                 if original_store is not None:
                     server.CONTROL_STATE = original_store
 
+    def test_health_marks_outdated_connected_extension_reload_required(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "local-runtime.wav"
+            audio_path.write_bytes(b"RIFF")
+            runtime = FakeVoiceRuntime(audio_path)
+            original_store = server.CONTROL_STATE
+            original_extension_package_version = server.extension_package_version
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            server.CONTROL_STATE.update_extension_state(
+                {"tabsCount": 2, "loadedVersion": "0.1.0"}
+            )
+            server.extension_package_version = lambda: "0.2.0"
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            setattr(httpd, "voice_runtime", runtime)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{httpd.server_port}/health", timeout=5
+                ) as response:
+                    health = json.loads(response.read().decode("utf-8"))
+
+                self.assertFalse(health["readiness"]["ready"])
+                self.assertEqual(
+                    health["readiness"]["browserExtension"], "reload_required"
+                )
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                server.CONTROL_STATE = original_store
+                server.extension_package_version = original_extension_package_version
+
     def test_local_voice_runtime_handles_speak_replay_stop_and_health(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             audio_path = Path(temp_dir) / "local-runtime.wav"

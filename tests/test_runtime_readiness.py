@@ -40,6 +40,14 @@ class RuntimeReadinessTests(unittest.TestCase):
         self.assertTrue(ready["ready"])
         self.assertEqual(ready["dependencies"], "ready")
 
+    def test_outdated_connected_extension_requires_reload_and_is_not_ready(self) -> None:
+        runtime = runtime_snapshot(FakeRuntime())
+        result = structured_readiness(
+            {"connected": True, "tabsCount": 2, "updateRequired": True}, runtime
+        )
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["browserExtension"], "reload_required")
+
     def test_enrichment_keeps_control_payload_and_adds_structured_runtime(self) -> None:
         runtime = runtime_snapshot(FakeRuntime())
         result = enrich_snapshot(
