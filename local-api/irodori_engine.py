@@ -181,15 +181,6 @@ def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
     return True
 
 
-def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
-    if not ref_wav:
-        return False
-    model_cfg = getattr(runtime, "model_cfg", None)
-    if not bool(getattr(model_cfg, "use_speaker_condition_resolved", False)):
-        raise IrodoriError("the active Irodori runtime cannot apply the selected reference voice")
-    return True
-
-
 def _sampling_quality(cfg: dict[str, Any], *, use_reference: bool) -> tuple[int, float]:
     default_steps = int(cfg.get("numSteps", 16))
     steps = int(cfg.get("referenceNumSteps", 32)) if use_reference else default_steps

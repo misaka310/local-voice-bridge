@@ -473,7 +473,8 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 runtime = voice_runtime_snapshot(self)
                 payload["voiceRuntime"] = runtime
-                payload["readiness"] = structured_readiness(CONTROL_STATE.snapshot().get("extension"), runtime)
+                control_snapshot = enrich_control_snapshot(CONTROL_STATE.snapshot())
+                payload["readiness"] = structured_readiness(control_snapshot.get("extension"), runtime)
                 json_response(self, HTTPStatus.OK, payload)
                 return
             if parsed.path == "/v1/models":
