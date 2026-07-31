@@ -17,6 +17,7 @@ jobs:
     name: public-readiness
     if: github.event_name == 'workflow_dispatch' || github.event.repository.private == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out target repository
         uses: actions/checkout@v4
@@ -33,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: misaka310/repo-launch-doctor
-          ref: b5d95da71ddc5733432dda4f78f4ae532a1685aa
+          ref: 976cc69ffdc9b2df446840f5afdfcfe9197151f8
           path: doctor
 
       - name: Scan current repository state
