@@ -306,6 +306,52 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
   }
 });
 
+test('inline code text is preserved before Auto finalizes a streaming preview', async () => {
+  test.setTimeout(60000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/inline-code-stream', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+
+    await page.evaluate(() => {
+      const reply = document.createElement('div');
+      reply.dataset.messageAuthorRole = 'assistant';
+      reply.dataset.messageId = 'inline-code-stream-reply';
+      const block = document.createElement('pre');
+      block.textContent = 'BLOCK-SAMPLE';
+      reply.append(block, document.createTextNode('206は「'));
+      document.querySelector('#chat').append(reply);
+      window.setTimeout(() => {
+        const code = document.createElement('code');
+        code.textContent = 'Partial Content（部分コンテンツ）」で、動画を一部分だけ正常に返したという成功ステータスです。';
+        reply.append(code);
+      }, 250);
+    });
+
+    await waitForCounts(1, 1);
+    const firstPost = (await apiEvents()).find((event) => event.method === 'POST' && event.path === '/v1/speak');
+    expect(firstPost.body.text).toContain('Partial Content（部分コンテンツ）');
+    expect(firstPost.body.text).not.toContain('BLOCK-SAMPLE');
+    expect(firstPost.body.text).not.toBe('206は「');
+  } finally {
+    await context.close().catch(() => {});
+    if (api) api.kill();
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
 test('Next uses the completed streaming reply instead of the short Auto preview snapshot', async () => {
   test.setTimeout(90000);
   const api = await startMock();

@@ -387,7 +387,7 @@
 
   function extractAssistantText(node) {
     const clone = node.cloneNode(true);
-    clone.querySelectorAll('pre, code, button, svg, menu, nav, script, style, textarea, input, select').forEach((item) => item.remove());
+    clone.querySelectorAll('pre, button, svg, menu, nav, script, style, textarea, input, select').forEach((item) => item.remove());
     const text = normalizeText(clone.innerText || clone.textContent || '');
     return isTransientAssistantStatus(text) ? '' : text;
   }
