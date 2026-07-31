@@ -327,7 +327,8 @@
 
   function shouldSendNow(preview, now, item) {
     if (!preview.length) return false;
-    if (isResponseGenerating() && preview.length <= 2 && !textCore.hasTerminalPunctuation(preview)) return false;
+    const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
+    if (isResponseGenerating() && preview.length < minChars && !textCore.hasTerminalPunctuation(preview)) return false;
     return now - item.lastChangedAt >= stableDelayForPreview(preview);
   }
 
