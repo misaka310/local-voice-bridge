@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a safe Windows-panel action that acknowledges a pending extension update before calling `chrome.runtime.reload()`, preventing reload loops and keeping the first unsupported upgrade as an explicit one-time manual step.
+
 - Pinned the required `hf-xet==1.5.1` runtime dependency so strict startup preflight succeeds after a clean environment setup.
 - Allowed the documented Irodori `sentencepiece<0.2` metadata conflict while still enforcing the security-fixed `sentencepiece==0.2.1` runtime baseline.
 - Fixed background-tab completion markers to use the live Chrome tab state and react immediately when response generation ends.

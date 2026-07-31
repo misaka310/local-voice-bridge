@@ -32,6 +32,7 @@ DEFAULT_EXTENSION_STATE: dict[str, Any] = {
     "replayAvailable": False,
     "tabsCount": 0,
     "loadedVersion": "",
+    "supportsExtensionReload": False,
     "updatedAt": 0.0,
 }
 
@@ -134,5 +135,6 @@ def normalize_extension_state(value: Any, *, now: float) -> dict[str, Any]:
         "replayAvailable": bool(raw.get("replayAvailable")),
         "tabsCount": tabs_count,
         "loadedVersion": str(raw.get("loadedVersion") or "").strip()[:32],
+        "supportsExtensionReload": bool(raw.get("supportsExtensionReload")),
         "updatedAt": float(now),
     }

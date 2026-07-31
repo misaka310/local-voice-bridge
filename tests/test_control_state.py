@@ -65,13 +65,28 @@ class ControlStateStoreTests(unittest.TestCase):
 
             first = store.enqueue_command("next")
             second = store.enqueue_command("replay")
+            third = store.enqueue_command("reload_extension")
 
             self.assertEqual(first["id"], 1)
             self.assertEqual(second["id"], 2)
-            self.assertEqual([item["command"] for item in store.poll_commands(0)], ["next", "replay"])
-            self.assertEqual([item["command"] for item in store.poll_commands(1)], ["replay"])
-            self.assertEqual(store.poll_commands(2), [])
-            self.assertEqual([item["command"] for item in store.claim_commands(0)], ["next", "replay"])
+            self.assertEqual(third["id"], 3)
+            self.assertEqual(
+                [item["command"] for item in store.poll_commands(0)],
+                ["next", "replay", "reload_extension"],
+            )
+            self.assertEqual(
+                [item["command"] for item in store.poll_commands(1)],
+                ["replay", "reload_extension"],
+            )
+            self.assertEqual(
+                [item["command"] for item in store.poll_commands(2)],
+                ["reload_extension"],
+            )
+            self.assertEqual(store.poll_commands(3), [])
+            self.assertEqual(
+                [item["command"] for item in store.claim_commands(0)],
+                ["next", "replay", "reload_extension"],
+            )
             self.assertEqual(store.claim_commands(0), [])
 
     def test_extension_snapshot_becomes_disconnected_when_stale(self) -> None:
@@ -88,6 +103,7 @@ class ControlStateStoreTests(unittest.TestCase):
                     "replayAvailable": True,
                     "tabsCount": 3,
                     "loadedVersion": "0.2.0",
+                    "supportsExtensionReload": True,
                 },
                 now=10.0,
             )
@@ -97,6 +113,7 @@ class ControlStateStoreTests(unittest.TestCase):
             self.assertEqual(connected["currentText"], "全タブの返答です。")
             self.assertEqual(connected["tabsCount"], 3)
             self.assertEqual(connected["loadedVersion"], "0.2.0")
+            self.assertTrue(connected["supportsExtensionReload"])
 
             stale = store.snapshot(now=14.1)["extension"]
             self.assertFalse(stale["connected"])

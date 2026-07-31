@@ -86,6 +86,14 @@
     async function handleCommand(item, effectiveSettings, consumerId) {
       const commandId = Number(item && item.id || 0);
       if (!commandId || commandId <= lastCommandId) return;
+      const command = String(item.command || '');
+      if (command === 'reload_extension') {
+        await deps.flushBrowserRuntimeState();
+        await acknowledge(effectiveSettings, consumerId, { commandId });
+        lastCommandId = commandId;
+        chrome.runtime.reload();
+        return;
+      }
       const referenceVoice = settingsCore.normalizeStoredReference(effectiveSettings.referenceVoice);
       const result = deps.executeUiCommand(
         String(item.command || ''),

@@ -164,6 +164,7 @@ class LocalVoiceControlPanel(QWidget):
         self._shutting_down = False
         self._poll_when_visible = bool(start_polling)
         self._current_text_full = "No assistant response yet"
+        self._reload_extension_requested = False
         self._drag_offset: QPoint | None = None
 
         self.setObjectName("local-voice-control-panel")
@@ -218,6 +219,13 @@ class LocalVoiceControlPanel(QWidget):
         self.current_text_label.setWordWrap(False)
         self.current_text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(self.current_text_label)
+
+        self.reload_extension_button = QPushButton("拡張機能を再読み込み", card)
+        self.reload_extension_button.setObjectName("panel-reload-extension")
+        self.reload_extension_button.setMinimumHeight(30)
+        self.reload_extension_button.clicked.connect(self._reload_extension)
+        self.reload_extension_button.hide()
+        card_layout.addWidget(self.reload_extension_button)
 
         self.queue_label = QLabel("Queue 0 · 0 tabs", card)
         self.queue_label.setObjectName("panel-queue")
@@ -314,6 +322,9 @@ class LocalVoiceControlPanel(QWidget):
         self.status_label.setText("Voice Bridge starting")
         self._set_current_text("Waiting for local API", tooltip="")
         self.queue_label.setText("Queue 0 · 0 tabs")
+        self._reload_extension_requested = False
+        self.reload_extension_button.hide()
+        self.reload_extension_button.setEnabled(False)
         for button in (self.next_button, self.regen_button, self.replay_button):
             button.setEnabled(False)
 
@@ -347,6 +358,13 @@ class LocalVoiceControlPanel(QWidget):
             self._updating_controls = False
 
         connected = bool(extension.get("connected"))
+        update_required = bool(extension.get("updateRequired"))
+        reload_supported = bool(extension.get("supportsExtensionReload"))
+        if not update_required:
+            self._reload_extension_requested = False
+        show_reload_button = connected and update_required and reload_supported
+        self.reload_extension_button.setVisible(show_reload_button)
+        self.reload_extension_button.setEnabled(show_reload_button and not self._reload_extension_requested)
         model_state = str(readiness.get("deviceOrModel") or voice_runtime.get("readiness") or "").strip().lower()
         repair_required = bool(readiness.get("repairRequired") or voice_runtime.get("repairRequired"))
         runtime_error = str(voice_runtime.get("error") or "").strip()
@@ -425,13 +443,17 @@ class LocalVoiceControlPanel(QWidget):
         self.regen_button.setEnabled(controls_available)
         self.replay_button.setEnabled(controls_available and not runtime_loading and replay_available)
 
-        if bool(extension.get("updateRequired")):
+        if update_required:
             loaded = str(extension.get("loadedVersion") or "旧版")
             expected = str(extension.get("expectedVersion") or "最新版")
             self.status_label.setText("拡張機能の再読み込みが必要")
             self._set_current_text(
-                f"Chrome / Braveの拡張機能画面でLocal Voice Bridgeを再読み込みしてください（{loaded} → {expected}）"
+                f"{'下のボタンでLocal Voice Bridgeを再読み込みできます' if reload_supported else 'この更新だけはChrome / Braveの拡張機能画面で手動再読み込みしてください'}（{loaded} → {expected}）"
             )
+
+        if self._reload_extension_requested and show_reload_button:
+            self.status_label.setText("拡張機能を再読み込みしています")
+            self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
 
     def _set_current_text(self, text: str, *, tooltip: str | None = None) -> None:
         self._current_text_full = str(text or "")
@@ -509,6 +531,21 @@ class LocalVoiceControlPanel(QWidget):
             self.client.update_settings(payload)
         except (OSError, RuntimeError, ValueError, urllib.error.URLError):
             self.status_label.setText("Control update failed")
+
+    def _reload_extension(self) -> None:
+        if self._reload_extension_requested:
+            return
+        self._reload_extension_requested = True
+        self.reload_extension_button.setEnabled(False)
+        try:
+            self.client.send_command("reload_extension")
+        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
+            self._reload_extension_requested = False
+            self.reload_extension_button.setEnabled(True)
+            self.status_label.setText("拡張機能の再読み込み要求に失敗しました")
+            return
+        self.status_label.setText("拡張機能を再読み込みしています")
+        self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
 
     def _send_command(self, command: str) -> None:
         try:
