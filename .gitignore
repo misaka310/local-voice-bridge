@@ -110,10 +110,12 @@ vm-*.png
 .ai-bridge/
 .ai-review/
 .codex/
+/AGENTS.md
 
 # removed optional native/background launch helpers
 # Keep local leftovers out of the public tree.
 tools/native-host/
+/start-voice-bridge.vbs
 
 # pet asset working files
 codex_prompt_*.txt
