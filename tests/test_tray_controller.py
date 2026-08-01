@@ -147,15 +147,12 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn('if ($advancedCheck.Checked)', setup_gui)
         self.assertIn("失敗内容をコピー", setup_gui)
 
-    def test_legacy_vbs_only_forwards_to_the_exe(self) -> None:
-        launcher = (ROOT / "start-voice-bridge.vbs").read_text(encoding="utf-8")
-        self.assertIn("LocalVoiceBridge.exe", launcher)
-        self.assertNotIn("pythonw.exe", launcher)
-        self.assertNotIn("PySide6", launcher)
+    def test_public_tree_has_no_vbs_launcher(self) -> None:
+        self.assertFalse((ROOT / "start-voice-bridge.vbs").exists())
 
-    def test_launcher_is_ascii_safe_for_windows_script_host(self) -> None:
-        launcher = (ROOT / "start-voice-bridge.vbs").read_text(encoding="utf-8")
-        launcher.encode("ascii")
+    def test_public_contributor_contract_replaces_agent_handoff(self) -> None:
+        self.assertTrue((ROOT / "CONTRIBUTING.md").is_file())
+        self.assertFalse((ROOT / "AGENTS.md").exists())
 
     def test_windows_directories_open_with_explicit_explorer_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
