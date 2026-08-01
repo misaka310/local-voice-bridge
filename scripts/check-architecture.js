@@ -63,9 +63,9 @@ capLines('extension/background-runtime-core.js', 190);
 capLines('extension/background-control-sync.js', 330);
 
 requireText(
-  'AGENTS.md',
-  '## Architecture boundaries for AI changes',
-  'AI agents must receive the repository architecture and verification contract',
+  'CONTRIBUTING.md',
+  '## Architecture boundaries',
+  'contributors must receive the public architecture and verification contract',
 );
 requireText(
   'local-api/control_state.py',
