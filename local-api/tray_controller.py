@@ -43,6 +43,7 @@ from conversation_controller import GlobalRightCtrlHook, VoiceConversationContro
 from desktop_pet import DesktopPetWindow  # noqa: E402
 from desktop_pet_config import DesktopPetSettingsStore  # noqa: E402
 from maintenance import clear_generated_audio, format_bytes  # noqa: E402
+from runtime_events import RuntimeEventLogger, default_event_log_path  # noqa: E402
 
 VENV_SCRIPTS = LOCAL_API_DIR / ".venv" / "Scripts"
 SERVER_PYTHON = VENV_SCRIPTS / "python.exe"
@@ -723,7 +724,10 @@ class VoiceBridgeQtRuntime(QObject):
             state_path=panel_state_path,
             start_polling=start_panel_polling,
         )
-        self.voice_conversation = conversation_controller or VoiceConversationController(self.control_panel_client)
+        self.voice_conversation = conversation_controller or VoiceConversationController(
+            self.control_panel_client,
+            event_logger=RuntimeEventLogger(default_event_log_path(APP_ROOT)),
+        )
         self.right_ctrl_hook = keyboard_hook or GlobalRightCtrlHook(self.voice_conversation.handle_key_event)
         self.conversation_settings_timer = QTimer(self)
         self.conversation_settings_timer.setInterval(500)

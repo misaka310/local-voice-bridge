@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
+import hashlib
 import json
 import math
 import os
@@ -15,6 +16,10 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 import numpy as np
+
+from gpu_arbiter import GpuArbiter
+from installation_identity import installation_id
+from runtime_events import NullRuntimeEventLogger
 
 VK_LCONTROL = 0xA2
 VK_RCONTROL = 0xA3
@@ -168,9 +173,10 @@ class SoundDeviceRecorder:
 
 
 class FasterWhisperTranscriber:
-    def __init__(self, *, download_root: Path) -> None:
+    def __init__(self, *, download_root: Path, allow_cpu_diagnostic: bool = False) -> None:
         self.download_root = Path(download_root)
         self.download_root.mkdir(parents=True, exist_ok=True)
+        self.allow_cpu_diagnostic = bool(allow_cpu_diagnostic)
         self._models: dict[tuple[str, str, str], Any] = {}
         self._lock = threading.RLock()
 
@@ -191,18 +197,20 @@ class FasterWhisperTranscriber:
             return model
 
     def prepare(self, model_name: str) -> str:
-        cuda_error: Exception | None = None
         try:
             self._model(model_name, "cuda", "float16")
             return "cuda"
-        except Exception as exc:
-            cuda_error = exc
+        except Exception as cuda_error:
+            if not self.allow_cpu_diagnostic:
+                raise RuntimeError(
+                    f"faster-whisper CUDAモデルを準備できませんでした。CPUへの自動フォールバックは無効です: {cuda_error}"
+                ) from cuda_error
         try:
             self._model(model_name, "cpu", "int8")
             return "cpu"
         except Exception as cpu_error:
             raise RuntimeError(
-                f"faster-whisperモデルをCUDAでもCPUでも準備できませんでした。CUDA: {cuda_error}; CPU: {cpu_error}"
+                f"診断用faster-whisper CPUモデルも準備できませんでした: {cpu_error}"
             ) from cpu_error
 
     @staticmethod
@@ -217,16 +225,18 @@ class FasterWhisperTranscriber:
         return "".join(str(segment.text or "") for segment in segments).strip()
 
     def transcribe(self, audio: np.ndarray, model_name: str) -> tuple[str, str]:
-        cuda_error: Exception | None = None
         try:
             return self._run(self._model(model_name, "cuda", "float16"), audio), "cuda"
-        except Exception as exc:  # CUDA未対応・VRAM不足・DLL不整合をCPUへフォールバックする。
-            cuda_error = exc
+        except Exception as cuda_error:
+            if not self.allow_cpu_diagnostic:
+                raise RuntimeError(
+                    f"faster-whisper CUDA推論に失敗しました。CPUへの自動フォールバックは無効です: {cuda_error}"
+                ) from cuda_error
         try:
             return self._run(self._model(model_name, "cpu", "int8"), audio), "cpu"
         except Exception as cpu_error:
             raise RuntimeError(
-                f"faster-whisperをCUDAでもCPUでも実行できませんでした。CUDA: {cuda_error}; CPU: {cpu_error}"
+                f"診断用faster-whisper CPU推論にも失敗しました: {cpu_error}"
             ) from cpu_error
 
 
@@ -240,6 +250,8 @@ class VoiceConversationController:
         *,
         recorder: SoundDeviceRecorder | Any | None = None,
         transcriber: FasterWhisperTranscriber | Any | None = None,
+        gpu_arbiter: GpuArbiter | Any | None = None,
+        event_logger: Any | None = None,
         executor: Any | None = None,
         control_executor: Any | None = None,
         pause_notifier: DictationPauseNotifier | Any | None = None,
@@ -254,6 +266,8 @@ class VoiceConversationController:
         self.transcriber = transcriber or FasterWhisperTranscriber(
             download_root=root / "runtime" / "stt-models"
         )
+        self._events = event_logger or NullRuntimeEventLogger()
+        self.gpu_arbiter = gpu_arbiter or GpuArbiter(installation_id(root.parent), event_logger=self._events)
         self.executor = executor or ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-voice-stt")
         self.control_executor = control_executor or ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="local-voice-control"
@@ -282,6 +296,7 @@ class VoiceConversationController:
         self._model_failed_for = ""
         self._shutdown = False
         self._phase = "off"
+        self._stt_cancel_event = threading.Event()
 
     def _send_pause_source(self, active: bool) -> None:
         try:
@@ -315,6 +330,7 @@ class VoiceConversationController:
             self._configured = True
             if previous_enabled and not self._enabled:
                 self._session_id += 1
+                self._stt_cancel_event.set()
                 self._pressed = False
                 self._right_ctrl_down = False
                 self._trigger_down = False
@@ -358,7 +374,8 @@ class VoiceConversationController:
     def _prepare_model(self, model_name: str) -> None:
         try:
             prepare = getattr(self.transcriber, "prepare", None)
-            device = str(prepare(model_name) if callable(prepare) else "cuda")
+            with self.gpu_arbiter.acquire_stt(timeout=120.0):
+                device = str(prepare(model_name) if callable(prepare) else "cuda")
         except Exception as exc:
             with self._lock:
                 if self._model_preparing_for == model_name:
@@ -407,6 +424,8 @@ class VoiceConversationController:
             if chord_down and not was_pressed:
                 self._pressed = True
                 self._session_id += 1
+                self._stt_cancel_event.set()
+                self._stt_cancel_event = threading.Event()
                 session_id = self._session_id
                 action = "start"
             elif was_pressed and not chord_down:
@@ -434,7 +453,7 @@ class VoiceConversationController:
                 if not isinstance(extension, dict):
                     extension = {}
                 phase = str(extension.get("playbackPhase") or "idle").strip().lower()
-                active = bool(extension.get("isPlaying")) or phase in {"generating", "playing"}
+                active = bool(extension.get("isPlaying")) or phase in {"playing", "stopping"}
                 if not active:
                     return True
             except Exception:
@@ -475,6 +494,7 @@ class VoiceConversationController:
                 ):
                     return
             self.recorder.start()
+            self._events.emit("recording_started", sessionId=session_id, sttDevice="cuda")
             with self._lock:
                 if self._shutdown or session_id != self._session_id:
                     self.recorder.discard()
@@ -494,8 +514,10 @@ class VoiceConversationController:
             self._recording = False
             model_name = self._stt_model
             cancel_grace_ms = self._cancel_grace_ms
+            cancel_event = self._stt_cancel_event
         try:
             audio = np.asarray(self.recorder.stop(), dtype=np.float32).reshape(-1)
+            self._events.emit("recording_stopped", sessionId=session_id)
         except Exception as exc:
             self._update_state("error", "録音を終了できませんでした", error=self._friendly_error(exc))
             return
@@ -505,7 +527,8 @@ class VoiceConversationController:
             self._update_state("idle", "音声が短いか無音のため送信しませんでした", error="")
             return
         self._update_state("transcribing", "文字起こし中", error="", stt_model=model_name)
-        self.executor.submit(self._transcribe, session_id, audio, model_name, cancel_grace_ms)
+        self._events.emit("transcription_started", sessionId=session_id, sttDevice="cuda")
+        self.executor.submit(self._transcribe, session_id, audio, model_name, cancel_grace_ms, cancel_event)
 
     def _transcribe(
         self,
@@ -513,10 +536,21 @@ class VoiceConversationController:
         audio: np.ndarray,
         model_name: str,
         cancel_grace_ms: int,
+        cancel_event: threading.Event,
     ) -> None:
         try:
-            text, device = self.transcriber.transcribe(audio, model_name)
+            with self.gpu_arbiter.acquire_stt(timeout=30.0, cancel_event=cancel_event):
+                text, device = self.transcriber.transcribe(audio, model_name)
             text = str(text or "").strip()
+            self._events.emit(
+                "transcription_completed",
+                sessionId=session_id,
+                sttDevice=device,
+                textLength=len(text),
+                textHash=hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
+                result="success",
+            )
+            self._events.emit("stt_device_selected", sessionId=session_id, sttDevice=device)
             with self._lock:
                 stale = self._shutdown or session_id != self._session_id or not self._enabled
             if stale:
@@ -628,6 +662,7 @@ class VoiceConversationController:
             self._shutdown = True
             self._enabled = False
             self._session_id += 1
+            self._stt_cancel_event.set()
             was_recording = self._recording
             pause_was_active = self._pause_source_active
             self._pause_source_active = False

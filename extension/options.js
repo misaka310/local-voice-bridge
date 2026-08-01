@@ -1,15 +1,17 @@
 'use strict';
 
 (() => {
-  const SETTINGS_VERSION = 10;
+  const SETTINGS_VERSION = 11;
   const DEFAULTS = Object.freeze({
     settingsVersion: SETTINGS_VERSION,
     previewMaxLines: 2,
     previewMaxChars: 80,
     sttModel: 'small',
     cancelGraceMs: 700,
+    liveTtsProfile: 'speed',
   });
   const STT_MODELS = new Set(['small', 'medium', 'large-v3-turbo']);
+  const LIVE_TTS_PROFILES = new Set(['speed', 'balanced', 'bridge']);
 
   function clampInteger(value, fallback, minimum, maximum) {
     if (value === '' || value === null || value === undefined) return fallback;
@@ -26,6 +28,9 @@
       previewMaxChars: clampInteger(raw.previewMaxChars, DEFAULTS.previewMaxChars, 40, 1000),
       sttModel: STT_MODELS.has(sttModel) ? sttModel : DEFAULTS.sttModel,
       cancelGraceMs: clampInteger(raw.cancelGraceMs, DEFAULTS.cancelGraceMs, 0, 5000),
+      liveTtsProfile: LIVE_TTS_PROFILES.has(String(raw.liveTtsProfile || '').trim().toLowerCase())
+        ? String(raw.liveTtsProfile).trim().toLowerCase()
+        : DEFAULTS.liveTtsProfile,
     };
   }
 
@@ -40,6 +45,7 @@
   const charsInput = document.getElementById('preview-max-chars');
   const sttModelSelect = document.getElementById('stt-model');
   const graceInput = document.getElementById('cancel-grace-seconds');
+  const liveTtsProfileSelect = document.getElementById('live-tts-profile');
   const resetButton = document.getElementById('reset-button');
   const status = document.getElementById('save-status');
   let statusTimer = null;
@@ -61,6 +67,7 @@
     charsInput.value = String(normalized.previewMaxChars);
     sttModelSelect.value = normalized.sttModel;
     graceInput.value = (normalized.cancelGraceMs / 1000).toFixed(1);
+    liveTtsProfileSelect.value = normalized.liveTtsProfile;
   }
 
   function readForm() {
@@ -69,6 +76,7 @@
       previewMaxChars: charsInput.value,
       sttModel: sttModelSelect.value,
       cancelGraceMs: Number(graceInput.value) * 1000,
+      liveTtsProfile: liveTtsProfileSelect.value,
     });
   }
 
@@ -115,7 +123,7 @@
     });
   });
 
-  for (const control of [linesInput, charsInput, sttModelSelect, graceInput]) {
+  for (const control of [linesInput, charsInput, sttModelSelect, graceInput, liveTtsProfileSelect]) {
     control.addEventListener('input', () => setStatus(''));
     control.addEventListener('change', () => setStatus(''));
   }

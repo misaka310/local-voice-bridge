@@ -302,12 +302,21 @@ async function deliverVoiceTranscript(targetTabId, payload, settings) {
   return { ok: false, reason: lastReason };
 }
 
-function shouldQueueAutoFromTab(tabId) {
-  if (['recording', 'preparing_model', 'transcribing', 'pending_send', 'sending'].includes(conversationPhase)) {
+function shouldQueueAutoFromTab(_tabId) {
+  if ([
+    'recording',
+    'preparing_model',
+    'transcribing',
+    'pending_send',
+    'arming_submission',
+    'arming', 'armed',
+    'sending',
+    'waiting_response',
+    'committed',
+    'responding',
+    'speaking',
+  ].includes(conversationPhase)) {
     return false;
-  }
-  if (conversationPhase === 'waiting_response' && activeConversationTargetTabId) {
-    return Number(tabId) === Number(activeConversationTargetTabId);
   }
   return true;
 }
@@ -521,6 +530,7 @@ async function controlPanelRequest(settings, pathname, options = {}) {
   return payload;
 }
 
+const liveClient = globalThis.BackgroundLiveClient.create({ fetch, getSettings, buildUrl: controlPanelUrl });
 async function replayLocalAudio(text = '') {
   const settings = await getSettings();
   return controlPanelRequest(settings, '/v1/playback/replay', {
@@ -565,7 +575,7 @@ async function reconnectChatGptTab(tab) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
+        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
       });
       const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
       return Boolean(response && response.ok === true);
@@ -1083,6 +1093,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'external-control-poll') {
     syncExternalControlPanel()
       .then((payload) => sendResponse({ ok: true, payload }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (globalThis.BackgroundLiveClient.MESSAGE_TYPES.has(message.type)) {
+    liveClient.handle(message, senderTabId, Boolean(senderTabId && tabs.has(senderTabId)))
+      .then((result) => sendResponse(result.response || { ok: false, error: 'live-message-unhandled' }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from conversation_controller import (  # noqa: E402
     VK_LCONTROL,
     VK_OEM_102,
     VK_RCONTROL,
+    FasterWhisperTranscriber,
     VoiceConversationController,
     YouTubePauseNotifier,
 )
@@ -47,16 +49,35 @@ class DelayedExecutor:
         self.items.clear()
 
 
+class ImmediateLease:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class FakeGpuArbiter:
+    def __init__(self) -> None:
+        self.stt_calls = 0
+
+    def acquire_stt(self, **_kwargs):
+        self.stt_calls += 1
+        return ImmediateLease()
+
+
 class FakeClient:
     def __init__(self) -> None:
         self.commands: list[str] = []
         self.events: list[tuple[str, dict[str, object]]] = []
         self.states: list[dict[str, object]] = []
         self.playing_states: list[bool] = []
+        self.playback_phases: list[str] = []
 
     def get_snapshot(self):
         playing = self.playing_states.pop(0) if self.playing_states else False
-        return {"extension": {"isPlaying": playing, "playbackPhase": "playing" if playing else "idle"}}
+        phase = self.playback_phases.pop(0) if self.playback_phases else ("playing" if playing else "idle")
+        return {"extension": {"isPlaying": playing, "playbackPhase": phase}}
 
     def send_command(self, command):
         self.commands.append(command)
@@ -149,6 +170,57 @@ class FailingPrepareTranscriber(FakeTranscriber):
         raise RuntimeError("model download failed")
 
 
+class FasterWhisperTranscriberTests(unittest.TestCase):
+    def test_cuda_prepare_failure_does_not_fall_back_to_cpu_in_live_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transcriber = FasterWhisperTranscriber(download_root=Path(temp_dir))
+            calls: list[tuple[str, str]] = []
+
+            def model(_name, device, compute_type):
+                calls.append((device, compute_type))
+                raise RuntimeError("cuda unavailable")
+
+            transcriber._model = model
+            with self.assertRaisesRegex(RuntimeError, "CPUへの自動フォールバックは無効"):
+                transcriber.prepare("small")
+            self.assertEqual(calls, [("cuda", "float16")])
+
+    def test_cuda_transcribe_failure_does_not_call_cpu_in_live_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transcriber = FasterWhisperTranscriber(download_root=Path(temp_dir))
+            calls: list[tuple[str, str]] = []
+
+            def model(_name, device, compute_type):
+                calls.append((device, compute_type))
+                raise RuntimeError("cuda inference failed")
+
+            transcriber._model = model
+            with self.assertRaisesRegex(RuntimeError, "CPUへの自動フォールバックは無効"):
+                transcriber.transcribe(np.ones(16000, dtype=np.float32), "small")
+            self.assertEqual(calls, [("cuda", "float16")])
+
+    def test_explicit_diagnostic_mode_may_use_cpu(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transcriber = FasterWhisperTranscriber(
+                download_root=Path(temp_dir),
+                allow_cpu_diagnostic=True,
+            )
+            cpu_model = object()
+
+            def model(_name, device, _compute_type):
+                if device == "cuda":
+                    raise RuntimeError("cuda unavailable")
+                return cpu_model
+
+            transcriber._model = model
+            transcriber._run = lambda selected, _audio: "診断" if selected is cpu_model else ""
+            self.assertEqual(transcriber.prepare("small"), "cpu")
+            self.assertEqual(
+                transcriber.transcribe(np.ones(16000, dtype=np.float32), "small"),
+                ("診断", "cpu"),
+            )
+
+
 class YouTubePauseNotifierTests(unittest.TestCase):
     def test_posts_local_voice_bridge_source_state(self):
         opener = CapturingOpener()
@@ -213,6 +285,7 @@ class VoiceConversationControllerTests(unittest.TestCase):
             client,
             recorder=recorder,
             transcriber=transcriber,
+            gpu_arbiter=FakeGpuArbiter(),
             control_executor=control_executor or InlineExecutor(),
             executor=stt_executor or InlineExecutor(),
             pause_notifier=pause_notifier or FakePauseNotifier(),
@@ -235,6 +308,7 @@ class VoiceConversationControllerTests(unittest.TestCase):
             client,
             recorder=FakeRecorder(),
             transcriber=transcriber,
+            gpu_arbiter=FakeGpuArbiter(),
             control_executor=InlineExecutor(),
             executor=InlineExecutor(),
             sleep=lambda _seconds: None,
@@ -272,6 +346,15 @@ class VoiceConversationControllerTests(unittest.TestCase):
         self.press_chord(controller)
         self.assertEqual(client.commands, ["stop"])
         self.assertEqual(client.events[0][0], "cancel_pending")
+        self.assertEqual(recorder.started, 1)
+        self.assertEqual(client.states[-1]["phase"], "recording")
+
+    def test_tts_generation_without_audio_does_not_block_recording_start(self):
+        controller, client, recorder, _ = self.make_controller()
+        client.playback_phases = ["generating"]
+
+        self.press_chord(controller)
+
         self.assertEqual(recorder.started, 1)
         self.assertEqual(client.states[-1]["phase"], "recording")
 

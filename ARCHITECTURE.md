@@ -14,13 +14,20 @@
 - `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
 - `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
-- `extension/content.js`: 各ChatGPTタブの返答検知、プレビュー作成、入力欄への文字起こし反映、delivery IDの重複防止を担当。音声は再生しない
+- `extension/content.js`: 各ChatGPTタブの通常Auto返答検知、入力欄への文字起こし反映、Live controllerのDOM接続、delivery IDの重複防止を担当。Live音声はローカルAPI側で再生する
 - `extension/background.js`: タブ登録、共通キュー、再生進行、各専用モジュールの接続だけを担当
 - `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
 - `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
 - `extension/background-control-sync.js`: 安定consumer ID、control-panel poll / ACK、再配信カーソル、外部設定同期、録音開始時の送信先への文字起こし配送を担当
-- `local-api/server.py`: 永続状態API、Irodori v3 direct、ローカル再生、参照音声一覧、外部パネルAPI、ペット選択同期を担当
-- `local-api/voice_runtime.py`: 起動時モデル準備と、生成・再生・Replay・Stopを1本のワーカーで直列化
+- `extension/live-browser-core.js`: assistant基線・一意bind、文境界、prefix整合、429 bounded retryを副作用なしで担当
+- `extension/live-content-controller.js`: `pageInstanceId`、`submissionId`、assistant bind、Liveチャンク送信、入力・送信・Regen・遷移による失効を担当
+- `extension/background-live-client.js`: content scriptから受けたLive要求へ送信元tab IDを上書きし、loopback Live APIへ転送
+- `local-api/server.py`: 永続状態API、Irodori v3 direct、ローカル再生、Live API、参照音声一覧、外部パネルAPI、ペット選択同期を担当
+- `local-api/voice_runtime.py`: 起動時モデル準備と、独立した生成ワーカー・再生ワーカー、Replay、世代付きStopを担当
+- `local-api/conversation_submission.py`: 送信前`arm`、送信後`commit`、assistant `bind`、失効・完了を永続管理
+- `local-api/live_conversation.py`: bind済み所有権、最大2チャンク先読み、重複排除、Live完了・失敗を管理
+- `local-api/gpu_arbiter.py`: Windows名前付きGate/GPU MutexでSTTを次のTTSより優先
+- `local-api/runtime_events.py`: 本文・絶対パスを含めないLive JSONLイベントを記録
 - `local-api/conversation_controller.py`: 右Ctrl＋`＼ / _`の録音状態、ローカルSTT、ChatGPT送信に加え、対応するYouTube Dictation Pause Controlへの入力元別状態通知を担当
 
 ## Windows Local Voice小窓
@@ -68,12 +75,30 @@ Autoの対象は、最後に触った1タブだけではありません。開い
 各ChatGPT content.js
   -> background.js がローカル永続キューへ同期
   -> POST http://127.0.0.1:8717/v1/speak { playLocal: true }
-  -> voice_runtime.py の単一ワーカーで生成
-  -> 同じワーカーがPCの音声デバイスで再生完了まで待機
+  -> voice_runtime.py の生成ワーカーで生成
+  -> 独立した再生ワーカーがPCの音声デバイスで再生
   -> 次のキュー項目へ進む
 ```
 
 `uiOwnerTabId`と`selectedTabId`は手動操作の対象返答を決める内部値です。音声再生先ではありません。Autoの検出対象も制限しません。タブを閉じても生成・再生はローカルワーカー上で継続し、APIまたはService Workerの再起動後は永続状態からタブ・最新返答・待機キューを復元します。
+
+## マイクLive経路
+
+```text
+録音終了
+  -> CUDA faster-whisper（CPU自動fallbackなし）
+  -> content.js が submissionId とassistant基線を生成
+  -> POST /v1/conversation/submission action=arm
+  -> 永続化ACK後だけChatGPT送信ボタンをクリック
+  -> action=commit
+  -> 同じtab/page/conversationの新規assistant候補が1件だけならaction=bind
+  -> 確定文をPOST /v1/live/chunksへ最大2件先読み
+  -> TTS生成ワーカーと再生ワーカーを重ねる
+```
+
+入力、Enter、送信ボタン、Regen、会話遷移、reload、次の録音は`cancelEpoch`を進め、生成済み・待機中・再生中の古いチャンクを失効します。Service WorkerまたはAPI再起動時、未完了Liveは自動復元せず`invalidated`になります。通常Auto、Next、Regen、Replayの永続キューは従来契約を維持します。
+
+GPUは`Local\\LocalVoiceBridgeGpuSttGate-*`と`Local\\LocalVoiceBridgeGpu-*`の2つのWindows名前付きMutexで調停します。STTがGateを取得すると、新しいTTSはGPU Mutexへ割り込めません。すでに実行中のTTSは安全に完了させ、録音自体はTTS生成完了を待たず開始します。
 
 ## YouTube停止状態の直接通知
 
@@ -142,7 +167,9 @@ Voice、Tab、Petの独立選択設定は保存しません。
 
 - Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
 - background単体テスト: 全タブ共通キュー、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
-- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク文字起こし
+- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク送信前ACK、assistant bind、Liveチャンク
+- Live 17項目ゲート: 入力・送信・Regen・遷移の割り込み、stale排除、再起動失効、通常キュー互換、曖昧bind拒否、STT優先、CPU fallback 0
 - real E2E: 専用loopbackポートでIrodori v3 direct、Next、実参照音声・ペット同期、複数タブ共通キュー
+- 実機測定: Suguhaの3プロファイル、CUDA STT、別プロセスGPU競合、録音終了から再生開始までの全経路
 
 エージェント実行のブラウザ検証では`voiceVolume=0`と`--mute-audio`を使用します。

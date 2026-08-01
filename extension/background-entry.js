@@ -8,6 +8,7 @@ importScripts(
   'background-settings-core.js',
   'background-runtime-core.js',
   'background-control-sync.js',
+  'background-live-client.js',
   'background.js',
 );
 

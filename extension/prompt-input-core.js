@@ -45,6 +45,17 @@
     } catch (_error) {
       event = new EventCtor('input', { bubbles: true });
     }
+    const syntheticMarker = String(environment.syntheticMarker || '');
+    if (syntheticMarker) {
+      try {
+        Object.defineProperty(event, 'localVoiceSyntheticInputToken', {
+          value: syntheticMarker,
+          configurable: true,
+        });
+      } catch (_error) {
+        try { event.localVoiceSyntheticInputToken = syntheticMarker; } catch (_ignored) {}
+      }
+    }
     element.dispatchEvent(event);
   }
 
@@ -208,6 +219,13 @@
     const clearTimer = environment.clearTimeout || globalThis.clearTimeout.bind(globalThis);
     const getLocation = environment.getLocation || (() => (typeof location !== 'undefined' ? location.href : ''));
     const onState = typeof environment.onState === 'function' ? environment.onState : () => {};
+    const prepareSubmission = typeof environment.prepareSubmission === 'function' ? environment.prepareSubmission : null;
+    const commitSubmission = typeof environment.commitSubmission === 'function' ? environment.commitSubmission : null;
+    const invalidateSubmission = typeof environment.invalidateSubmission === 'function' ? environment.invalidateSubmission : null;
+    const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
+    const createId = typeof environment.createId === 'function'
+      ? environment.createId
+      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     let pending = null;
     let generation = 0;
 
@@ -228,9 +246,17 @@
 
     function cancel(reason = 'cancelled') {
       const item = pending;
+      const invalidateCurrent = () => {
+        if (!item || !invalidateSubmission) return;
+        try {
+          const invalidated = invalidateSubmission(item, reason);
+          if (invalidated && typeof invalidated.then === 'function') void invalidated.catch(() => {});
+        } catch (_error) {}
+      };
       if (!item) return { ok: false, reason: 'nothing-pending' };
       generation += 1;
       finishPending(item);
+      invalidateCurrent();
       const cleared = clearInsertedText(item.composer, item.insertedText, {
         document: documentObject,
         window: windowObject,
@@ -245,7 +271,7 @@
       return { ok: false, reason: cleared.reason };
     }
 
-    function send(item) {
+    function validateBeforeSend(item) {
       if (!item || pending !== item || item.generation !== generation) return { ok: false, reason: 'stale' };
       if (getLocation() !== item.location) {
         finishPending(item);
@@ -263,25 +289,100 @@
         emit('error', 'ChatGPTの送信ボタンを確認できませんでした', 'send-button-not-ready');
         return { ok: false, reason: 'send-button-not-ready' };
       }
-      finishPending(item);
-      emit('sending', 'ChatGPTへ送信中');
-      button.click();
-      emit('waiting_response', 'ChatGPT応答待ち');
-      return { ok: true };
+      return { ok: true, button };
     }
 
-    function start({ sessionId, text, graceMs }) {
+    function finishSend(item, preparation) {
+      const validation = validateBeforeSend(item);
+      if (!validation.ok) {
+        if (preparation && preparation.sendAllowed !== false && invalidateSubmission) {
+          try {
+            const request = invalidateSubmission(item, validation.reason || 'send-validation-failed');
+            if (request && typeof request.then === 'function') void request.catch(() => {});
+          } catch (_error) {}
+        }
+        return validation;
+      }
+      if (!preparation || preparation.ok === false || preparation.sendAllowed === false) {
+        finishPending(item);
+        const reason = String((preparation && (preparation.reason || preparation.error)) || 'submission-arm-failed');
+        clearInsertedText(item.composer, item.insertedText, {
+          document: documentObject,
+          window: windowObject,
+          Event: environment.Event,
+          InputEvent: environment.InputEvent,
+        });
+        emit('error', '送信関連付けを保存できなかったため送信しませんでした', reason);
+        return { ok: false, reason };
+      }
+      item.submission = preparation.submission || preparation;
+      finishPending(item);
+      emit('sending', 'ChatGPTへ送信中');
+      if (markSubmissionClick) markSubmissionClick(item, item.composer);
+      validation.button.click();
+      if (commitSubmission) {
+        try {
+          const committed = commitSubmission(item);
+          if (committed && typeof committed.then === 'function') {
+            void committed.catch((error) => {
+              if (invalidateSubmission) void Promise.resolve(invalidateSubmission(item, 'submission-commit-failed')).catch(() => {});
+              emit('error', '送信済みですが関連付け確定に失敗しました', error && error.message ? error.message : String(error));
+            });
+          }
+        } catch (error) {
+          if (invalidateSubmission) void Promise.resolve(invalidateSubmission(item, 'submission-commit-failed')).catch(() => {});
+          emit('error', '送信済みですが関連付け確定に失敗しました', error && error.message ? error.message : String(error));
+        }
+      }
+      emit('waiting_response', 'ChatGPT応答待ち');
+      return { ok: true, submission: item.submission || null };
+    }
+
+    function send(item) {
+      const validation = validateBeforeSend(item);
+      if (!validation.ok) return { ...validation };
+      if (!prepareSubmission) return finishSend(item, { ok: true, sendAllowed: true });
+      emit('arming_submission', '送信関連付けを保存中');
+      try {
+        const prepared = prepareSubmission(item);
+        if (prepared && typeof prepared.then === 'function') {
+          return Promise.resolve(prepared)
+            .then((result) => finishSend(item, result))
+            .catch((error) => finishSend(item, { ok: false, error: error && error.message ? error.message : String(error) }));
+        }
+        return finishSend(item, prepared);
+      } catch (error) {
+        return finishSend(item, { ok: false, error: error && error.message ? error.message : String(error) });
+      }
+    }
+
+    function start({
+      sessionId,
+      text,
+      graceMs,
+      turnId = '',
+      submissionId = '',
+      pageInstanceId = '',
+      conversationKey = '',
+      cancelEpoch = 0,
+      assistantBaselineKey = '',
+      assistantCountBefore = 0,
+      baselineKeys = [],
+    }) {
       if (pending) cancel('new-recording');
       const composer = findComposer(documentObject);
       if (!composer) {
         emit('error', 'ChatGPTの入力欄を検出できませんでした', 'composer-not-found');
         return { ok: false, reason: 'composer-not-found' };
       }
+      generation += 1;
+      const syntheticMarker = createId('synthetic-input');
       const inserted = insertComposerText(composer, text, {
         document: documentObject,
         window: windowObject,
         Event: environment.Event,
         InputEvent: environment.InputEvent,
+        syntheticMarker,
       });
       if (!inserted.ok) {
         const messages = {
@@ -293,11 +394,19 @@
         return inserted;
       }
 
-      generation += 1;
       const safeGrace = Math.max(0, Math.min(5000, Math.round(Number(graceMs) || 0)));
       const item = {
         generation,
-        sessionId: Number(sessionId) || 0,
+        sessionId: String(sessionId || createId('session')),
+        turnId: String(turnId || createId('turn')),
+        submissionId: String(submissionId || createId('submission')),
+        pageInstanceId: String(pageInstanceId || ''),
+        conversationKey: String(conversationKey || getLocation()),
+        cancelEpoch: Math.max(0, Math.round(Number(cancelEpoch) || 0)),
+        assistantBaselineKey: String(assistantBaselineKey || ''),
+        assistantCountBefore: Math.max(0, Math.round(Number(assistantCountBefore) || 0)),
+        baselineKeys: Array.from(baselineKeys || [], (value) => String(value || '')).filter(Boolean),
+        syntheticMarker,
         composer,
         insertedText: inserted.insertedText,
         location: getLocation(),
@@ -317,13 +426,26 @@
       if (safeGrace === 0) return send(item);
       emit('pending_send', `Escでキャンセルできます（${(safeGrace / 1000).toFixed(1)}秒）`);
       item.timer = setTimer(() => send(item), safeGrace);
-      return { ok: true, pending: true, insertedText: item.insertedText };
+      return {
+        ok: true,
+        pending: true,
+        insertedText: item.insertedText,
+        sessionId: item.sessionId,
+        turnId: item.turnId,
+        submissionId: item.submissionId,
+      };
     }
 
     return {
       start,
       cancel,
       hasPending: () => Boolean(pending),
+      pendingInfo: () => (pending ? {
+        sessionId: pending.sessionId,
+        turnId: pending.turnId,
+        submissionId: pending.submissionId,
+        syntheticMarker: pending.syntheticMarker,
+      } : null),
     };
   }
 

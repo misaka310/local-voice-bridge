@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import inspect
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from ffmpeg_env import configure_ffmpeg_dll_path
+from tts_profiles import TtsProfile, TtsProfileError, apply_profile, resolve_tts_profile
 
 _MODEL_CACHE: dict[tuple[Any, ...], Any] = {}
 _MODEL_CACHE_LOCK = threading.RLock()
+_SYNTHESIS_SETTINGS_LOCK = threading.RLock()
+_REFERENCE_LATENT_LOCK = threading.RLock()
 
 
 class IrodoriError(RuntimeError):
@@ -181,11 +186,137 @@ def _require_reference_condition(runtime: Any, ref_wav: str | None) -> bool:
     return True
 
 
-def _sampling_quality(cfg: dict[str, Any], *, use_reference: bool) -> tuple[int, float]:
-    default_steps = int(cfg.get("numSteps", 16))
-    steps = int(cfg.get("referenceNumSteps", 32)) if use_reference else default_steps
-    speaker_scale = float(cfg.get("cfgScaleSpeaker", 6.0 if use_reference else 5.0))
-    return steps, speaker_scale
+def _sampling_quality(
+    cfg: dict[str, Any],
+    *,
+    use_reference: bool,
+    profile_name: str | None = None,
+    live: bool = False,
+) -> tuple[int, float]:
+    try:
+        profile = resolve_tts_profile(
+            profile_name or cfg.get("ttsProfile"),
+            live=live,
+            use_reference=use_reference,
+            legacy_settings=cfg,
+        )
+    except TtsProfileError as exc:
+        raise IrodoriError(str(exc)) from exc
+    return profile.num_steps, profile.cfg_scale_speaker
+
+
+def _resolve_profile(
+    cfg: dict[str, Any],
+    *,
+    profile_name: str | None,
+    live: bool,
+    use_reference: bool,
+) -> TtsProfile:
+    try:
+        return resolve_tts_profile(
+            profile_name or cfg.get("ttsProfile"),
+            live=live,
+            use_reference=use_reference,
+            legacy_settings=cfg,
+        )
+    except TtsProfileError as exc:
+        raise IrodoriError(str(exc)) from exc
+
+
+def _reference_latent_cache(
+    *,
+    runtime: Any,
+    inference_runtime_module: Any,
+    reference_audio: str,
+    cfg: dict[str, Any],
+    output_dir: Path,
+) -> tuple[str, bool]:
+    source = Path(reference_audio).expanduser().resolve()
+    if not source.is_file():
+        raise IrodoriError(f"reference voice audio file not found: {source}")
+    configured_cache = str(cfg.get("referenceLatentCacheDir") or "").strip()
+    if configured_cache:
+        cache_dir = Path(configured_cache).expanduser()
+        if not cache_dir.is_absolute():
+            cache_dir = output_dir.resolve().parents[1] / cache_dir
+    else:
+        cache_dir = output_dir.resolve().parent / "reference-latents"
+    cache_dir = cache_dir.resolve()
+    stat = source.stat()
+    fingerprint = "\n".join(
+        (
+            str(source),
+            str(stat.st_size),
+            str(stat.st_mtime_ns),
+            str(cfg.get("codecRepo") or ""),
+            str(cfg.get("codecPrecision") or ""),
+            "normalize_db=-16.0",
+            "ensure_max=true",
+        )
+    )
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24]
+    cache_path = cache_dir / f"{source.stem}-{digest}.pt"
+    with _REFERENCE_LATENT_LOCK:
+        import torch
+
+        if cache_path.is_file():
+            try:
+                try:
+                    torch.load(cache_path, map_location="cpu", weights_only=True)
+                except TypeError:
+                    torch.load(cache_path, map_location="cpu")
+                return str(cache_path), True
+            except Exception:
+                cache_path.unlink(missing_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        wav, sample_rate = inference_runtime_module._load_audio(str(source))
+        latent = runtime.codec.encode_waveform(
+            wav.unsqueeze(0),
+            sample_rate=int(sample_rate),
+            normalize_db=-16.0,
+            ensure_max=True,
+        ).cpu()
+        temporary = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            torch.save(latent, temporary)
+            temporary.replace(cache_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return str(cache_path), False
+
+
+@contextmanager
+def _runtime_profile_overrides(
+    runtime: Any,
+    inference_runtime_module: Any,
+    profile: TtsProfile,
+) -> Iterator[None]:
+    """Apply unavoidable runtime-global settings under one generation lock."""
+
+    with _SYNTHESIS_SETTINGS_LOCK:
+        watermarker = getattr(runtime, "watermarker", None)
+        had_watermark_model = bool(watermarker is not None and hasattr(watermarker, "model"))
+        watermark_model = getattr(watermarker, "model", None) if had_watermark_model else None
+        measure_start = getattr(inference_runtime_module, "_measure_start", None)
+        measure_end = getattr(inference_runtime_module, "_measure_end", None)
+        if not profile.sync_stages and (measure_start is None or measure_end is None):
+            raise IrodoriError("the active Irodori runtime cannot disable synchronized stage timing safely")
+        try:
+            if not profile.watermark and had_watermark_model:
+                watermarker.model = None
+            if not profile.sync_stages:
+                inference_runtime_module._measure_start = lambda _device, *_extra: time.perf_counter()
+                inference_runtime_module._measure_end = (
+                    lambda _device, started, *_extra: time.perf_counter() - started
+                )
+            yield
+        finally:
+            if measure_start is not None:
+                inference_runtime_module._measure_start = measure_start
+            if measure_end is not None:
+                inference_runtime_module._measure_end = measure_end
+            if had_watermark_model:
+                watermarker.model = watermark_model
 
 
 def synthesize_irodori_direct(
@@ -197,8 +328,11 @@ def synthesize_irodori_direct(
     request_id: str | None,
     reference_voice: str | None = None,
     voice_prompt: str | None = None,
+    profile_name: str | None = None,
+    live: bool = False,
 ) -> tuple[Path, str]:
     configure_ffmpeg_dll_path()
+    import irodori_tts.inference_runtime as inference_runtime_module
     from irodori_tts.inference_runtime import SamplingRequest, resolve_cfg_scales, save_wav
 
     cfg = dict(raw_config.get("irodori") or {})
@@ -206,49 +340,77 @@ def synthesize_irodori_direct(
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file = output_dir / _safe_name(text, request_id)
     ref_wav = _reference_audio_for(reference_voice, raw_config)
+    profile = _resolve_profile(
+        cfg,
+        profile_name=profile_name,
+        live=live,
+        use_reference=bool(ref_wav),
+    )
+    cfg = apply_profile(cfg, profile)
     caption = str(voice_prompt or cfg.get("caption") or "").strip() or None
     runtime = _get_runtime(model_cfg=cfg)
     use_speaker = _require_reference_condition(runtime, ref_wav)
-    num_steps, cfg_scale_speaker_requested = _sampling_quality(cfg, use_reference=use_speaker)
     use_caption = bool(runtime.model_cfg.use_caption_condition and caption)
     cfg_scale_text, cfg_scale_caption, cfg_scale_speaker, _messages = resolve_cfg_scales(
         cfg_guidance_mode=str(cfg.get("cfgGuidanceMode") or "independent"),
-        cfg_scale_text=float(cfg.get("cfgScaleText", 3.0)),
+        cfg_scale_text=float(cfg.get("cfgScaleText", profile.cfg_scale_text)),
         cfg_scale_caption=float(cfg.get("cfgScaleCaption", 3.0)),
-        cfg_scale_speaker=cfg_scale_speaker_requested,
+        cfg_scale_speaker=float(cfg.get("cfgScaleSpeaker", profile.cfg_scale_speaker)),
         cfg_scale=None,
         use_caption_condition=use_caption,
         use_speaker_condition=use_speaker,
     )
-    request = SamplingRequest(
-        text=text,
-        caption=caption,
-        ref_wav=ref_wav,
-        no_ref=not bool(ref_wav),
-        num_steps=num_steps,
-        t_schedule_mode=str(cfg.get("tScheduleMode") or "sway"),
-        sway_coeff=float(cfg.get("swayCoeff", -1.0)),
-        duration_scale=float(cfg.get("durationScale", 1.0)),
-        num_candidates=1,
-        decode_mode=str(cfg.get("decodeMode") or "sequential"),
-        cfg_scale_text=cfg_scale_text,
-        cfg_scale_caption=cfg_scale_caption,
-        cfg_scale_speaker=cfg_scale_speaker,
-        cfg_guidance_mode=str(cfg.get("cfgGuidanceMode") or "independent"),
-        cfg_min_t=float(cfg.get("cfgMinT", 0.5)),
-        cfg_max_t=float(cfg.get("cfgMaxT", 1.0)),
-        context_kv_cache=_bool(cfg.get("contextKvCache"), True),
-        trim_tail=_bool(cfg.get("trimTail"), True),
-        seed=_sampling_seed(cfg.get("seed", DEFAULT_SAMPLING_SEED)),
-    )
+    ref_latent: str | None = None
+    reference_cache_hit = False
+    if ref_wav and profile.reference_mode == "latent":
+        ref_latent, reference_cache_hit = _reference_latent_cache(
+            runtime=runtime,
+            inference_runtime_module=inference_runtime_module,
+            reference_audio=ref_wav,
+            cfg=cfg,
+            output_dir=output_dir,
+        )
+    request_kwargs: dict[str, Any] = {
+        "text": text,
+        "caption": caption,
+        "ref_wav": None if ref_latent else ref_wav,
+        "no_ref": not bool(ref_wav or ref_latent),
+        "num_steps": profile.num_steps,
+        "t_schedule_mode": profile.t_schedule_mode,
+        "sway_coeff": profile.sway_coeff,
+        "duration_scale": float(cfg.get("durationScale", 1.0)),
+        "num_candidates": 1,
+        "decode_mode": profile.decode_mode,
+        "cfg_scale_text": cfg_scale_text,
+        "cfg_scale_caption": cfg_scale_caption,
+        "cfg_scale_speaker": cfg_scale_speaker,
+        "cfg_guidance_mode": str(cfg.get("cfgGuidanceMode") or "independent"),
+        "cfg_min_t": float(cfg.get("cfgMinT", 0.5)),
+        "cfg_max_t": float(cfg.get("cfgMaxT", 1.0)),
+        "context_kv_cache": profile.context_kv_cache,
+        "trim_tail": profile.trim_tail,
+        "seed": _sampling_seed(cfg.get("seed", profile.seed)),
+    }
+    if ref_latent:
+        parameters = inspect.signature(SamplingRequest).parameters
+        if "ref_latent" not in parameters:
+            raise IrodoriError("the active Irodori runtime cannot consume a cached reference latent")
+        request_kwargs["ref_latent"] = ref_latent
+    request = SamplingRequest(**request_kwargs)
     result = None
+    succeeded = False
     try:
-        result = runtime.synthesize(request, log_fn=None)
+        with _runtime_profile_overrides(runtime, inference_runtime_module, profile):
+            result = runtime.synthesize(request, log_fn=None)
         save_wav(out_file, result.audio, result.sample_rate)
+        succeeded = True
     finally:
         result = None
-        if _bool(cfg.get("releaseUnusedCudaCache"), True):
+        if not succeeded:
+            out_file.unlink(missing_ok=True)
+        if profile.release_unused_cuda_cache:
             _release_unused_cuda_cache(runtime)
+    _ = reference_cache_hit
     return out_file, str(ref_wav or "")
 
 

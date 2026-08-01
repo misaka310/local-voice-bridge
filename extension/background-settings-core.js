@@ -15,7 +15,7 @@
     throw new Error('background-core.js must be loaded before background-settings-core.js');
   }
 
-  const SETTINGS_VERSION = 10;
+  const SETTINGS_VERSION = 11;
   const DEFAULT_SETTINGS = Object.freeze({
     settingsVersion: SETTINGS_VERSION,
     enabled: false,
@@ -33,6 +33,7 @@
     micConversationEnabled: false,
     sttModel: 'small',
     cancelGraceMs: 700,
+    liveTtsProfile: 'speed',
   });
   const LEGACY_BROWSER_UI_STORAGE_KEYS = Object.freeze([
     'petMode',
@@ -76,6 +77,13 @@
     return clampInteger(value, DEFAULT_SETTINGS.cancelGraceMs, 0, 5000);
   }
 
+  function normalizeLiveTtsProfile(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['speed', 'balanced', 'bridge'].includes(normalized)
+      ? normalized
+      : DEFAULT_SETTINGS.liveTtsProfile;
+  }
+
   function sanitizeSettings(raw = {}) {
     const safe = raw && typeof raw === 'object' ? raw : {};
     const referenceVoice = storedReferenceVoice(safe);
@@ -92,6 +100,7 @@
       previewMaxChars: clampInteger(safe.previewMaxChars, DEFAULT_SETTINGS.previewMaxChars, 40, 1000),
       sttModel: normalizeSttModel(safe.sttModel),
       cancelGraceMs: normalizeCancelGraceMs(safe.cancelGraceMs),
+      liveTtsProfile: normalizeLiveTtsProfile(safe.liveTtsProfile),
     };
     for (const key of LEGACY_BROWSER_UI_STORAGE_KEYS) delete sanitized[key];
     return sanitized;
@@ -160,6 +169,7 @@
     externalReferenceSelection,
     legacyExternalReferenceNeedsRepair,
     normalizeCancelGraceMs,
+    normalizeLiveTtsProfile,
     normalizeModel,
     normalizeStoredReference,
     normalizeSttModel,

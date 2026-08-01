@@ -39,7 +39,11 @@ if (status === 0) {
     'tests/content-text-core.test.js',
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
+    'tests/options-settings.test.js',
     'tests/prompt-input-core.test.js',
+    'tests/live-browser-core.test.js',
+    'tests/live-content-controller.test.js',
+    'tests/background-live-client.test.js',
   ]);
 }
 

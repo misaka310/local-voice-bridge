@@ -1,4 +1,5 @@
 const fs = require('fs');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -6,8 +7,9 @@ const { test, expect, chromium } = require('@playwright/test');
 const { DEMO_REPLY, fixtureHtml } = require('../../scripts/demo-fixture');
 
 const ROOT = path.resolve(__dirname, '../..');
-const MOCK_PORT = Number(process.env.MOCK_VOICE_PORT || (18000 + (process.pid % 1000)));
-const API = `http://127.0.0.1:${MOCK_PORT}`;
+const FIXED_MOCK_PORT = Number(process.env.MOCK_VOICE_PORT || 0);
+let MOCK_PORT = 0;
+let API = '';
 const SOURCE_EXTENSION = path.join(ROOT, 'extension');
 const EXTENSION_DIR = path.join(os.tmpdir(), `local-voice-extension-mock-${process.pid}-${Date.now()}`);
 const EXTENSION = EXTENSION_DIR.replaceAll('\\', '/');
@@ -21,14 +23,31 @@ function prepareTestExtension() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   manifest.host_permissions = [...new Set([
     ...(Array.isArray(manifest.host_permissions) ? manifest.host_permissions : []),
-    `http://127.0.0.1:${MOCK_PORT}/*`,
-    `http://localhost:${MOCK_PORT}/*`,
+    'http://127.0.0.1/*',
+    'http://localhost/*',
   ])];
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
 }
 
 test.beforeAll(() => prepareTestExtension());
 test.afterAll(() => fs.rmSync(EXTENSION_DIR, { recursive: true, force: true }));
+
+async function allocateMockPort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = address && typeof address === 'object' ? address.port : 0;
+      probe.close((error) => {
+        if (error) reject(error);
+        else if (!port) reject(new Error('failed to allocate a loopback mock port'));
+        else resolve(port);
+      });
+    });
+  });
+}
 
 async function mockHealth() {
   try {
@@ -40,14 +59,38 @@ async function mockHealth() {
   }
 }
 
+async function waitForMockStopped() {
+  const until = Date.now() + 10000;
+  while (Date.now() < until) {
+    if (!(await mockHealth())) return true;
+    await wait(100);
+  }
+  return false;
+}
+
+async function stopMock(proc = null) {
+  try {
+    await fetch(`${API}/__test/shutdown`, { method: 'POST' });
+  } catch (_) {}
+  if (!(await waitForMockStopped()) && proc && proc.exitCode === null) proc.kill();
+  if (proc && proc.exitCode === null) {
+    await Promise.race([
+      new Promise((resolve) => proc.once('exit', resolve)),
+      wait(5000),
+    ]);
+    if (proc.exitCode === null) proc.kill('SIGKILL');
+  }
+}
+
 async function startMock() {
+  MOCK_PORT = FIXED_MOCK_PORT || await allocateMockPort();
+  API = `http://127.0.0.1:${MOCK_PORT}`;
   try {
     const response = await fetch(`${API}/health`);
     if (response.ok) {
       const body = await response.json();
       if (body.runtime !== 'mock') throw new Error(`mock port ${MOCK_PORT} is already used by a non-mock API`);
-      await fetch(`${API}/__test/reset`, { method: 'POST' });
-      return null;
+      await stopMock();
     }
   } catch (error) {
     if (String(error.message || error).includes('non-mock')) throw error;
@@ -129,6 +172,13 @@ async function waitForCounts(postCount, playbackCount) {
   }, { timeout: 30000 }).toEqual({ posts: postCount, playbacks: playbackCount });
 }
 
+async function waitForLiveChunks(count) {
+  await expect.poll(async () => {
+    const events = await apiEvents();
+    return events.filter((event) => event.method === 'POST' && event.path === '/v1/live/chunks').length;
+  }, { timeout: 30000 }).toBe(count);
+}
+
 async function waitForControlReady(tabsCount = 1) {
   await expect.poll(async () => {
     const snapshot = await controlSnapshot();
@@ -157,7 +207,7 @@ async function launchContext() {
 }
 
 async function configureWorker(worker, values = {}) {
-  await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('settingsVersion')).settingsVersion)).toBe(10);
+  await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('settingsVersion')).settingsVersion)).toBe(11);
   await worker.evaluate(async ({ apiUrl, healthUrl, overrides }) => {
     await chrome.storage.local.set({
       apiUrl,
@@ -301,7 +351,7 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
     expect(await page.locator('#local-voice-bridge-panel').count()).toBe(0);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -347,7 +397,7 @@ test('inline code text is preserved before Auto finalizes a streaming preview', 
     expect(firstPost.body.text).not.toBe('206は「');
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -393,7 +443,7 @@ test('Next uses the completed streaming reply instead of the short Auto preview 
     expect(posts[1].body.text).toContain('ただし');
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -442,7 +492,7 @@ test('Auto does not finalize a one-character streaming fragment and repairs the 
       && event.body.text === '完了状態 最初から再点検しました。'), { timeout: 30000 }).toBe(true);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -492,7 +542,7 @@ test('Auto does not finalize a short unpunctuated streaming fragment before the 
       && event.body.text.includes('実際のCall of Dutyではなく')), { timeout: 30000 }).toBe(true);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -530,7 +580,7 @@ test('all ChatGPT tabs continue to enqueue into one Auto queue without an in-pag
     expect((await controlSnapshot()).extension.tabsCount).toBe(2);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -621,12 +671,12 @@ test('a completed reply marks its background tab until the user focuses it', asy
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
 
-test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and reply TTS', async () => {
+test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and Live reply chunks', async () => {
   test.setTimeout(90000);
   const api = await startMock();
   const context = await launchContext();
@@ -691,7 +741,11 @@ test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and
     await page.waitForTimeout(1000);
     expect(await page.evaluate(() => window.__sent.length)).toBe(1);
     await expect(page.locator('[data-message-id="mic-reply-1"]')).toHaveText('音声会話から送信された質問への返答です。');
-    await waitForCounts(1, 1);
+    await waitForLiveChunks(1);
+    const liveEvents = (await apiEvents()).filter((event) => event.path === '/v1/live/chunks');
+    expect(liveEvents[0].body.profile).toBe('speed');
+    expect(liveEvents[0].body.isFinal).toBe(true);
+    expect((await apiEvents()).filter((event) => event.path === '/v1/speak')).toHaveLength(0);
 
     await page.evaluate(() => {
       const composer = document.querySelector('#prompt-textarea');
@@ -709,7 +763,7 @@ test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and
     await expect.poll(async () => (await controlSnapshot()).conversation.phase).toBe('error');
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
@@ -751,7 +805,7 @@ test('Auto reads a complete assistant reply shorter than 20 characters from the 
     await expect(page.locator('#local-voice-bridge-panel')).toHaveCount(0);
   } finally {
     await context.close().catch(() => {});
-    if (api) api.kill();
+    await stopMock(api);
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });

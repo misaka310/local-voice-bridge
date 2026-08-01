@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import importlib.util
 import json
 import mimetypes
@@ -24,15 +23,34 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 from control_state import ControlStateStore
 from desktop_pet_config import discover_available_pets
 from http_io import ResponseWriteError, is_normal_client_disconnect, json_response, request_json
-from irodori_engine import IrodoriError, cache_hint, prepare_irodori_direct, synthesize_irodori_direct
-from maintenance import audio_retention_policy, prune_generated_audio
+from installation_identity import installation_id
+from irodori_engine import IrodoriError, cache_hint, synthesize_irodori_direct
+from live_conversation import LiveConversationService
+from live_http import get_live_state, post_interrupt, post_live_chunk, post_submission
+from maintenance import audio_retention_policy
+from runtime_events import RuntimeEventLogger, default_event_log_path
 from runtime_readiness import enrich_snapshot, runtime_snapshot, structured_readiness
 from server_logging import configure_server_process_logging
+from tts_profiles import TtsProfileError, profile_from_payload
 from voice_runtime import VoiceRuntime, VoiceRuntimeError
+from voice_service import (
+    VoiceServiceError,
+    build_voice_runtime as build_voice_runtime_service,
+    model_config,
+    model_list,
+    normalize_reference_id,
+    output_dir,
+    prune_audio,
+    reference_voice_list,
+    reference_voices_dir,
+    sanitize_text,
+    scan_reference_voices,
+)
 
 ROOT = Path(__file__).resolve().parent
 APP_ROOT = ROOT.parent
-INSTANCE_ID = hashlib.sha256(str(APP_ROOT).casefold().encode("utf-8")).hexdigest()[:20]
+INSTANCE_ID = installation_id(APP_ROOT)
+EVENT_LOGGER = RuntimeEventLogger(default_event_log_path(APP_ROOT))
 INSTANCE_STATE_PATH = Path(
     os.environ.get("LOCAL_VOICE_INSTANCE_STATE") or ROOT / "runtime" / "server-instance.json"
 ).expanduser().resolve()
@@ -47,6 +65,7 @@ CONTROL_STATE = ControlStateStore(
     Path(os.environ.get("LOCAL_VOICE_CONTROL_STATE") or CONTROL_PANEL_STATE_PATH).expanduser().resolve()
 )
 VOICE_RUNTIME: VoiceRuntime | None = None
+LIVE_CONVERSATION: LiveConversationService | None = None
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
 TEXT_FILES = ("voice.txt", "text.txt", "transcript.txt")
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -59,6 +78,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "maxFiles": 1000,
         "maxBytes": 1073741824,
         "maxAgeDays": 14,
+    },
+    "audioQuality": {
+        "minRms": 0.005,
+        "maxClipFraction": 0.002,
+        "maxAbsDcOffset": 0.03,
+        "maxDiffSpikeFraction": 0.002,
+        "maxHighBandRatio": 0.08,
+        "maxSpectralFlatness": 0.35,
+        "minDurationSeconds": 0.05,
+        "maxDurationSeconds": 120.0,
     },
     "defaultModel": "irodori-v3",
     "models": {"irodori-v3": {"label": "Irodori v3 direct", "runtime": "irodori_direct", "hfCheckpoint": "Aratako/Irodori-TTS-500M-v3"}},
@@ -80,6 +109,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "decodeMode": "sequential",
         "contextKvCache": True,
         "releaseUnusedCudaCache": True,
+        "referenceLatentCacheDir": "./runtime/reference-latents",
         "seed": 10,
     },
 }
@@ -177,26 +207,6 @@ def load_config() -> dict[str, Any]:
     return merged
 
 
-def resolve_path(value: Any) -> Path:
-    path = Path(str(value or "")).expanduser()
-    return path if path.is_absolute() else (ROOT / path).resolve()
-
-
-def output_dir(config: dict[str, Any]) -> Path:
-    return resolve_path(config.get("audioOutputDir", "./runtime/audio"))
-
-
-def prune_audio(config: dict[str, Any], preserve: tuple[Path, ...] = ()):
-    policy = audio_retention_policy(config)
-    return prune_generated_audio(
-        output_dir(config),
-        max_files=policy["maxFiles"],
-        max_bytes=policy["maxBytes"],
-        max_age_days=policy["maxAgeDays"],
-        preserve=preserve,
-    )
-
-
 def write_instance_state(token: str, path: Path = INSTANCE_STATE_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -220,11 +230,6 @@ def remove_instance_state(token: str, path: Path = INSTANCE_STATE_PATH) -> None:
         return
     if isinstance(payload, dict) and secrets.compare_digest(str(payload.get("shutdownToken") or ""), token):
         path.unlink(missing_ok=True)
-
-
-def reference_voices_dir(config: dict[str, Any]) -> Path:
-    return resolve_path(config.get("referenceVoicesDir", "./reference/voices"))
-
 
 
 def normalize_desktop_pet_id(value: Any) -> str:
@@ -273,94 +278,15 @@ def update_desktop_pet_settings(value: Any, path: Path | None = None) -> dict[st
         return settings
 
 
-def sanitize_text(value: Any) -> str:
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not text:
-        raise BridgeError("text is required")
-    if len(text) > 1600:
-        raise BridgeError("text is too long")
-    return text
 
 
-def model_config(config: dict[str, Any], model: str) -> dict[str, Any]:
-    item = config.get("models", {}).get(model)
-    return item if isinstance(item, dict) else {}
 
 
-def model_list(config: dict[str, Any]) -> list[dict[str, str]]:
-    models = config.get("models") if isinstance(config.get("models"), dict) else {}
-    return [{"id": str(k), "label": str(v.get("label") or k), "runtime": str(v.get("runtime") or "")} for k, v in models.items() if isinstance(v, dict)]
 
-
-def find_text_file(folder: Path) -> Path | None:
-    for name in TEXT_FILES:
-        path = folder / name
-        if path.is_file():
-            return path
-    return None
-
-
-def scan_reference_voices(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    base = reference_voices_dir(config)
-    if base.is_dir():
-        for folder in sorted([p for p in base.iterdir() if p.is_dir()]):
-            voice_wav = folder / "voice.wav"
-            if not voice_wav.is_file():
-                continue
-            text_file = find_text_file(folder)
-            result[folder.name] = {
-                "label": folder.name,
-                "referenceAudioPath": str(voice_wav),
-                "referenceTextPath": str(text_file) if text_file else "",
-                "language": "Japanese",
-                "source": "reference/voices",
-            }
-    configured = config.get("referenceVoices") if isinstance(config.get("referenceVoices"), dict) else {}
-    for key, value in configured.items():
-        if isinstance(value, dict):
-            result[str(key)] = value
-    return result
-
-
-def reference_voice_list(config: dict[str, Any]) -> list[dict[str, str]]:
-    voices = scan_reference_voices(config)
-    return [{"id": "", "label": "none"}] + [{"id": str(k), "label": str(v.get("label") or k)} for k, v in voices.items()]
 
 
 def build_voice_runtime(config: dict[str, Any]) -> VoiceRuntime:
-    runtime_config = copy.deepcopy(config)
-    runtime_config["referenceVoices"] = scan_reference_voices(config)
-    selected_model = "irodori-v3"
-
-    def prepare() -> dict[str, Any]:
-        return prepare_irodori_direct(
-            raw_config=runtime_config,
-            model_config=model_config(config, selected_model),
-        )
-
-    def synthesize(payload: dict[str, Any]) -> tuple[Path, str]:
-        source_file, used_reference_audio = synthesize_irodori_direct(
-            raw_config=runtime_config,
-            model_config=model_config(config, selected_model),
-            output_dir=output_dir(config),
-            text=sanitize_text(payload.get("text")),
-            request_id=str(payload.get("requestId") or "") or None,
-            reference_voice=normalize_reference_id(
-                payload.get("voiceId") or payload.get("referenceVoice") or ""
-            )
-            or None,
-            voice_prompt=str(payload.get("voicePrompt") or payload.get("instruct") or "").strip(),
-        )
-        cleanup = prune_audio(config, preserve=(source_file,))
-        if cleanup.deleted_files:
-            print(
-                f"[maintenance] removed {cleanup.deleted_files} generated audio files "
-                f"({cleanup.deleted_bytes} bytes); remaining={cleanup.remaining_files} files/{cleanup.remaining_bytes} bytes"
-            )
-        return source_file, used_reference_audio
-
-    return VoiceRuntime(prepare_fn=prepare, synthesize_fn=synthesize)
+    return build_voice_runtime_service(config, instance_id=INSTANCE_ID, event_logger=EVENT_LOGGER)
 
 
 def voice_runtime_for(handler: BaseHTTPRequestHandler | None = None) -> VoiceRuntime | None:
@@ -373,6 +299,14 @@ def voice_runtime_for(handler: BaseHTTPRequestHandler | None = None) -> VoiceRun
 
 def voice_runtime_snapshot(handler: BaseHTTPRequestHandler | None = None) -> dict[str, Any]:
     return runtime_snapshot(voice_runtime_for(handler))
+
+
+def live_conversation_for(handler: BaseHTTPRequestHandler | None = None) -> LiveConversationService | None:
+    if handler is not None:
+        service = getattr(getattr(handler, "server", None), "live_conversation", None)
+        if service is not None:
+            return service
+    return LIVE_CONVERSATION
 
 
 def enrich_runtime_snapshot(payload: dict[str, Any], handler: BaseHTTPRequestHandler | None = None) -> dict[str, Any]:
@@ -434,6 +368,13 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"ok": True, "browserRuntime": CONTROL_STATE.browser_runtime_snapshot()},
             )
+            return
+        if parsed.path == "/v1/live/state":
+            service = live_conversation_for(self)
+            if service is None:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "live conversation is not started"})
+            else:
+                get_live_state(self, service)
             return
         if parsed.path == "/v1/desktop-pet":
             try:
@@ -582,6 +523,18 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, RuntimeError) as exc:
                 json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
             return
+        if path in {"/v1/conversation/submission", "/v1/live/chunks", "/v1/interrupt"}:
+            service = live_conversation_for(self)
+            if service is None:
+                json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "live conversation is not started"})
+                return
+            if path == "/v1/conversation/submission":
+                post_submission(self, service)
+            elif path == "/v1/live/chunks":
+                post_live_chunk(self, service)
+            else:
+                post_interrupt(self, service)
+            return
         if path == "/v1/desktop-pet":
             try:
                 payload = request_json(self)
@@ -635,6 +588,13 @@ class Handler(BaseHTTPRequestHandler):
             model = "irodori-v3"
             voice_id = normalize_reference_id(payload.get("voiceId") or payload.get("referenceVoice") or "")
             voice_prompt = str(payload.get("voicePrompt") or payload.get("instruct") or "").strip()
+            profile = profile_from_payload(
+                payload,
+                live=False,
+                use_reference=bool(voice_id),
+                legacy_settings=config.get("irodori"),
+            )
+            payload["ttsProfile"] = profile.name
             runtime = voice_runtime_for(self)
             if runtime is not None:
                 play_local = bool(payload.get("playLocal"))
@@ -669,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
                         "voiceProfile": model,
                         "referenceVoice": voice_id,
                         "usedReferenceAudio": str(runtime_result.get("usedReferenceAudio") or ""),
+                        "ttsProfile": str(runtime_result.get("ttsProfile") or profile.name),
                         "requestId": request_id,
                         "audioUrl": audio_url,
                         "textLength": len(text),
@@ -688,6 +649,8 @@ class Handler(BaseHTTPRequestHandler):
                 request_id=request_id,
                 reference_voice=voice_id or None,
                 voice_prompt=voice_prompt,
+                profile_name=profile.name,
+                live=False,
             )
             cleanup = prune_audio(config, preserve=(source_file,))
             if cleanup.deleted_files:
@@ -696,11 +659,11 @@ class Handler(BaseHTTPRequestHandler):
                     f"({cleanup.deleted_bytes} bytes); remaining={cleanup.remaining_files} files/{cleanup.remaining_bytes} bytes"
                 )
             audio_url = f"{str(config.get('publicBaseUrl')).rstrip('/')}/audio/{source_file.name}"
-            json_response(self, HTTPStatus.OK, {"ok": True, "engine": "irodori_direct", "runtime": "irodori_direct", "model": model, "voiceId": voice_id, "voiceProfile": model, "referenceVoice": voice_id, "usedReferenceAudio": used_reference_audio, "requestId": request_id, "audioUrl": audio_url, "textLength": len(text)})
+            json_response(self, HTTPStatus.OK, {"ok": True, "engine": "irodori_direct", "runtime": "irodori_direct", "model": model, "voiceId": voice_id, "voiceProfile": model, "referenceVoice": voice_id, "usedReferenceAudio": used_reference_audio, "ttsProfile": profile.name, "requestId": request_id, "audioUrl": audio_url, "textLength": len(text)})
         except VoiceRuntimeError as exc:
             print(f"[TTS ERROR] {exc}", file=sys.stderr)
             json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
-        except (BridgeError, IrodoriError) as exc:
+        except (BridgeError, VoiceServiceError, IrodoriError, TtsProfileError) as exc:
             print(f"[TTS ERROR] {exc}", file=sys.stderr)
             json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
         except ResponseWriteError:
@@ -738,7 +701,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    global VOICE_RUNTIME
+    global VOICE_RUNTIME, LIVE_CONVERSATION
     configure_server_process_logging()
     control_nonce = uuid.uuid4().hex
     try:
@@ -748,6 +711,12 @@ def main() -> int:
         cleanup = prune_audio(config)
         VOICE_RUNTIME = build_voice_runtime(config)
         VOICE_RUNTIME.start()
+        LIVE_CONVERSATION = LiveConversationService(
+            runtime=VOICE_RUNTIME,
+            state_path=ROOT / "runtime" / "live-conversation-state.json",
+            max_pending_chunks=2,
+            event_logger=EVENT_LOGGER,
+        )
     except Exception as exc:
         print(f"[FATAL] {exc}", file=sys.stderr)
         return 2
@@ -765,6 +734,7 @@ def main() -> int:
     httpd = ThreadingHTTPServer((host, port), Handler)
     setattr(httpd, "shutdown_token", control_nonce)
     setattr(httpd, "voice_runtime", VOICE_RUNTIME)
+    setattr(httpd, "live_conversation", LIVE_CONVERSATION)
     try:
         write_instance_state(control_nonce)
     except Exception as exc:

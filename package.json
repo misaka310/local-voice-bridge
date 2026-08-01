@@ -10,6 +10,7 @@
     "test:background-core": "node scripts/run-background-core-tests.js",
     "test:background": "node scripts/run-background-tests.js",
     "test:e2e:mock": "node scripts/run-mock-e2e.js",
+    "test:live-e2e": "node scripts/verify-live-e2e.js",
     "test:e2e:real": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --workers=1",
     "test:ci": "node scripts/run-ci.js",
     "demo": "node scripts/run-extension-demo.js",

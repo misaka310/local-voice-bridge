@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINE_PATH = ROOT / "local-api" / "irodori_engine.py"
+LOCAL_API = ROOT / "local-api"
+if str(LOCAL_API) not in sys.path:
+    sys.path.insert(0, str(LOCAL_API))
+ENGINE_PATH = LOCAL_API / "irodori_engine.py"
 
 
 def load_engine_module():
@@ -85,14 +88,60 @@ class IrodoriCudaCacheTests(unittest.TestCase):
         self.assertFalse(engine._require_reference_condition(runtime, None))
 
 
-    def test_reference_requests_use_the_quality_sampling_profile(self):
-        self.assertEqual(engine._sampling_quality({}, use_reference=False), (16, 5.0))
+    def test_reference_requests_use_only_approved_profiles(self):
+        self.assertEqual(engine._sampling_quality({}, use_reference=False), (16, 6.0))
         self.assertEqual(engine._sampling_quality({}, use_reference=True), (32, 6.0))
+        self.assertEqual(
+            engine._sampling_quality({}, use_reference=True, profile_name="speed", live=True),
+            (12, 6.0),
+        )
+        self.assertEqual(
+            engine._sampling_quality({}, use_reference=True, profile_name="balanced", live=True),
+            (16, 6.0),
+        )
 
-    def test_reference_sampling_profile_can_be_overridden(self):
-        config = {"numSteps": 20, "referenceNumSteps": 40, "cfgScaleSpeaker": 7.0}
-        self.assertEqual(engine._sampling_quality(config, use_reference=False), (20, 7.0))
-        self.assertEqual(engine._sampling_quality(config, use_reference=True), (40, 7.0))
+    def test_arbitrary_sampling_steps_are_rejected(self):
+        for config in (
+            {"numSteps": 20},
+            {"referenceNumSteps": 40},
+            {"numSteps": 8, "referenceNumSteps": 32},
+        ):
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(engine.IrodoriError, "unsupported Irodori step count"):
+                    engine._sampling_quality(config, use_reference=bool(config.get("referenceNumSteps")))
+
+    def test_low_latency_runtime_overrides_are_restored_after_success(self):
+        original_start = object()
+        original_end = object()
+        module = types.SimpleNamespace(_measure_start=original_start, _measure_end=original_end)
+        watermark_model = object()
+        runtime = types.SimpleNamespace(watermarker=types.SimpleNamespace(model=watermark_model))
+        profile = engine.resolve_tts_profile("speed")
+
+        with engine._runtime_profile_overrides(runtime, module, profile):
+            self.assertIsNone(runtime.watermarker.model)
+            self.assertIsNot(module._measure_start, original_start)
+            self.assertIsNot(module._measure_end, original_end)
+
+        self.assertIs(runtime.watermarker.model, watermark_model)
+        self.assertIs(module._measure_start, original_start)
+        self.assertIs(module._measure_end, original_end)
+
+    def test_low_latency_runtime_overrides_are_restored_after_exception(self):
+        original_start = object()
+        original_end = object()
+        module = types.SimpleNamespace(_measure_start=original_start, _measure_end=original_end)
+        watermark_model = object()
+        runtime = types.SimpleNamespace(watermarker=types.SimpleNamespace(model=watermark_model))
+        profile = engine.resolve_tts_profile("balanced")
+
+        with self.assertRaisesRegex(RuntimeError, "synthesis failed"):
+            with engine._runtime_profile_overrides(runtime, module, profile):
+                raise RuntimeError("synthesis failed")
+
+        self.assertIs(runtime.watermarker.model, watermark_model)
+        self.assertIs(module._measure_start, original_start)
+        self.assertIs(module._measure_end, original_end)
 
 
 if __name__ == "__main__":

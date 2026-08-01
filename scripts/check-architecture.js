@@ -46,11 +46,25 @@ for (const file of [
   'local-api/durable_outbox.py',
   'local-api/http_io.py',
   'local-api/runtime_readiness.py',
+  'local-api/installation_identity.py',
+  'local-api/gpu_arbiter.py',
+  'local-api/tts_profiles.py',
+  'local-api/audio_quality.py',
+  'local-api/runtime_events.py',
+  'local-api/conversation_submission.py',
+  'local-api/live_conversation.py',
+  'local-api/live_http.py',
+  'local-api/conversation_turn.py',
+  'local-api/voice_job_queue.py',
   'local-api/voice_runtime.py',
+  'local-api/voice_service.py',
   'extension/background-core.js',
   'extension/background-settings-core.js',
   'extension/background-runtime-core.js',
   'extension/background-control-sync.js',
+  'extension/background-live-client.js',
+  'extension/live-browser-core.js',
+  'extension/live-content-controller.js',
 ]) {
   requireFile(file);
 }
@@ -61,6 +75,9 @@ capLines('extension/background.js', 1125);
 capLines('extension/background-settings-core.js', 200);
 capLines('extension/background-runtime-core.js', 190);
 capLines('extension/background-control-sync.js', 330);
+capLines('extension/background-live-client.js', 120);
+capLines('extension/live-browser-core.js', 250);
+capLines('extension/live-content-controller.js', 420);
 
 requireText(
   'CONTRIBUTING.md',

@@ -25,12 +25,14 @@ test('options settings preserve valid values and clamp unsafe input', () => {
     previewMaxChars: 480,
     sttModel: 'large-v3-turbo',
     cancelGraceMs: 1500,
+    liveTtsProfile: 'balanced',
   }), {
     settingsVersion: SETTINGS_VERSION,
     previewMaxLines: 10,
     previewMaxChars: 480,
     sttModel: 'large-v3-turbo',
     cancelGraceMs: 1500,
+    liveTtsProfile: 'balanced',
   });
 
   assert.deepEqual(normalizeSettings({
@@ -44,5 +46,6 @@ test('options settings preserve valid values and clamp unsafe input', () => {
     previewMaxChars: 40,
     sttModel: DEFAULTS.sttModel,
     cancelGraceMs: 0,
+    liveTtsProfile: DEFAULTS.liveTtsProfile,
   });
 });

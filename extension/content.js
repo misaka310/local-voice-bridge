@@ -1,5 +1,5 @@
 (() => {
-  const SETTINGS_VERSION = 10;
+  const SETTINGS_VERSION = 11;
   const DEFAULT_SETTINGS = {
     settingsVersion: SETTINGS_VERSION,
     enabled: false,
@@ -17,6 +17,7 @@
     micConversationEnabled: false,
     sttModel: 'small',
     cancelGraceMs: 700,
+    liveTtsProfile: 'speed',
   };
   const AUTO_SENT_FLAG = 'localVoiceSent';
   const COMPLETION_TITLE_PREFIX = '● ';
@@ -49,6 +50,7 @@
   let currentPlaybackCancel = null;
   let currentConversationPhase = 'off';
   let pendingSendController = null;
+  let liveController = null;
   let cancelOverlay = null;
   let isUiOwner = null;
   let completionMarkerPending = false;
@@ -211,6 +213,13 @@
     return clampInteger(value, DEFAULT_SETTINGS.cancelGraceMs, 0, 5000);
   }
 
+  function normalizeLiveTtsProfile(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['speed', 'balanced', 'bridge'].includes(normalized)
+      ? normalized
+      : DEFAULT_SETTINGS.liveTtsProfile;
+  }
+
   async function sanitizeStoredSettings(raw) {
     const next = {
       ...DEFAULT_SETTINGS,
@@ -225,6 +234,7 @@
       previewMaxChars: clampInteger(raw.previewMaxChars, DEFAULT_SETTINGS.previewMaxChars, 40, 1000),
       sttModel: normalizeSttModel(raw.sttModel),
       cancelGraceMs: normalizeCancelGraceMs(raw.cancelGraceMs),
+      liveTtsProfile: normalizeLiveTtsProfile(raw.liveTtsProfile),
     };
     for (const key of LEGACY_BROWSER_UI_STORAGE_KEYS) delete next[key];
     if (globalThis.chrome && chrome.storage && chrome.storage.local) {
@@ -457,6 +467,47 @@
     });
   }
 
+  function ensureLiveController() {
+    if (liveController) return liveController;
+    const api = globalThis.LocalVoiceLiveContent;
+    if (!api || typeof api.createLiveContentController !== 'function') return null;
+    liveController = api.createLiveContentController({
+      getLocation: () => location.href,
+      getAssistantNodes,
+      getStableKey,
+      extractAssistantText,
+      isResponseGenerating,
+      runtimeMessage,
+      crypto: globalThis.crypto,
+      getVoiceSettings: () => ({
+        liveTtsProfile: normalizeLiveTtsProfile(settings.liveTtsProfile),
+        voiceId: getCurrentReferenceVoice(),
+        referenceVoice: getCurrentReferenceVoice(),
+        voicePrompt: String(settings.voicePrompt || ''),
+        voiceVolume: clampVolume(settings.voiceVolume),
+      }),
+      onState: (state) => {
+        const labels = {
+          arming: '送信関連付けを保存中',
+          armed: '送信準備完了',
+          committed: 'ChatGPT応答待ち',
+          bound: '返答を逐次読み上げ中',
+          invalidated: 'Live会話を取り消しました',
+          interrupted: 'Live会話を停止しました',
+        };
+        if (labels[state.phase]) {
+          reportConversationState({
+            phase: state.phase === 'bound' ? 'responding' : state.phase,
+            statusText: labels[state.phase],
+            error: '',
+            sttModel: settings.sttModel,
+          });
+        }
+      },
+    });
+    return liveController;
+  }
+
   async function reportChunks(entry, isAuto = false) {
     await chrome.runtime.sendMessage({
       type: 'report-chunks',
@@ -617,6 +668,7 @@
     const nodes = getAssistantNodes();
     if (nodes.length === 0) return;
     processNode(nodes[nodes.length - 1]);
+    if (settings.micConversationEnabled) void ensureLiveController()?.inspect();
   }
 
   function removedNodeContainsGenerationControl(node) {
@@ -857,12 +909,18 @@
     if (pendingSendController) return pendingSendController;
     const api = globalThis.LocalVoicePromptInput;
     if (!api || typeof api.createPendingSendController !== 'function') return null;
+    const live = ensureLiveController();
+    if (!live) return null;
     pendingSendController = api.createPendingSendController({
       document,
       window,
       Event,
       InputEvent,
       getLocation: () => location.href,
+      prepareSubmission: (item) => live.prepareSubmission(item),
+      commitSubmission: (item) => live.commitSubmission(item),
+      invalidateSubmission: (item, reason) => live.invalidateSubmission(item, reason),
+      markSubmissionClick: (item, composer) => live.markSubmissionClick(item, composer),
       onState: (state) => {
         if (state.phase === 'pending_send') showCancelOverlay(settings.cancelGraceMs);
         else hideCancelOverlay();
@@ -938,14 +996,22 @@
           return false;
         }
         settings.cancelGraceMs = Math.max(0, Math.min(5000, Number(payload.cancelGraceMs) || 0));
-        const result = controller.start({
-          sessionId: Number(payload.sessionId) || 0,
-          text: String(payload.text || ''),
+        const live = ensureLiveController();
+        if (!live) {
+          sendResponse({ ok: false, reason: 'live-content-controller-unavailable' });
+          return false;
+        }
+        const text = String(payload.text || '');
+        const metadata = live.metadata(String(payload.sessionId || ''), text);
+        Promise.resolve(controller.start({
+          ...metadata,
+          text,
           graceMs: settings.cancelGraceMs,
-        });
-        if (result && result.ok === true && deliveryId && ledger) ledger.mark(deliveryId);
-        sendResponse(result);
-        return false;
+        })).then((result) => {
+          if (result && result.ok === true && deliveryId && ledger) ledger.mark(deliveryId);
+          sendResponse(result);
+        }).catch((error) => sendResponse({ ok: false, reason: error.message || String(error) }));
+        return true;
       }
       if (message.type === 'cancel-voice-send') {
         const controller = ensurePendingSendController();
@@ -986,6 +1052,8 @@
     } catch (_error) {
       applyOwnerState(null);
     }
+    const live = ensureLiveController();
+    if (settings.micConversationEnabled) void live?.reconcile();
     observer = new MutationObserver(scheduleInspect);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     const claimUiOwnership = () => {
@@ -1009,9 +1077,21 @@
     document.addEventListener('pointerdown', claimUiOwnership, { capture: true });
     document.addEventListener('focusin', (event) => reportComposerFocus(event.target), { capture: true });
     document.addEventListener('pointerdown', (event) => reportComposerFocus(event.target), { capture: true });
+    document.addEventListener('input', (event) => {
+      if (settings.micConversationEnabled) live?.handleInput(event);
+    }, { capture: true });
+    document.addEventListener('keydown', (event) => {
+      if (!settings.micConversationEnabled) return;
+      const promptApi = globalThis.LocalVoicePromptInput;
+      live?.handleKeydown(event, (target) => Boolean(promptApi && promptApi.isComposerTarget(document, target)));
+    }, { capture: true });
+    document.addEventListener('pointerdown', (event) => {
+      if (settings.micConversationEnabled) live?.handlePointer(event);
+    }, { capture: true });
     reportComposerFocus();
     window.addEventListener('pagehide', () => {
       if (pendingSendController) pendingSendController.cancel('page-changed');
+      void live?.interrupt('pagehide');
       hideCancelOverlay();
     });
     void pollExternalControl();
@@ -1029,10 +1109,13 @@
       if (!wasEnabled && enabled) rebaselineAutoMessages();
       settings.voiceVolume = clampVolume(settings.voiceVolume);
       if (Object.prototype.hasOwnProperty.call(changes, 'micConversationEnabled')) {
-        if (!settings.micConversationEnabled && pendingSendController) {
-          pendingSendController.cancel('disabled');
+        if (!settings.micConversationEnabled) {
+          if (pendingSendController) pendingSendController.cancel('disabled');
+          void ensureLiveController()?.interrupt('disabled');
           hideCancelOverlay();
           reportConversationState({ phase: 'off', statusText: 'マイク会話オフ', error: '', sttModel: settings.sttModel });
+        } else {
+          void ensureLiveController()?.reconcile();
         }
       }
       if (Object.prototype.hasOwnProperty.call(changes, 'voiceId')
