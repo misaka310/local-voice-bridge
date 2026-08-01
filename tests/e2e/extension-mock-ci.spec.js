@@ -15,6 +15,9 @@ const EXTENSION_DIR = path.join(os.tmpdir(), `local-voice-extension-mock-${proce
 const EXTENSION = EXTENSION_DIR.replaceAll('\\', '/');
 const PROFILE = path.join(ROOT, `.e2e-profile-mock-${process.pid}-${Date.now()}`);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const USED_MOCK_PORTS = new Set();
+const MOCK_PORT_BASE = 20000 + ((process.pid * 997 + Date.now()) % 30000);
+let nextMockPortOffset = 0;
 
 function prepareTestExtension() {
   fs.rmSync(EXTENSION_DIR, { recursive: true, force: true });
@@ -33,20 +36,29 @@ test.beforeAll(() => prepareTestExtension());
 test.afterAll(() => fs.rmSync(EXTENSION_DIR, { recursive: true, force: true }));
 
 async function allocateMockPort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.unref();
-    probe.once('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = address && typeof address === 'object' ? address.port : 0;
-      probe.close((error) => {
-        if (error) reject(error);
-        else if (!port) reject(new Error('failed to allocate a loopback mock port'));
-        else resolve(port);
+  for (let attempt = 0; attempt < 30000; attempt += 1) {
+    const port = 20000 + ((MOCK_PORT_BASE - 20000 + nextMockPortOffset) % 30000);
+    nextMockPortOffset += 1;
+    if (USED_MOCK_PORTS.has(port)) continue;
+    const available = await new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.unref();
+      probe.once('error', (error) => {
+        if (error && error.code === 'EADDRINUSE') resolve(false);
+        else reject(error);
+      });
+      probe.listen(port, '127.0.0.1', () => {
+        probe.close((error) => {
+          if (error) reject(error);
+          else resolve(true);
+        });
       });
     });
-  });
+    if (!available) continue;
+    USED_MOCK_PORTS.add(port);
+    return port;
+  }
+  throw new Error('failed to allocate a unique loopback mock port');
 }
 
 async function mockHealth() {
