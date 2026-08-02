@@ -11,6 +11,7 @@ const BACKGROUND_PATH = path.join(ROOT, 'extension', 'background.js');
 const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
+const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_LIVE_CLIENT_PATH = path.join(ROOT, 'extension', 'background-live-client.js');
 
@@ -277,6 +278,7 @@ function createHarness({
       BACKGROUND_CORE_PATH,
       BACKGROUND_SETTINGS_CORE_PATH,
       BACKGROUND_RUNTIME_CORE_PATH,
+      BACKGROUND_QUEUE_CORE_PATH,
       BACKGROUND_CONTROL_SYNC_PATH,
       BACKGROUND_LIVE_CLIENT_PATH,
     ]) {
@@ -406,7 +408,7 @@ test('missing receivers are injected into already-open ChatGPT tabs before recon
   await waitFor(() => harness.injectedScripts.length === 1);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
     target: { tabId: 303 },
-    files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
+    files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content.js'],
   });
   await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
 });

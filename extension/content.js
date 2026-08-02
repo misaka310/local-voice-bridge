@@ -48,13 +48,10 @@
   const DEFAULT_PET_ID = 'placeholder';
   const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
 
-  const stateByElement = new WeakMap();
-  const initializedElements = new WeakSet();
   let settings = { ...DEFAULT_SETTINGS };
   let enabled = false;
   let observer = null;
   let titleObserver = null;
-  let inspectTimer = null;
   let currentAudio = null;
   let currentObjectUrl = null;
   let currentPlaybackToken = null;
@@ -67,17 +64,13 @@
   let completionMarkerPending = false;
   let baseDocumentTitle = '';
   let deliveryLedger = null;
+  let autoSpeechController = null;
   const textCore = globalThis.ContentTextCore;
+  const assistantText = globalThis.LocalVoiceAssistantText;
+  const autoSpeech = globalThis.LocalVoiceAutoSpeech;
 
   function normalizeText(text) {
-    return String(text || '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    return assistantText.normalizeText(text);
   }
 
   function stripCompletionTitlePrefix(title) {
@@ -170,34 +163,6 @@
   function hasResponseCompletionControl(node) {
     const turn = responseTurnForNode(node);
     return Boolean(turn && typeof turn.querySelector === 'function' && turn.querySelector(RESPONSE_COMPLETE_SELECTOR));
-  }
-
-  function observeResponseCompletion(node, item) {
-    const generating = isResponseGenerating();
-    if (generating) item.generationObserved = true;
-    else if (item.generationObserved) item.generationCompleted = true;
-    if (hasResponseCompletionControl(node)) item.completionControlObserved = true;
-    return {
-      generating,
-      confirmed: Boolean(item.generationCompleted || item.completionControlObserved),
-    };
-  }
-
-  function isTransientAssistantStatus(text) {
-    const normalized = normalizeText(text).replace(/\s+/g, '');
-    return /^(?:(?:\d+|個の)?画像を(?:分析|解析)(?:中|しています)|思考中|考え中|Thinking|Analyzing(?:the)?images?)(?:ストリーミングが中断されました。?完全なメッセージを待機しています)?(?:[.…。・]+)?$/i.test(normalized);
-  }
-
-  function normalizeMarkdownLine(line) {
-    return String(line || '')
-      .replace(/^>\s*/g, '')
-      .replace(/^#{1,6}\s*/g, '')
-      .replace(/^\s*[-*+]\s+/g, '')
-      .replace(/^\s*\d+\.\s+/g, '')
-      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
-      .replace(/[*_~`]/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
   }
 
   function clampVolume(value) {
@@ -319,8 +284,8 @@
     text = text.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/\n{2,}/g, '\n');
     const lines = text
       .split('\n')
-      .map((line) => normalizeMarkdownLine(line))
-      .filter((line) => Boolean(line) && !isTransientAssistantStatus(line));
+      .map((line) => assistantText.normalizeMarkdownLine(line))
+      .filter((line) => Boolean(line) && !assistantText.isTransientAssistantStatus(line));
     return textCore.coalesceOrphanLines(lines, {
       minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
     });
@@ -367,174 +332,66 @@
     return textCore.stableDelayForPreview(preview, { minChars, stableMs });
   }
 
-  function shouldSendNow(node, preview, now, item) {
-    if (!preview.length) return false;
-    const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
-    const completion = observeResponseCompletion(node, item);
-    if (!textCore.canFinalizePreview(preview, {
-      minChars,
-      completionConfirmed: completion.confirmed,
-    })) return false;
-    if (completion.generating && preview.length < minChars) return false;
-    return now - item.lastChangedAt >= stableDelayForPreview(preview);
-  }
-
-  function schedulePendingAutoSend(node, item, preview) {
-    if (item.idleTimer) clearTimeout(item.idleTimer);
-    const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
-    const generationRetryMs = isResponseGenerating() ? 500 : 0;
-    const completionRetryMs = preview.length < minChars ? 500 : 0;
-    const remainingMs = Math.max(
-      50,
-      generationRetryMs,
-      completionRetryMs,
-      stableDelayForPreview(preview) - (Date.now() - item.lastChangedAt) + 50,
-    );
-    item.idleTimer = setTimeout(() => {
-      item.idleTimer = null;
-      if (item.sent) return;
-      const latest = extractAssistantText(node);
-      if (!latest) return;
-      if (latest !== item.lastText) {
-        processNode(node);
-        return;
-      }
-      const pendingChunks = splitSpeakChunks(latest, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      const pendingPreview = extractAutoPreview(latest, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      if (!pendingPreview) return;
-      if (!shouldSendNow(node, pendingPreview, Date.now(), item)) {
-        schedulePendingAutoSend(node, item, pendingPreview);
-        return;
-      }
-      item.sent = true;
-      node.dataset[AUTO_SENT_FLAG] = '1';
-      void reportChunks({ node, text: latest, messageKey: item.key, chunks: pendingChunks, autoPreview: pendingPreview, capturedAt: Date.now() }, Boolean(enabled && settings.enabled));
-      maybeMarkResponseCompleted(node, item, latest);
-    }, remainingMs);
-  }
-
   function getAssistantNodes() {
-    const primary = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
-    if (primary.length > 0) return primary;
-    return Array.from(document.querySelectorAll('article')).filter((node) => {
-      const label = `${node.getAttribute('aria-label') || ''} ${node.textContent || ''}`.toLowerCase();
-      return label.includes('assistant') || label.includes('chatgpt');
-    });
+    return assistantText.getAssistantNodes(document);
   }
 
   function getStableKey(node) {
-    const turn = node.closest('[data-testid^="conversation-turn-"]');
-    const testId = turn && turn.getAttribute('data-testid');
-    const messageId = node.getAttribute('data-message-id') || node.dataset.messageId;
-    if (messageId) return messageId;
-    if (testId) return testId;
-    if (!node.__localVoiceBridgeId) node.__localVoiceBridgeId = `node-${Math.random().toString(36).slice(2)}`;
-    return node.__localVoiceBridgeId;
-  }
-
-  function normalizedLinkLabel(value) {
-    return normalizeText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-
-  function isBareHostLabel(link, label) {
-    if (!label || label.length > 40) return false;
-    const href = String(link.getAttribute('href') || '').trim();
-    if (!href) return false;
-    try {
-      const parsed = new URL(href, 'https://chatgpt.com/');
-      if (!/^https?:$/.test(parsed.protocol)) return false;
-      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
-      const hostParts = host.split('.').filter(Boolean);
-      const candidates = new Set([
-        hostParts[0] || '',
-        hostParts.slice(0, -1).join(''),
-        host.replace(/\./g, ''),
-      ].map(normalizedLinkLabel).filter(Boolean));
-      return candidates.has(normalizedLinkLabel(label));
-    } catch (_error) {
-      return false;
-    }
-  }
-
-  function removeDecorativeSourceLinks(clone) {
-    const links = Array.from(clone.querySelectorAll('a'));
-    const labelCounts = new Map();
-    for (const link of links) {
-      const label = normalizeText(link.innerText || link.textContent || '');
-      const key = normalizedLinkLabel(label);
-      if (key) labelCounts.set(key, (labelCounts.get(key) || 0) + 1);
-    }
-    for (const link of links) {
-      const label = normalizeText(link.innerText || link.textContent || '');
-      const key = normalizedLinkLabel(label);
-      const repeatedBareLabel = /^[A-Za-z][A-Za-z0-9 ._+-]{1,39}$/.test(label)
-        && Number(labelCounts.get(key) || 0) >= 3;
-      if (repeatedBareLabel || isBareHostLabel(link, label)) link.remove();
-    }
+    return assistantText.getStableKey(node);
   }
 
   function extractAssistantText(node) {
-    const clone = node.cloneNode(true);
-    clone.querySelectorAll('pre, button, svg, menu, nav, script, style, textarea, input, select, sup').forEach((item) => item.remove());
-    removeDecorativeSourceLinks(clone);
-    const text = textCore.stripRepeatedUiLabels(normalizeText(clone.innerText || clone.textContent || ''));
-    return isTransientAssistantStatus(text) ? '' : text;
+    return assistantText.extractAssistantText(node);
   }
 
-  function ensureElementState(node, text) {
-    let item = stateByElement.get(node);
-    if (!item) {
-      const alreadySent = node.dataset[AUTO_SENT_FLAG] === '1';
-      item = {
-        key: getStableKey(node),
-        sent: alreadySent,
-        completionNotified: alreadySent,
-        generationObserved: false,
-        generationCompleted: false,
-        completionControlObserved: false,
-        lastText: text,
-        lastChangedAt: Date.now(),
-        idleTimer: null,
-        completionTimer: null,
-      };
-      stateByElement.set(node, item);
+  function getPreviewOptions() {
+    return {
+      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
+      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
+      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
+    };
+  }
+
+  function isGenerationControlNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    return node.matches(RESPONSE_GENERATING_SELECTOR)
+      || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));
+  }
+
+  function ensureAutoSpeechController() {
+    if (autoSpeechController) return autoSpeechController;
+    if (!assistantText || !autoSpeech || typeof autoSpeech.createAutoSpeechController !== 'function') {
+      throw new Error('assistant text and auto speech modules must load before content.js');
     }
-    return item;
+    autoSpeechController = autoSpeech.createAutoSpeechController({
+      sentFlag: AUTO_SENT_FLAG,
+      getAssistantNodes,
+      extractAssistantText,
+      getStableKey,
+      isResponseGenerating,
+      hasResponseCompletionControl,
+      getPreviewOptions,
+      splitSpeakChunks,
+      extractAutoPreview,
+      stableDelayForPreview,
+      canFinalizePreview: textCore.canFinalizePreview,
+      reportChunks,
+      markResponseCompleted,
+      isAutoEnabled: () => Boolean(enabled && settings.enabled),
+      isGenerationControlNode,
+      afterInspectLatest: () => {
+        if (settings.micConversationEnabled) void ensureLiveController()?.inspect();
+      },
+    });
+    return autoSpeechController;
   }
 
   function markExistingMessagesAsSeen() {
-    for (const node of getAssistantNodes()) {
-      const text = extractAssistantText(node);
-      initializedElements.add(node);
-      const item = stateByElement.get(node);
-      if (item && item.idleTimer) clearTimeout(item.idleTimer);
-      if (item && item.completionTimer) clearTimeout(item.completionTimer);
-      stateByElement.set(node, {
-        key: getStableKey(node),
-        sent: true,
-        completionNotified: true,
-        generationObserved: false,
-        generationCompleted: false,
-        completionControlObserved: false,
-        lastText: text,
-        lastChangedAt: Date.now(),
-        idleTimer: null,
-        completionTimer: null,
-      });
-      node.dataset[AUTO_SENT_FLAG] = '1';
-    }
+    ensureAutoSpeechController().markExistingMessagesAsSeen();
   }
 
   function rebaselineAutoMessages() {
-    markExistingMessagesAsSeen();
+    ensureAutoSpeechController().rebaseline();
   }
 
   function runtimeMessage(type, extra = {}) {
@@ -612,32 +469,7 @@
   }
 
   async function reportLatestAssistantSnapshot() {
-    const nodes = getAssistantNodes();
-    if (!nodes.length) return false;
-    const node = nodes[nodes.length - 1];
-    const text = extractAssistantText(node);
-    if (!text) return false;
-    const item = ensureElementState(node, text);
-    const chunks = splitSpeakChunks(text, {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-    const preview = extractAutoPreview(text, {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-    if (!chunks.length || !preview) return false;
-    await reportChunks({
-      node,
-      text,
-      messageKey: item.key,
-      chunks,
-      autoPreview: preview,
-      capturedAt: Date.now(),
-    }, false);
-    return true;
+    return ensureAutoSpeechController().reportLatestSnapshot();
   }
 
   async function registerCurrentTab({ claimOwner = false, includeLatest = false } = {}) {
@@ -650,137 +482,8 @@
     return response || null;
   }
 
-  function maybeMarkResponseCompleted(node, item, text) {
-    if (!item.sent || item.completionNotified) return;
-    if (isResponseGenerating()) {
-      item.generationObserved = true;
-      if (item.completionTimer) clearTimeout(item.completionTimer);
-      item.completionTimer = null;
-      return;
-    }
-    const preview = extractAutoPreview(text, {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-    if (!preview) return;
-    const stableMs = stableDelayForPreview(preview);
-    const requiredStableMs = item.generationObserved ? 0 : Math.max(stableMs, 1800);
-    const remainingMs = requiredStableMs - (Date.now() - item.lastChangedAt);
-    if (remainingMs > 0) {
-      if (item.completionTimer) clearTimeout(item.completionTimer);
-      item.completionTimer = setTimeout(() => {
-        item.completionTimer = null;
-        const latest = extractAssistantText(node);
-        if (!latest) return;
-        if (latest !== item.lastText) {
-          processNode(node);
-          return;
-        }
-        maybeMarkResponseCompleted(node, item, latest);
-      }, remainingMs + 50);
-      return;
-    }
-    item.completionNotified = true;
-    if (item.completionTimer) clearTimeout(item.completionTimer);
-    item.completionTimer = null;
-    void markResponseCompleted();
-  }
-
-  function processNode(node) {
-    const text = extractAssistantText(node);
-    if (!text) return;
-    const item = ensureElementState(node, text);
-    if (isResponseGenerating()) item.generationObserved = true;
-    if (item.sent) {
-      if (text === item.lastText) {
-        maybeMarkResponseCompleted(node, item, text);
-        return;
-      }
-      item.lastText = text;
-      item.lastChangedAt = Date.now();
-      const chunks = splitSpeakChunks(text, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      const preview = extractAutoPreview(text, {
-        maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-        maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-        minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-      });
-      if (chunks.length && preview) {
-        void reportChunks({
-          node,
-          text,
-          messageKey: item.key,
-          chunks,
-          autoPreview: preview,
-          capturedAt: Date.now(),
-        }, false);
-        maybeMarkResponseCompleted(node, item, text);
-      }
-      return;
-    }
-    if (!initializedElements.has(node)) {
-      initializedElements.add(node);
-      item.lastText = text;
-      item.lastChangedAt = Date.now();
-      if (!enabled || !settings.enabled) return;
-    }
-    if (text !== item.lastText) {
-      item.lastText = text;
-      item.lastChangedAt = Date.now();
-    }
-    const chunks = splitSpeakChunks(text, {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-    const preview = extractAutoPreview(text, {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-    if (!preview) return;
-    const entry = { node, text, messageKey: item.key, chunks, autoPreview: preview, capturedAt: Date.now() };
-    if (shouldSendNow(node, preview, Date.now(), item)) {
-      item.sent = true;
-      node.dataset[AUTO_SENT_FLAG] = '1';
-      void reportChunks(entry, Boolean(enabled && settings.enabled));
-      maybeMarkResponseCompleted(node, item, text);
-      return;
-    }
-    schedulePendingAutoSend(node, item, preview);
-  }
-
-  function inspectLatestAssistant() {
-    const nodes = getAssistantNodes();
-    if (nodes.length === 0) return;
-    processNode(nodes[nodes.length - 1]);
-    if (settings.micConversationEnabled) void ensureLiveController()?.inspect();
-  }
-
-  function removedNodeContainsGenerationControl(node) {
-    if (!node || node.nodeType !== 1) return false;
-    return node.matches(RESPONSE_GENERATING_SELECTOR)
-      || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));
-  }
-
   function scheduleInspect(mutations = []) {
-    const generationEnded = mutations.some((mutation) => Array.from(mutation.removedNodes || [])
-      .some(removedNodeContainsGenerationControl));
-    if (generationEnded) {
-      if (inspectTimer) clearTimeout(inspectTimer);
-      inspectTimer = null;
-      inspectLatestAssistant();
-      return;
-    }
-    if (inspectTimer) return;
-    inspectTimer = setTimeout(() => {
-      inspectTimer = null;
-      inspectLatestAssistant();
-    }, 200);
+    ensureAutoSpeechController().scheduleInspect(mutations);
   }
 
   async function syncDesktopPetSelection(referenceVoice = getCurrentReferenceVoice()) {

@@ -14,10 +14,14 @@
 - `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
 - `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
-- `extension/content.js`: 各ChatGPTタブの通常Auto返答検知、入力欄への文字起こし反映、Live controllerのDOM接続、delivery IDの重複防止を担当。Live音声はローカルAPI側で再生する
-- `extension/background.js`: タブ登録、共通キュー、再生進行、各専用モジュールの接続だけを担当
+- `extension/content.js`: 各ChatGPTタブの設定・MutationObserver・Chrome message・ローカル再生・Live controllerを接続する調整層。本文抽出、Auto状態機械、Composer DOM規則は保持しない
+- `extension/assistant-text-extractor.js`: assistant DOMから本文だけを抽出し、コード、操作ボタン、途中状態、引用番号、外部ソースカードの装飾ラベルを除外する境界
+- `extension/auto-speech-controller.js`: 既存返答の基線、新規返答のstreaming / stable / completed、Auto一回送信、更新差分、完了通知をタブ単位で管理
+- `extension/prompt-input-core.js`: 使用可能なChatGPT Composerの選択、ProseMirrorへのネイティブ挿入・削除、送信ボタン範囲、送信前ACK後のクリックを担当
+- `extension/background.js`: Chromeタブ・HTTP・永続化・再生副作用と、各専用モジュールの接続だけを担当
 - `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
 - `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
+- `extension/background-queue-core.js`: Auto許可判定、streaming時の既読境界維持、Auto重複排除、Next / Regen選択、キュー項目正規化を副作用なしで担当
 - `extension/background-control-sync.js`: 安定consumer ID、control-panel poll / ACK、再配信カーソル、外部設定同期、録音開始時の送信先への文字起こし配送を担当
 - `extension/live-browser-core.js`: assistant基線・一意bind、文境界、prefix整合、429 bounded retryを副作用なしで担当
 - `extension/live-content-controller.js`: `pageInstanceId`、`submissionId`、assistant bind、Liveチャンク送信、入力・送信・Regen・遷移による失効を担当
@@ -61,11 +65,11 @@ POST /v1/control-panel/state
 ## 返答検知と全タブAuto
 
 1. 開いている各ChatGPTタブが`background.js`へ登録されます。
-2. 各`content.js`が既存assistant返答を基準として記録します。
+2. `assistant-text-extractor.js`がassistant本文だけを取り出し、`auto-speech-controller.js`が既存返答を基準として記録します。
 3. 外部小窓で`Auto`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
-4. その後で各タブへ新しく表示されたassistant返答を検知します。
-5. 各タブの最大2行・80文字の冒頭プレビューを1つの共通キューへ追加します。
-6. 共通キューの順番で1件ずつ読み上げます。
+4. その後で各タブへ新しく表示されたassistant返答をAuto状態機械が検知・安定判定します。
+5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、1つの共通キューへ追加します。
+6. `background.js`がローカル音声APIと再生副作用を実行し、共通キューの順番で1件ずつ読み上げます。
 
 Autoの対象は、最後に触った1タブだけではありません。開いている全ChatGPTタブです。`思考中`、`考え中`、`Thinking`、`画像を分析しています`だけの途中状態と、Autoをオンにする前から表示されていた返答は読みません。
 
@@ -161,12 +165,12 @@ Voice、Tab、Petの独立選択設定は保存しません。
 
 ## 変更時の設計ゲート
 
-`npm run check:architecture`は、責務分離に必要なモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`control_state.py`、`server.py`、`background.js`へ新しい責務を直接追加して上限を超える変更は、別モジュールへ切り出さない限りCIで失敗します。
+`npm run check:architecture`は、責務分離に必要なモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`control_state.py`、`server.py`、`content.js`、`background.js`へ本文抽出・Auto状態・Composer規則・キュー規則などの新しい責務を戻す変更や、上限を超える変更はCIで失敗します。
 
 ## テスト
 
 - Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
-- background単体テスト: 全タブ共通キュー、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
+- extension単体テスト: assistant本文抽出、Auto状態機械、Composer操作、全タブ共通キュー、Next / Regen境界、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
 - mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク送信前ACK、assistant bind、Liveチャンク
 - Live 17項目ゲート: 入力・送信・Regen・遷移の割り込み、stale排除、再起動失効、通常キュー互換、曖昧bind拒否、STT優先、CPU fallback 0
 - real E2E: 専用loopbackポートでIrodori v3 direct、Next、実参照音声・ペット同期、複数タブ共通キュー

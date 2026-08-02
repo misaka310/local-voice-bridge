@@ -7,6 +7,8 @@ const {
   normalizeStoredReference,
   sanitizeSettings,
 } = settingsCore;
+const queueCore = globalThis.BackgroundQueueCore;
+if (!queueCore) throw new Error('background-queue-core.js must be loaded before background.js');
 const CHATGPT_TAB_PATTERNS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
 const BRIDGE_CONSUMER_ID_KEY = 'bridgeConsumerId';
 
@@ -303,58 +305,7 @@ async function deliverVoiceTranscript(targetTabId, payload, settings) {
 }
 
 function shouldQueueAutoFromTab(_tabId) {
-  if ([
-    'recording',
-    'preparing_model',
-    'transcribing',
-    'pending_send',
-    'arming_submission',
-    'arming', 'armed',
-    'sending',
-    'waiting_response',
-    'committed',
-    'responding',
-    'speaking',
-  ].includes(conversationPhase)) {
-    return false;
-  }
-  return true;
-}
-
-function preserveReadChunkBoundary(previousMessage, incomingChunks, lastReadIndex) {
-  if (!previousMessage || !Array.isArray(previousMessage.chunks) || lastReadIndex < 0) return incomingChunks;
-  const consumed = previousMessage.chunks
-    .slice(0, lastReadIndex + 1)
-    .map((value) => String(value || '').trim())
-    .filter(Boolean);
-  if (!consumed.length) return incomingChunks;
-  let prefix = consumed.join(' ');
-  const continuation = [];
-  for (const rawChunk of incomingChunks) {
-    const chunk = String(rawChunk || '').trim();
-    if (!chunk) continue;
-    if (!prefix) {
-      continuation.push(chunk);
-      continue;
-    }
-    if (prefix === chunk) {
-      prefix = '';
-      continue;
-    }
-    if (prefix.startsWith(`${chunk} `)) {
-      prefix = prefix.slice(chunk.length + 1).trim();
-      continue;
-    }
-    if (chunk.startsWith(prefix)) {
-      const remainder = chunk.slice(prefix.length).trim();
-      prefix = '';
-      if (remainder) continuation.push(remainder);
-      continue;
-    }
-    return incomingChunks;
-  }
-  if (prefix) return incomingChunks;
-  return [...consumed, ...continuation];
+  return queueCore.shouldQueueAuto(conversationPhase);
 }
 
 function statePayload(forTabId = null) {
@@ -575,7 +526,7 @@ async function reconnectChatGptTab(tab) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
+        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content.js'],
       });
       const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
       return Boolean(response && response.ok === true);
@@ -662,23 +613,13 @@ async function syncExternalControlPanel() {
 }
 
 function enqueue(base, front = false) {
-  const item = {
-    id: `q-${Date.now()}-${seq++}`,
-    mode: String(base.mode || 'manual'),
-    reason: String(base.reason || 'manual'),
-    tabId: Number(base.tabId),
-    tabTitle: String(base.tabTitle || 'ChatGPT'),
-    messageKey: String(base.messageKey || ''),
-    chunkIndex: Number(base.chunkIndex || 0),
-    chunkCount: Number(base.chunkCount || 0),
-    text: String(base.text || ''),
-    voiceProfile: DEFAULT_SETTINGS.voiceProfile,
-    referenceVoice: base.referenceVoice === undefined
-      ? (referenceSettingsLoaded ? lastKnownReferenceVoice : undefined)
-      : normalizeStoredReference(base.referenceVoice),
-    voicePrompt: '',
-    audioUrl: base.audioUrl ? String(base.audioUrl) : null,
-  };
+  const item = queueCore.createQueueItem(base, {
+    createId: () => `q-${Date.now()}-${seq++}`,
+    defaultVoiceProfile: DEFAULT_SETTINGS.voiceProfile,
+    referenceSettingsLoaded,
+    lastKnownReferenceVoice,
+    normalizeReferenceVoice: normalizeStoredReference,
+  });
   if (front) queue.unshift(item);
   else queue.push(item);
   return item;
@@ -744,54 +685,20 @@ function recoverExpiredPlayback(now = Date.now()) {
   return abandonCurrentPlayback('Playback timed out; skipped', 'warn');
 }
 
-function selectedTarget(senderTabId) {
-  if (senderTabId && tabs.has(senderTabId)) return senderTabId;
-  if (selectedTabId && tabs.has(selectedTabId)) return selectedTabId;
-  return Array.from(tabs.keys())[0] || null;
-}
-
 function queueCommand(cmd, senderTabId, _params = {}) {
-  const tabId = selectedTarget(senderTabId);
-  if (!tabId || !tabs.has(tabId)) {
-    setStatus('No ChatGPT tab selected', 'warn');
-    return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-  }
-  const info = tabs.get(tabId);
-  const message = info.lastAssistantMessage;
-  if (!message || !Array.isArray(message.chunks) || !message.chunks.length) {
-    setStatus('No assistant response yet', 'warn');
-    return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-  }
-  const lastReadIndex = Number.isInteger(info.lastReadIndex) ? info.lastReadIndex : -1;
-  let chunkIndex = 0;
-  if (cmd === 'next') {
-    chunkIndex = lastReadIndex < 0 ? 0 : lastReadIndex + 1;
-    if (chunkIndex >= message.chunks.length) {
-      setStatus('End of response', 'info');
-      return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-    }
-  }
-  if (cmd === 'regen') {
-    chunkIndex = Math.min(message.chunks.length - 1, Math.max(0, lastReadIndex));
-  }
-  info.lastReadIndex = chunkIndex;
-  const text = String(message.chunks[chunkIndex] || '').trim();
-  if (!text) return { ok: true, payload: { statusText: 'Chunk text is empty', statusLevel: 'warn' } };
-  enqueue({
-    mode: cmd,
-    reason: cmd,
-    tabId,
-    tabTitle: info.title,
-    messageKey: message.messageKey,
-    chunkIndex,
-    chunkCount: message.chunks.length,
-    text,
-    voiceProfile: DEFAULT_SETTINGS.voiceProfile,
-    referenceVoice: undefined,
-    voicePrompt: '',
+  const plan = queueCore.planManualCommand({
+    command: cmd,
+    senderTabId,
+    tabs,
+    selectedTabId,
   });
-  setStatus(`${cmd === 'regen' ? 'Regen' : 'Next'} chunk ${chunkIndex + 1}/${message.chunks.length}`, 'info');
-  void playNext();
+  setStatus(plan.statusText, plan.statusLevel);
+  if (plan.ok) {
+    const info = tabs.get(plan.tabId);
+    info.lastReadIndex = plan.lastReadIndex;
+    enqueue(plan.enqueueBase);
+    void playNext();
+  }
   return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
 }
 
@@ -1012,32 +919,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'report-chunks') {
     if (senderTabId && tabs.has(senderTabId)) {
-      const info = tabs.get(senderTabId);
-      const chunks = Array.isArray(message.chunks) ? message.chunks.map((x) => String(x || '').trim()).filter(Boolean) : [];
-      const autoPreview = String(message.autoPreview || '').trim();
-      const messageKey = String(message.messageKey || '').trim();
-      if (messageKey && chunks.length) {
-        const previousMessage = info.lastAssistantMessage;
-        const sameMessage = Boolean(previousMessage && previousMessage.messageKey === messageKey);
-        if (!sameMessage) info.lastReadIndex = -1;
-        const updatedChunks = sameMessage
-          ? preserveReadChunkBoundary(previousMessage, chunks, info.lastReadIndex)
-          : chunks;
-        info.lastAssistantMessage = { messageKey, chunks: updatedChunks, capturedAt: Date.now() };
-        if (message.isAuto) {
-          const autoText = autoPreview || chunks[0] || '';
-          const autoQueueSignature = `${messageKey}\u0000${autoText}`;
-          if (info.lastAutoQueueSignature !== autoQueueSignature) {
-            info.lastAutoQueueSignature = autoQueueSignature;
-            info.lastReadIndex = autoText ? 0 : -1;
-            if (autoText && shouldQueueAutoFromTab(senderTabId)) {
-              enqueue({ mode: 'auto', reason: 'auto', tabId: senderTabId, tabTitle: info.title, messageKey, chunkIndex: 0, chunkCount: chunks.length, text: autoText, voiceProfile: DEFAULT_SETTINGS.voiceProfile, referenceVoice: undefined, voicePrompt: '' });
-              void playNext();
-            } else if (autoText) {
-              setStatus('音声入力中のため別の返答は読み上げませんでした', 'info');
-            }
-          }
-        }
+      const report = queueCore.applyAssistantReport(tabs.get(senderTabId), message, {
+        tabId: senderTabId,
+        allowAuto: shouldQueueAutoFromTab(senderTabId),
+        capturedAt: Date.now(),
+      });
+      if (report.changed) tabs.set(senderTabId, report.info);
+      if (report.enqueueBase) {
+        enqueue(report.enqueueBase);
+        void playNext();
+      } else if (report.suppressedAuto) {
+        setStatus('音声入力中のため別の返答は読み上げませんでした', 'info');
       }
     }
     sendResponse({ ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } });

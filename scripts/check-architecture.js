@@ -61,23 +61,32 @@ for (const file of [
   'extension/background-core.js',
   'extension/background-settings-core.js',
   'extension/background-runtime-core.js',
+  'extension/background-queue-core.js',
   'extension/background-control-sync.js',
   'extension/background-live-client.js',
   'extension/live-browser-core.js',
   'extension/live-content-controller.js',
+  'extension/prompt-input-core.js',
+  'extension/assistant-text-extractor.js',
+  'extension/auto-speech-controller.js',
 ]) {
   requireFile(file);
 }
 
 capLines('local-api/control_state.py', 350);
 capLines('local-api/server.py', 810);
-capLines('extension/background.js', 1125);
+capLines('extension/content.js', 940);
+capLines('extension/background.js', 1030);
+capLines('extension/assistant-text-extractor.js', 180);
+capLines('extension/auto-speech-controller.js', 330);
 capLines('extension/background-settings-core.js', 200);
 capLines('extension/background-runtime-core.js', 190);
+capLines('extension/background-queue-core.js', 260);
 capLines('extension/background-control-sync.js', 330);
 capLines('extension/background-live-client.js', 120);
 capLines('extension/live-browser-core.js', 250);
 capLines('extension/live-content-controller.js', 420);
+capLines('extension/prompt-input-core.js', 520);
 
 requireText(
   'CONTRIBUTING.md',
@@ -111,8 +120,18 @@ requireText(
 );
 requireText(
   'extension/background-entry.js',
+  "'background-queue-core.js'",
+  'the service worker must load pure queue rules before background.js',
+);
+requireText(
+  'extension/background-entry.js',
   "'background-control-sync.js'",
   'the service worker must load durable control synchronization before background.js',
+);
+requireText(
+  'extension/manifest.json',
+  '"assistant-text-extractor.js", "auto-speech-controller.js", "content.js"',
+  'content scripts must load assistant extraction and Auto lifecycle modules before content.js',
 );
 requireText(
   'extension/background.js',
@@ -121,8 +140,28 @@ requireText(
 );
 requireText(
   'extension/background.js',
+  'queueCore.planManualCommand',
+  'Next and Regen planning must use background-queue-core.js',
+);
+requireText(
+  'extension/background.js',
   'BackgroundControlSync.create',
   'external poll, ACK, and transcript routing must use background-control-sync.js',
+);
+requireText(
+  'extension/content.js',
+  'globalThis.LocalVoicePromptInput',
+  'ChatGPT Composer operations must use prompt-input-core.js',
+);
+requireText(
+  'extension/content.js',
+  'autoSpeech.createAutoSpeechController',
+  'Auto response lifecycle must use auto-speech-controller.js',
+);
+requireText(
+  'extension/content.js',
+  'assistantText.extractAssistantText',
+  'assistant DOM extraction must use assistant-text-extractor.js',
 );
 
 forbidText(
@@ -170,6 +209,36 @@ forbidText(
   'async function applyExternalSettings(',
   'external settings synchronization belongs in background-control-sync.js',
 );
+forbidText(
+  'extension/background.js',
+  'function preserveReadChunkBoundary(',
+  'streaming read boundaries belong in background-queue-core.js',
+);
+forbidText(
+  'extension/background.js',
+  'function selectedTarget(',
+  'queue target selection belongs in background-queue-core.js',
+);
+forbidText(
+  'extension/content.js',
+  'function removeDecorativeSourceLinks(',
+  'assistant DOM cleanup belongs in assistant-text-extractor.js',
+);
+forbidText(
+  'extension/content.js',
+  'function shouldSendNow(',
+  'Auto stability and completion decisions belong in auto-speech-controller.js',
+);
+forbidText(
+  'extension/content.js',
+  'new WeakMap()',
+  'per-message Auto lifecycle state belongs in auto-speech-controller.js',
+);
+forbidText(
+  'extension/content.js',
+  'execCommand(',
+  'native Composer editing belongs in prompt-input-core.js',
+);
 
 if (failures.length) {
   console.error('ARCHITECTURE CHECK: FAIL');
@@ -179,5 +248,6 @@ if (failures.length) {
 
 console.log('ARCHITECTURE CHECK: PASS');
 console.log('- durable state/outbox/browser schemas are separated');
+console.log('- assistant text, Auto lifecycle, and queue rules are isolated from browser coordinators');
 console.log('- HTTP I/O and voice runtime remain focused modules');
 console.log('- orchestrator growth caps are enforced');

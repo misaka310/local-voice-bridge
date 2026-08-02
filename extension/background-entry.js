@@ -7,6 +7,7 @@ importScripts(
   'background-core.js',
   'background-settings-core.js',
   'background-runtime-core.js',
+  'background-queue-core.js',
   'background-control-sync.js',
   'background-live-client.js',
   'background.js',

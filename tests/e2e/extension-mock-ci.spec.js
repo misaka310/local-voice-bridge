@@ -34,6 +34,11 @@ let nextMockPortOffset = 0;
 function prepareTestExtension() {
   fs.rmSync(EXTENSION_DIR, { recursive: true, force: true });
   fs.cpSync(SOURCE_EXTENSION, EXTENSION_DIR, { recursive: true });
+  const settingsPath = path.join(EXTENSION_DIR, 'background-settings-core.js');
+  const settingsSource = fs.readFileSync(settingsPath, 'utf8');
+  const isolatedSettingsSource = settingsSource.replaceAll('http://127.0.0.1:8717', 'http://127.0.0.1:1');
+  if (isolatedSettingsSource === settingsSource) throw new Error('test extension defaults were not isolated from the real local API');
+  fs.writeFileSync(settingsPath, isolatedSettingsSource, 'utf8');
   const backgroundPath = path.join(EXTENSION_DIR, 'background.js');
   const backgroundSource = fs.readFileSync(backgroundPath, 'utf8');
   const fetchShim = `
