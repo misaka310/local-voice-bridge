@@ -67,8 +67,10 @@ for (const file of [
   'extension/live-browser-core.js',
   'extension/live-content-controller.js',
   'extension/prompt-input-core.js',
+  'extension/assistant-source-filter.js',
   'extension/assistant-text-extractor.js',
   'extension/auto-speech-controller.js',
+  'tests/e2e/assistant-text-extractor-dom.spec.js',
 ]) {
   requireFile(file);
 }
@@ -77,7 +79,8 @@ capLines('local-api/control_state.py', 350);
 capLines('local-api/server.py', 810);
 capLines('extension/content.js', 940);
 capLines('extension/background.js', 1030);
-capLines('extension/assistant-text-extractor.js', 210);
+capLines('extension/assistant-source-filter.js', 200);
+capLines('extension/assistant-text-extractor.js', 150);
 capLines('extension/auto-speech-controller.js', 330);
 capLines('extension/background-settings-core.js', 200);
 capLines('extension/background-runtime-core.js', 190);
@@ -130,7 +133,7 @@ requireText(
 );
 requireText(
   'extension/manifest.json',
-  '"assistant-text-extractor.js", "auto-speech-controller.js", "content.js"',
+  '"assistant-source-filter.js", "assistant-text-extractor.js", "auto-speech-controller.js", "content.js"',
   'content scripts must load assistant extraction and Auto lifecycle modules before content.js',
 );
 requireText(
@@ -238,6 +241,33 @@ forbidText(
   'extension/content.js',
   'execCommand(',
   'native Composer editing belongs in prompt-input-core.js',
+);
+
+requireText(
+  'scripts/playwright-mock.config.js',
+  "'assistant-text-extractor-dom.spec.js'",
+  'the source-chip DOM matrix must remain part of the normal mock browser gate',
+);
+
+requireText(
+  'extension/assistant-text-extractor.js',
+  'sourceFilter.removeDecorativeSourceLinks',
+  'assistant source and citation filtering must use assistant-source-filter.js',
+);
+requireText(
+  'extension/background.js',
+  "'assistant-source-filter.js', 'assistant-text-extractor.js'",
+  'reconnect injection must load the source filter before the assistant extractor',
+);
+forbidText(
+  'extension/assistant-text-extractor.js',
+  'function sourceHint(',
+  'source and citation DOM heuristics belong in assistant-source-filter.js',
+);
+forbidText(
+  'extension/assistant-text-extractor.js',
+  'function hasCompactSourceContext(',
+  'source container classification belongs in assistant-source-filter.js',
 );
 
 if (failures.length) {

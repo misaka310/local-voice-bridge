@@ -1,10 +1,12 @@
 'use strict';
 
 (function exposeAssistantTextExtractor(root, factory) {
-  const api = factory(root && root.ContentTextCore);
+  const api = factory(root && root.ContentTextCore, root && root.LocalVoiceAssistantSourceFilter);
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LocalVoiceAssistantText = api;
-}(typeof globalThis !== 'undefined' ? globalThis : this, (textCore) => {
+}(typeof globalThis !== 'undefined' ? globalThis : this, (textCore, sourceFilter) => {
+  if (!sourceFilter) throw new Error('assistant-source-filter.js must load before assistant-text-extractor.js');
+
   const REMOVED_CONTENT_SELECTOR = [
     'pre',
     'button',
@@ -48,99 +50,15 @@
   }
 
   function normalizedLinkLabel(value) {
-    return normalizeText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-
-  function sourceHint(element) {
-    if (!element || typeof element.getAttribute !== 'function') return false;
-    const hint = ['data-testid', 'aria-label', 'role']
-      .map((name) => String(element.getAttribute(name) || ''))
-      .join(' ')
-      .toLowerCase();
-    return /(?:citation|source|attribution)/.test(hint);
+    return sourceFilter.normalizedLinkLabel(value, normalizeText);
   }
 
   function isBareHostLabel(link, label) {
-    if (!label || label.length > 40 || !link || typeof link.getAttribute !== 'function') return false;
-    const href = String(link.getAttribute('href') || '').trim();
-    if (!href) return false;
-    try {
-      const parsed = new URL(href, 'https://chatgpt.com/');
-      if (!/^https?:$/.test(parsed.protocol)) return false;
-      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
-      const hostParts = host.split('.').filter(Boolean);
-      const candidates = new Set([
-        hostParts[0] || '',
-        hostParts.slice(0, -1).join(''),
-        host.replace(/\./g, ''),
-      ].map(normalizedLinkLabel).filter(Boolean));
-      if (candidates.has(normalizedLinkLabel(label))) return true;
-      const labelTokens = normalizeText(label).toLowerCase().match(/[a-z0-9]+/g) || [];
-      const hostTokens = new Set(host.split(/[^a-z0-9]+/).filter(Boolean));
-      return labelTokens.length >= 2 && labelTokens.every((token) => hostTokens.has(token));
-    } catch (_error) {
-      return false;
-    }
-  }
-
-  function sourceDecorationRemainder(element, labels) {
-    let text = normalizeText(element && (element.innerText || element.textContent || ''));
-    for (const label of [...new Set(labels)].sort((a, b) => b.length - a.length)) {
-      const pattern = label
-        .split(/\s+/)
-        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, (character) => `\\${character}`))
-        .join('\\s*');
-      text = text.replace(new RegExp(pattern, 'gi'), ' ');
-    }
-    return text
-      .replace(/[+＋·•]\s*\d+/g, ' ')
-      .replace(/\d+\s*(?:sources?|citations?|件|個)/gi, ' ')
-      .replace(/[+＋·•|｜]/g, ' ')
-      .replace(/\s+/g, '');
-  }
-
-  function decorativeSourceContainer(link, clone, isSourceLink) {
-    let best = link;
-    let current = link;
-    for (let depth = 0; current && current !== clone && depth < 6; depth += 1) {
-      const anchors = typeof current.querySelectorAll === 'function'
-        ? Array.from(current.querySelectorAll('a'))
-        : [];
-      const labels = anchors
-        .map((item) => normalizeText(item.innerText || item.textContent || ''))
-        .filter(Boolean);
-      if (anchors.some(isSourceLink) && !sourceDecorationRemainder(current, labels)) best = current;
-      current = current.parentElement;
-    }
-    return best;
+    return sourceFilter.isBareHostLabel(link, label, normalizeText);
   }
 
   function removeDecorativeSourceLinks(clone) {
-    if (!clone || typeof clone.querySelectorAll !== 'function') return;
-    const links = Array.from(clone.querySelectorAll('a'));
-    const labelCounts = new Map();
-    for (const link of links) {
-      const label = normalizeText(link.innerText || link.textContent || '');
-      const key = normalizedLinkLabel(label);
-      if (key) labelCounts.set(key, (labelCounts.get(key) || 0) + 1);
-    }
-    for (const link of links) {
-      const label = normalizeText(link.innerText || link.textContent || '');
-      const key = normalizedLinkLabel(label);
-      const repeatedBareLabel = /^[A-Za-z][A-Za-z0-9 ._+-]{1,39}$/.test(label)
-        && Number(labelCounts.get(key) || 0) >= 3;
-      link.__localVoiceSourceDecoration = Boolean(
-        repeatedBareLabel
-        || isBareHostLabel(link, label)
-        || sourceHint(link)
-        || sourceHint(link.parentElement),
-      );
-    }
-    const isSourceLink = (link) => Boolean(link && link.__localVoiceSourceDecoration);
-    const removals = new Set(links
-      .filter(isSourceLink)
-      .map((link) => decorativeSourceContainer(link, clone, isSourceLink)));
-    for (const item of removals) item.remove();
+    sourceFilter.removeDecorativeSourceLinks(clone, normalizeText);
   }
 
   function extractAssistantText(node) {

@@ -15,7 +15,8 @@
 - `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
 - `extension/content.js`: 各ChatGPTタブの設定・MutationObserver・Chrome message・ローカル再生・Live controllerを接続する調整層。本文抽出、Auto状態機械、Composer DOM規則は保持しない
-- `extension/assistant-text-extractor.js`: assistant DOMから本文だけを抽出し、コード、操作ボタン、途中状態、引用番号、外部ソースカードの装飾ラベルを除外する境界
+- `extension/assistant-source-filter.js`: ChatGPTの出典・citation UIを周辺証拠付きで判定し、本文を含まない最小コンテナだけを除外する境界
+- `extension/assistant-text-extractor.js`: assistant DOMから本文だけを抽出し、コード、操作ボタン、途中状態を除外したうえで出典フィルタへ委譲する境界
 - `extension/auto-speech-controller.js`: 既存返答の基線、新規返答のstreaming / stable / completed、Auto一回送信、更新差分、完了通知をタブ単位で管理
 - `extension/prompt-input-core.js`: 使用可能なChatGPT Composerの選択、ProseMirrorへのネイティブ挿入・削除、送信ボタン範囲、送信前ACK後のクリックを担当
 - `extension/background.js`: Chromeタブ・HTTP・永続化・再生副作用と、各専用モジュールの接続だけを担当
@@ -65,7 +66,7 @@ POST /v1/control-panel/state
 ## 返答検知と全タブAuto
 
 1. 開いている各ChatGPTタブが`background.js`へ登録されます。
-2. `assistant-text-extractor.js`がassistant本文だけを取り出し、`auto-speech-controller.js`が既存返答を基準として記録します。
+2. `assistant-source-filter.js`が出典UIだけを除外し、`assistant-text-extractor.js`がassistant本文を取り出し、`auto-speech-controller.js`が既存返答を基準として記録します。
 3. 外部小窓で`Auto`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
 4. その後で各タブへ新しく表示されたassistant返答をAuto状態機械が検知・安定判定します。
 5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、1つの共通キューへ追加します。
@@ -171,7 +172,7 @@ Voice、Tab、Petの独立選択設定は保存しません。
 
 - Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
 - extension単体テスト: assistant本文抽出、Auto状態機械、Composer操作、全タブ共通キュー、Next / Regen境界、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
-- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク送信前ACK、assistant bind、Liveチャンク
+- mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク送信前ACK、assistant bind、Liveチャンク、出典UI除外と通常リンク・本文保持のDOMマトリクス
 - Live 17項目ゲート: 入力・送信・Regen・遷移の割り込み、stale排除、再起動失効、通常キュー互換、曖昧bind拒否、STT優先、CPU fallback 0
 - real E2E: 専用loopbackポートでIrodori v3 direct、Next、実参照音声・ペット同期、複数タブ共通キュー
 - 実機測定: Suguhaの3プロファイル、CUDA STT、別プロセスGPU競合、録音終了から再生開始までの全経路
