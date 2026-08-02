@@ -145,7 +145,8 @@ class ControlPanelQtTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertEqual(panel.status_label.text(), "音声モデルを準備中")
-            self.assertIn("初回起動時", panel.current_text_label.toolTip())
+            self.assertIn("保存済みモデルは再利用", panel.current_text_label.toolTip())
+            self.assertNotIn("初回起動時", panel.current_text_label.toolTip())
             self.assertTrue(panel.next_button.isEnabled())
             self.assertFalse(panel.replay_button.isEnabled())
             self.assertIn("Queue 2", panel.queue_label.text())

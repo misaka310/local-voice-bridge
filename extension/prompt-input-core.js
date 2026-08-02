@@ -79,25 +79,49 @@
     dispatchInput(element, environment);
   }
 
+  function selectContentEditableContents(element, environment = {}) {
+    const documentObject = environment.document || (typeof document !== 'undefined' ? document : null);
+    const windowObject = environment.window || (typeof window !== 'undefined' ? window : null);
+    if (!documentObject || typeof documentObject.createRange !== 'function') return false;
+    const selection = windowObject && typeof windowObject.getSelection === 'function'
+      ? windowObject.getSelection()
+      : (typeof documentObject.getSelection === 'function' ? documentObject.getSelection() : null);
+    if (!selection || typeof selection.removeAllRanges !== 'function' || typeof selection.addRange !== 'function') return false;
+    try {
+      const range = documentObject.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function insertComposerText(element, text, environment = {}) {
     const normalized = normalizeText(text);
     if (!element) return { ok: false, reason: 'composer-not-found' };
     if (!normalized) return { ok: false, reason: 'text-empty' };
-    if (composerText(element) !== '') return { ok: false, reason: 'composer-not-empty' };
+    if (normalizeText(composerText(element)) !== '') return { ok: false, reason: 'composer-not-empty' };
     if (typeof element.focus === 'function') element.focus();
 
     const tagName = String(element.tagName || '').toUpperCase();
     const documentObject = environment.document || (typeof document !== 'undefined' ? document : null);
+    const isTextControl = tagName === 'TEXTAREA' || tagName === 'INPUT';
     let insertedByCommand = false;
-    if (tagName !== 'TEXTAREA' && tagName !== 'INPUT' && documentObject && typeof documentObject.execCommand === 'function') {
+    if (!isTextControl && documentObject && typeof documentObject.execCommand === 'function'
+      && selectContentEditableContents(element, environment)) {
       try {
         insertedByCommand = Boolean(documentObject.execCommand('insertText', false, normalized));
       } catch (_error) {
         insertedByCommand = false;
       }
     }
-    if (!insertedByCommand || normalizeText(composerText(element)) !== normalized) {
+    if (isTextControl) {
       setNativeValue(element, normalized, environment);
+    }
+    if (!isTextControl && !insertedByCommand) {
+      return { ok: false, reason: 'composer-native-insert-failed' };
     }
     if (normalizeText(composerText(element)) !== normalized) {
       return { ok: false, reason: 'composer-state-not-updated' };
@@ -109,8 +133,25 @@
     if (!element) return { ok: false, reason: 'composer-not-found' };
     const expected = normalizeText(insertedText);
     if (normalizeText(composerText(element)) !== expected) return { ok: false, reason: 'composer-changed' };
-    setNativeValue(element, '', environment);
-    return composerText(element) === ''
+    const tagName = String(element.tagName || '').toUpperCase();
+    const isTextControl = tagName === 'TEXTAREA' || tagName === 'INPUT';
+    if (isTextControl) {
+      setNativeValue(element, '', environment);
+    } else {
+      const documentObject = environment.document || (typeof document !== 'undefined' ? document : null);
+      if (!documentObject || typeof documentObject.execCommand !== 'function'
+        || !selectContentEditableContents(element, environment)) {
+        return { ok: false, reason: 'composer-native-clear-unavailable' };
+      }
+      let clearedByCommand = false;
+      try {
+        clearedByCommand = Boolean(documentObject.execCommand('delete', false, null));
+      } catch (_error) {
+        clearedByCommand = false;
+      }
+      if (!clearedByCommand) return { ok: false, reason: 'composer-native-clear-failed' };
+    }
+    return normalizeText(composerText(element)) === ''
       ? { ok: true }
       : { ok: false, reason: 'composer-clear-failed' };
   }

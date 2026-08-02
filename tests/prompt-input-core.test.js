@@ -82,11 +82,36 @@ function createFixture() {
     ['button[aria-label*="Send"]', [hiddenGlobalSendButton]],
   ]);
 
+  let selectedComposer = null;
   documentObject = {
     activeElement: visibleComposer,
     querySelectorAll(selector) { return selectorMap.get(selector) || []; },
     querySelector(selector) { return (selectorMap.get(selector) || [])[0] || null; },
-    execCommand() { return false; },
+    createRange() {
+      return {
+        selectNodeContents(element) { selectedComposer = element; },
+      };
+    },
+    getSelection() {
+      return {
+        removeAllRanges() {},
+        addRange() {},
+      };
+    },
+    execCommand(command, _showUi, value) {
+      if (!selectedComposer) return false;
+      if (command === 'insertText') {
+        selectedComposer.textContent = String(value || '');
+        selectedComposer.innerText = String(value || '');
+        return true;
+      }
+      if (command === 'delete') {
+        selectedComposer.textContent = '';
+        selectedComposer.innerText = '';
+        return true;
+      }
+      return false;
+    },
     addEventListener() {},
     removeEventListener() {},
   };

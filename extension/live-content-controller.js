@@ -324,8 +324,8 @@
       const targetText = target ? liveCore.normalizeText(
         target.value !== undefined ? target.value : (target.innerText !== undefined ? target.innerText : target.textContent),
       ) : '';
-      if (event && event.isTrusted === false
-        && target === session.submitComposer
+      if (event
+
         && !session.submitClearConsumed
         && now() <= session.submitClearUntil
         && targetText === '') {

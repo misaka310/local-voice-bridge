@@ -294,6 +294,7 @@ class VoiceConversationController:
         self._model_device = ""
         self._model_preparing_for = ""
         self._model_failed_for = ""
+        self._model_waiting_session_id = 0
         self._shutdown = False
         self._phase = "off"
         self._stt_cancel_event = threading.Event()
@@ -326,6 +327,8 @@ class VoiceConversationController:
             self._cancel_grace_ms = normalized_grace
             if previous_enabled != self._enabled or previous_model != normalized_model:
                 self._model_failed_for = ""
+            if previous_enabled != self._enabled or previous_model != normalized_model:
+                self._model_waiting_session_id = 0
             first_configuration = not self._configured
             self._configured = True
             if previous_enabled and not self._enabled:
@@ -357,7 +360,7 @@ class VoiceConversationController:
         if should_prepare:
             self._update_state(
                 "preparing_model",
-                f"STT {normalized_model}を準備中（初回のみダウンロード）",
+                f"STT {normalized_model}をGPUへ読み込み中（保存済みモデルは再利用）",
                 stt_model=normalized_model,
                 error="",
             )
@@ -372,6 +375,7 @@ class VoiceConversationController:
             )
 
     def _prepare_model(self, model_name: str) -> None:
+        retry_session_id = 0
         try:
             prepare = getattr(self.transcriber, "prepare", None)
             with self.gpu_arbiter.acquire_stt(timeout=120.0):
@@ -398,6 +402,9 @@ class VoiceConversationController:
             if not stale:
                 self._model_ready_for = model_name
                 self._model_device = device
+                if self._pressed and self._model_waiting_session_id == self._session_id:
+                    retry_session_id = self._session_id
+                    self._model_waiting_session_id = 0
                 self._model_failed_for = ""
         if not stale:
             self._update_state(
@@ -407,6 +414,9 @@ class VoiceConversationController:
                 stt_model=model_name,
                 error="",
             )
+
+        if retry_session_id:
+            self.control_executor.submit(self._begin_recording, retry_session_id)
 
     def handle_key_event(self, vk_code: int, is_down: bool) -> bool:
         key = int(vk_code)
@@ -429,6 +439,8 @@ class VoiceConversationController:
                 session_id = self._session_id
                 action = "start"
             elif was_pressed and not chord_down:
+                if self._model_waiting_session_id == self._session_id:
+                    self._model_waiting_session_id = 0
                 self._pressed = False
                 session_id = self._session_id
                 action = "stop"
@@ -468,10 +480,12 @@ class VoiceConversationController:
             with self._lock:
                 model_name = self._stt_model
                 model_ready = self._model_ready_for == model_name
+                if not model_ready and self._pressed and session_id == self._session_id:
+                    self._model_waiting_session_id = session_id
             if not model_ready:
                 self._update_state(
                     "preparing_model",
-                    f"STT {model_name}を準備中です。完了後にもう一度押してください",
+                    f"STT {model_name}をGPUへ読み込み中です。押し続けると準備完了後に録音を開始します",
                     stt_model=model_name,
                     error="",
                 )

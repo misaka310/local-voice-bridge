@@ -295,6 +295,45 @@ class VoiceConversationControllerTests(unittest.TestCase):
         controller.configure(enabled=True, stt_model="small", cancel_grace_ms=700)
         return controller, client, recorder, transcriber
 
+    def test_held_chord_starts_recording_automatically_after_model_preparation(self):
+        stt_executor = DelayedExecutor()
+        control_executor = DelayedExecutor()
+        controller, client, recorder, _transcriber = self.make_controller(
+            stt_executor=stt_executor,
+            control_executor=control_executor,
+        )
+
+        self.press_chord(controller)
+        control_executor.run_all()
+        self.assertEqual(recorder.started, 0)
+        self.assertEqual(client.states[-1]["phase"], "preparing_model")
+        self.assertNotIn("もう一度押してください", str(client.states[-1]["statusText"]))
+        self.assertIn("押し続けると準備完了後に録音", str(client.states[-1]["statusText"]))
+        self.assertIn("保存済みモデルは再利用", str(client.states[0]["statusText"]))
+
+        stt_executor.run_all()
+        control_executor.run_all()
+
+        self.assertEqual(recorder.started, 1)
+        self.assertEqual(client.states[-1]["phase"], "recording")
+
+    def test_releasing_chord_while_model_prepares_does_not_start_recording_later(self):
+        stt_executor = DelayedExecutor()
+        control_executor = DelayedExecutor()
+        controller, _client, recorder, _transcriber = self.make_controller(
+            stt_executor=stt_executor,
+            control_executor=control_executor,
+        )
+
+        self.press_chord(controller)
+        control_executor.run_all()
+        controller.handle_key_event(VK_OEM_102, False)
+        control_executor.run_all()
+        stt_executor.run_all()
+        control_executor.run_all()
+
+        self.assertEqual(recorder.started, 0)
+
     def test_model_is_prepared_when_enabled_or_changed_not_on_first_utterance(self):
         controller, _client, _recorder, transcriber = self.make_controller()
         self.assertEqual(transcriber.prepared, ["small"])

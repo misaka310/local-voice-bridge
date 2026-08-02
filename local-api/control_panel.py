@@ -379,7 +379,7 @@ class LocalVoiceControlPanel(QWidget):
             )
         elif runtime_loading:
             self.status_label.setText("音声モデルを準備中")
-            self._set_current_text("初回起動時の音声モデル準備中です。完了後に自動で利用可能になります。")
+            self._set_current_text("音声モデルをGPUへ読み込み中です。保存済みモデルは再利用し、完了後に自動で利用可能になります。")
         elif connected:
             status = str(extension.get("statusText") or "").strip()
             phase = str(extension.get("playbackPhase") or voice_runtime.get("phase") or "idle")

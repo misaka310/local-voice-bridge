@@ -16,7 +16,11 @@ const EXTENSION = EXTENSION_DIR.replaceAll('\\', '/');
 const PROFILE = path.join(ROOT, `.e2e-profile-mock-${process.pid}-${Date.now()}`);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const USED_MOCK_PORTS = new Set();
-const MOCK_PORT_BASE = 20000 + ((process.pid * 997 + Date.now()) % 30000);
+const MOCK_PORT_MIN = 52000;
+const MOCK_PORT_RANGE = 10000;
+const MOCK_PORT_BASE = MOCK_PORT_MIN + ((process.pid * 997 + Date.now()) % MOCK_PORT_RANGE);
+const MOCK_PORT_RESERVATION_DIR = path.join(os.tmpdir(), 'local-voice-e2e-port-reservations');
+const MOCK_PORT_RESERVATION_TTL_MS = 12 * 60 * 60 * 1000;
 let nextMockPortOffset = 0;
 
 function prepareTestExtension() {
@@ -35,11 +39,42 @@ function prepareTestExtension() {
 test.beforeAll(() => prepareTestExtension());
 test.afterAll(() => fs.rmSync(EXTENSION_DIR, { recursive: true, force: true }));
 
+function reserveMockPort(port) {
+  fs.mkdirSync(MOCK_PORT_RESERVATION_DIR, { recursive: true });
+  const reservationPath = path.join(MOCK_PORT_RESERVATION_DIR, String(port));
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = fs.openSync(reservationPath, 'wx');
+      try {
+        fs.writeFileSync(descriptor, `${Date.now()}\n`, 'utf8');
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return true;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') throw error;
+      try {
+        const ageMs = Date.now() - fs.statSync(reservationPath).mtimeMs;
+        if (ageMs > MOCK_PORT_RESERVATION_TTL_MS) {
+          fs.rmSync(reservationPath, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (!statError || statError.code !== 'ENOENT') throw statError;
+        continue;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+
 async function allocateMockPort() {
-  for (let attempt = 0; attempt < 30000; attempt += 1) {
-    const port = 20000 + ((MOCK_PORT_BASE - 20000 + nextMockPortOffset) % 30000);
+  for (let attempt = 0; attempt < MOCK_PORT_RANGE; attempt += 1) {
+    const port = MOCK_PORT_MIN + ((MOCK_PORT_BASE - MOCK_PORT_MIN + nextMockPortOffset) % MOCK_PORT_RANGE);
     nextMockPortOffset += 1;
-    if (USED_MOCK_PORTS.has(port)) continue;
+    if (USED_MOCK_PORTS.has(port) || !reserveMockPort(port)) continue;
     const available = await new Promise((resolve, reject) => {
       const probe = net.createServer();
       probe.unref();
@@ -264,6 +299,54 @@ function microphoneFixtureHtml() {
     </script>
   </body></html>`;
 }
+
+function proseMirrorMicrophoneFixtureHtml() {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>ChatGPT ProseMirror microphone fixture</title></head><body>
+    <main id="chat"></main>
+    <form id="prompt-form">
+      <div id="prompt-textarea" class="ProseMirror" contenteditable="true"><p><br></p></div>
+      <button type="button" data-testid="send-button" disabled>送信</button>
+    </form>
+    <script>
+      window.__sent = [];
+      window.__inputEvents = [];
+      let composer = document.querySelector('#prompt-textarea');
+      const send = document.querySelector('[data-testid="send-button"]');
+      const attachComposer = (element) => {
+        element.addEventListener('input', (event) => {
+          const text = element.innerText.trim();
+          window.__inputEvents.push({ trusted: event.isTrusted, inputType: event.inputType || '', text });
+          if (event.isTrusted) send.disabled = !text;
+        });
+      };
+      attachComposer(composer);
+      send.addEventListener('click', () => {
+        const text = composer.innerText.trim();
+        if (!text || send.disabled) return;
+        window.__sent.push(text);
+        const replacement = composer.cloneNode(false);
+        replacement.innerHTML = '<p><br></p>';
+        composer.replaceWith(replacement);
+        composer = replacement;
+        attachComposer(composer);
+        composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+        const turn = document.createElement('article');
+        turn.dataset.testid = 'conversation-turn-assistant-prosemirror';
+        const reply = document.createElement('div');
+        reply.dataset.messageAuthorRole = 'assistant';
+        reply.dataset.messageId = 'prosemirror-reply-' + window.__sent.length;
+        reply.textContent = 'ProseMirrorから送信された質問への返答です。';
+        const copy = document.createElement('button');
+        copy.dataset.testid = 'copy-turn-action-button';
+        copy.setAttribute('aria-label', 'Copy');
+        turn.append(copy);
+        turn.append(reply);
+        document.querySelector('#chat').append(turn);
+      });
+    </script>
+  </body></html>`;
+}
+
 
 test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes transient status text', async () => {
   test.setTimeout(90000);
@@ -779,6 +862,75 @@ test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
+
+test('microphone transcript commits and sends through a ProseMirror composer that is replaced on submit', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: proseMirrorMicrophoneFixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/prosemirror-microphone', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#prompt-textarea')).toBeVisible();
+    await waitForControlReady(1);
+    await updateControlSettings({
+      enabled: true,
+      micConversationEnabled: true,
+      voiceVolume: 0,
+      referenceVoice: '',
+      cancelGraceMs: 700,
+    });
+
+    await sendConversationEvent('transcript', {
+      sessionId: 40,
+      text: 'ProseMirrorでキャンセルする音声入力',
+      cancelGraceMs: 1200,
+    });
+    await expect(page.locator('#prompt-textarea')).toContainText('ProseMirrorでキャンセルする音声入力');
+    await expect(page.locator('[data-testid="send-button"]')).toBeEnabled();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#prompt-textarea')).toHaveText('');
+    await expect(page.locator('[data-testid="send-button"]')).toBeDisabled();
+    expect(await page.evaluate(() => window.__sent)).toEqual([]);
+
+    await sendConversationEvent('transcript', {
+      sessionId: 41,
+      text: 'ProseMirrorへ確実に送信する音声入力',
+      cancelGraceMs: 700,
+    });
+
+    await expect(page.locator('#prompt-textarea')).toContainText('ProseMirrorへ確実に送信する音声入力');
+    await page.waitForTimeout(100);
+    const beforeSend = await page.evaluate(() => ({
+      text: document.querySelector('#prompt-textarea')?.innerText || '',
+      disabled: document.querySelector('[data-testid="send-button"]')?.disabled,
+      events: window.__inputEvents,
+    }));
+    expect(beforeSend.text).toBe('ProseMirrorへ確実に送信する音声入力');
+    expect(beforeSend.disabled).toBe(false);
+    expect(beforeSend.events.some((event) => event.trusted && event.inputType === 'insertText')).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__sent.length), { timeout: 5000 }).toBe(1);
+    expect(await page.evaluate(() => window.__sent[0])).toBe('ProseMirrorへ確実に送信する音声入力');
+    await expect(page.locator('[data-message-id="prosemirror-reply-1"]')).toBeVisible();
+    await expect.poll(async () => (await apiEvents()).filter((event) => (
+      event.path === '/v1/conversation/submission' && event.body && event.body.action === 'commit'
+    )).length).toBe(1);
+    const inputEvents = await page.evaluate(() => window.__inputEvents);
+    expect(inputEvents.some((event) => event.trusted && event.text.includes('ProseMirror'))).toBe(true);
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
 
 test('Auto reads a complete assistant reply shorter than 20 characters from the external setting', async () => {
   test.setTimeout(90000);

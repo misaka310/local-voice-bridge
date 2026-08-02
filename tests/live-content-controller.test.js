@@ -144,6 +144,29 @@ test('submit clear event is ignored once but trusted user input still interrupts
   assert.equal(interrupt.extra.payload.reason, 'composer-input');
 });
 
+test('ChatGPT composer replacement during the automatic send click does not invalidate commit', async () => {
+  const harness = createHarness();
+  const item = {
+    ...harness.controller.metadata('session-1', '質問'),
+    insertedText: '質問',
+    syntheticMarker: 'marker-1',
+  };
+  await harness.controller.prepareSubmission(item);
+  const originalComposer = { value: '質問' };
+  const replacementComposer = { value: '' };
+  assert.equal(harness.controller.markSubmissionClick(item, originalComposer), true);
+
+  assert.equal(harness.controller.handleInput({ target: replacementComposer, isTrusted: true }), false);
+  await harness.controller.commitSubmission(item);
+  await flush();
+
+  assert.deepEqual(
+    harness.calls.filter((call) => call.type === 'live-submission').map((call) => call.extra.action),
+    ['arm', 'commit'],
+  );
+  assert.equal(harness.calls.some((call) => call.type === 'live-interrupt'), false);
+});
+
 test('final state resubmits the last chunk as final when it was already streamed', async () => {
   const harness = createHarness();
   const item = { ...harness.controller.metadata('session-1', '質問'), insertedText: '質問' };
