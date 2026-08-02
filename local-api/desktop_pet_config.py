@@ -13,9 +13,10 @@ DEFAULT_RIGHT_MARGIN = 24
 DEFAULT_BOTTOM_MARGIN = 140
 MIN_VISIBLE_PIXELS = 24
 SUPPORTED_ASSET_SUFFIXES = {".png", ".webp", ".svg"}
-ANIMATION_NAMES = ("idle", "thinking", "talking", "happy", "error")
+ANIMATION_NAMES = ("idle", "walking", "thinking", "talking", "happy", "error")
 ANIMATION_ALIASES = {
     "idle": ("idle", "waiting"),
+    "walking": ("walking", "walk", "pacing"),
     "thinking": ("thinking", "working"),
     "talking": ("talking", "speaking", "talk"),
     "happy": ("happy", "success", "celebrate"),
@@ -23,6 +24,7 @@ ANIMATION_ALIASES = {
 }
 DEFAULT_ANIMATION_SPEEDS = {
     "idle": 400,
+    "walking": 180,
     "thinking": 300,
     "talking": 150,
     "happy": 220,

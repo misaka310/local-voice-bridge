@@ -128,6 +128,7 @@ class PetDiscoveryTests(unittest.TestCase):
                     "displayScale": 0.5,
                     "animations": {
                         "idle": {"frames": [-1, 0, 99], "speed": 250},
+                        "walk": {"frames": [3, 2], "speed": 175},
                         "talking": [1, 2],
                     },
                 },
@@ -138,6 +139,8 @@ class PetDiscoveryTests(unittest.TestCase):
         self.assertEqual(pet.display_scale, 0.5)
         self.assertEqual(pet.animations["idle"].frames, (0, 0, 3))
         self.assertEqual(pet.animations["idle"].speed_ms, 250)
+        self.assertEqual(pet.animations["walking"].frames, (3, 2))
+        self.assertEqual(pet.animations["walking"].speed_ms, 175)
         self.assertEqual(pet.animations["talking"].frames, (1, 2))
         self.assertEqual(pet.animations["happy"].frames, (0,))
 

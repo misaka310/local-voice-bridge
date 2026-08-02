@@ -28,6 +28,7 @@ from desktop_pet_config import (
 
 LOGGER = logging.getLogger("local-voice-bridge-tray")
 IS_WINDOWS = os.name == "nt"
+IDLE_ACTIVITY_DELAY_MS = 8000
 
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
@@ -160,6 +161,7 @@ class DesktopPetWindow(QWidget):
         self._frames: list[QPixmap] = []
         self._frame_index = 0
         self.current_state = "idle"
+        self._active_animation_state = "idle"
         self._drag_offset: QPoint | None = None
         self._drag_origin: QPoint | None = None
         self._position_dirty = False
@@ -169,6 +171,12 @@ class DesktopPetWindow(QWidget):
 
         self._animation_timer = QTimer(self)
         self._animation_timer.timeout.connect(self._advance_frame)
+        self._idle_activity_timer = QTimer(self)
+        self._idle_activity_timer.setSingleShot(True)
+        self._idle_activity_timer.timeout.connect(self._play_idle_activity)
+        self._idle_activity_end_timer = QTimer(self)
+        self._idle_activity_end_timer.setSingleShot(True)
+        self._idle_activity_end_timer.timeout.connect(self._finish_idle_activity)
 
         self.setObjectName("desktop-pet-window")
         self.setWindowTitle("Local Voice Bridge Desktop Pet")
@@ -250,7 +258,10 @@ class DesktopPetWindow(QWidget):
         if was_visible:
             self.show()
             apply_windows_toolwindow_style(self)
+        self._idle_activity_timer.stop()
+        self._idle_activity_end_timer.stop()
         self._start_animation(self.current_state)
+        self._schedule_idle_activity()
         self.update()
 
     def _restore_saved_position(self) -> None:
@@ -372,23 +383,56 @@ class DesktopPetWindow(QWidget):
         self.set_state("error")
 
     def set_state(self, state: str) -> None:
-        self.current_state = state if state in self.current_pet.animations else "idle"
+        normalized = state if state in self.current_pet.animations else "idle"
+        if normalized == self.current_state:
+            if normalized == "idle" and not self._idle_activity_timer.isActive():
+                self._schedule_idle_activity()
+            return
+        self._idle_activity_timer.stop()
+        self._idle_activity_end_timer.stop()
+        self.current_state = normalized
+        self._schedule_idle_activity()
         self._start_animation(self.current_state)
 
     def _start_animation(self, state: str) -> None:
         self._animation_timer.stop()
-        animation = self.current_pet.animations.get(state) or self.current_pet.animations["idle"]
+        self._active_animation_state = state if state in self.current_pet.animations else "idle"
+        animation = self.current_pet.animations.get(self._active_animation_state) or self.current_pet.animations["idle"]
         self._frame_index = 0
         self._show_animation_frame(animation.frames[0])
         if len(animation.frames) > 1:
             self._animation_timer.start(animation.speed_ms)
 
     def _advance_frame(self) -> None:
-        animation = self.current_pet.animations.get(self.current_state) or self.current_pet.animations["idle"]
+        animation = self.current_pet.animations.get(self._active_animation_state) or self.current_pet.animations["idle"]
         if not animation.frames:
             return
         self._frame_index = (self._frame_index + 1) % len(animation.frames)
         self._show_animation_frame(animation.frames[self._frame_index])
+
+    def _schedule_idle_activity(self) -> None:
+        if self._shutting_down or self.current_state != "idle":
+            return
+        walking = self.current_pet.animations.get("walking")
+        idle = self.current_pet.animations.get("idle")
+        if walking is None or idle is None or len(walking.frames) < 2 or walking.frames == idle.frames:
+            return
+        self._idle_activity_timer.start(IDLE_ACTIVITY_DELAY_MS)
+
+    def _play_idle_activity(self) -> None:
+        if self._shutting_down or self.current_state != "idle":
+            return
+        walking = self.current_pet.animations.get("walking")
+        if walking is None or len(walking.frames) < 2:
+            return
+        self._start_animation("walking")
+        self._idle_activity_end_timer.start(max(1, len(walking.frames) * walking.speed_ms))
+
+    def _finish_idle_activity(self) -> None:
+        if self._shutting_down or self.current_state != "idle":
+            return
+        self._start_animation("idle")
+        self._schedule_idle_activity()
 
     def _show_animation_frame(self, frame_id: int) -> None:
         if not self._frames:
@@ -463,6 +507,8 @@ class DesktopPetWindow(QWidget):
             return
         self._shutting_down = True
         self._animation_timer.stop()
+        self._idle_activity_timer.stop()
+        self._idle_activity_end_timer.stop()
         self.persist_settings()
         self.hide()
         self.close()
