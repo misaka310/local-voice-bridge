@@ -34,6 +34,17 @@
     'button[aria-label="応答を停止"]',
     'button[aria-label="ストリーミングを停止"]',
   ].join(',');
+  const RESPONSE_COMPLETE_SELECTOR = [
+    'button[data-testid="copy-turn-action-button"]',
+    'button[data-testid="good-response-turn-action-button"]',
+    'button[data-testid="bad-response-turn-action-button"]',
+    'button[aria-label="Copy"]',
+    'button[aria-label="コピー"]',
+    'button[aria-label="Good response"]',
+    'button[aria-label="Bad response"]',
+    'button[aria-label="Regenerate"]',
+    'button[aria-label="再生成する"]',
+  ].join(',');
   const DEFAULT_PET_ID = 'placeholder';
   const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
 
@@ -149,6 +160,27 @@
 
   function isResponseGenerating() {
     return Boolean(document.querySelector(RESPONSE_GENERATING_SELECTOR));
+  }
+
+  function responseTurnForNode(node) {
+    if (!node || typeof node.closest !== 'function') return null;
+    return node.closest('[data-testid^="conversation-turn-"]') || node;
+  }
+
+  function hasResponseCompletionControl(node) {
+    const turn = responseTurnForNode(node);
+    return Boolean(turn && typeof turn.querySelector === 'function' && turn.querySelector(RESPONSE_COMPLETE_SELECTOR));
+  }
+
+  function observeResponseCompletion(node, item) {
+    const generating = isResponseGenerating();
+    if (generating) item.generationObserved = true;
+    else if (item.generationObserved) item.generationCompleted = true;
+    if (hasResponseCompletionControl(node)) item.completionControlObserved = true;
+    return {
+      generating,
+      confirmed: Boolean(item.generationCompleted || item.completionControlObserved),
+    };
   }
 
   function isTransientAssistantStatus(text) {
@@ -335,17 +367,29 @@
     return textCore.stableDelayForPreview(preview, { minChars, stableMs });
   }
 
-  function shouldSendNow(preview, now, item) {
+  function shouldSendNow(node, preview, now, item) {
     if (!preview.length) return false;
     const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
-    if (isResponseGenerating() && preview.length < minChars && !textCore.hasTerminalPunctuation(preview)) return false;
+    const completion = observeResponseCompletion(node, item);
+    if (!textCore.canFinalizePreview(preview, {
+      minChars,
+      completionConfirmed: completion.confirmed,
+    })) return false;
+    if (completion.generating && preview.length < minChars) return false;
     return now - item.lastChangedAt >= stableDelayForPreview(preview);
   }
 
   function schedulePendingAutoSend(node, item, preview) {
     if (item.idleTimer) clearTimeout(item.idleTimer);
+    const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
     const generationRetryMs = isResponseGenerating() ? 500 : 0;
-    const remainingMs = Math.max(50, generationRetryMs, stableDelayForPreview(preview) - (Date.now() - item.lastChangedAt) + 50);
+    const completionRetryMs = preview.length < minChars ? 500 : 0;
+    const remainingMs = Math.max(
+      50,
+      generationRetryMs,
+      completionRetryMs,
+      stableDelayForPreview(preview) - (Date.now() - item.lastChangedAt) + 50,
+    );
     item.idleTimer = setTimeout(() => {
       item.idleTimer = null;
       if (item.sent) return;
@@ -366,7 +410,7 @@
         minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
       });
       if (!pendingPreview) return;
-      if (!shouldSendNow(pendingPreview, Date.now(), item)) {
+      if (!shouldSendNow(node, pendingPreview, Date.now(), item)) {
         schedulePendingAutoSend(node, item, pendingPreview);
         return;
       }
@@ -396,10 +440,52 @@
     return node.__localVoiceBridgeId;
   }
 
+  function normalizedLinkLabel(value) {
+    return normalizeText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function isBareHostLabel(link, label) {
+    if (!label || label.length > 40) return false;
+    const href = String(link.getAttribute('href') || '').trim();
+    if (!href) return false;
+    try {
+      const parsed = new URL(href, 'https://chatgpt.com/');
+      if (!/^https?:$/.test(parsed.protocol)) return false;
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+      const hostParts = host.split('.').filter(Boolean);
+      const candidates = new Set([
+        hostParts[0] || '',
+        hostParts.slice(0, -1).join(''),
+        host.replace(/\./g, ''),
+      ].map(normalizedLinkLabel).filter(Boolean));
+      return candidates.has(normalizedLinkLabel(label));
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function removeDecorativeSourceLinks(clone) {
+    const links = Array.from(clone.querySelectorAll('a'));
+    const labelCounts = new Map();
+    for (const link of links) {
+      const label = normalizeText(link.innerText || link.textContent || '');
+      const key = normalizedLinkLabel(label);
+      if (key) labelCounts.set(key, (labelCounts.get(key) || 0) + 1);
+    }
+    for (const link of links) {
+      const label = normalizeText(link.innerText || link.textContent || '');
+      const key = normalizedLinkLabel(label);
+      const repeatedBareLabel = /^[A-Za-z][A-Za-z0-9 ._+-]{1,39}$/.test(label)
+        && Number(labelCounts.get(key) || 0) >= 3;
+      if (repeatedBareLabel || isBareHostLabel(link, label)) link.remove();
+    }
+  }
+
   function extractAssistantText(node) {
     const clone = node.cloneNode(true);
-    clone.querySelectorAll('pre, button, svg, menu, nav, script, style, textarea, input, select').forEach((item) => item.remove());
-    const text = normalizeText(clone.innerText || clone.textContent || '');
+    clone.querySelectorAll('pre, button, svg, menu, nav, script, style, textarea, input, select, sup').forEach((item) => item.remove());
+    removeDecorativeSourceLinks(clone);
+    const text = textCore.stripRepeatedUiLabels(normalizeText(clone.innerText || clone.textContent || ''));
     return isTransientAssistantStatus(text) ? '' : text;
   }
 
@@ -412,6 +498,8 @@
         sent: alreadySent,
         completionNotified: alreadySent,
         generationObserved: false,
+        generationCompleted: false,
+        completionControlObserved: false,
         lastText: text,
         lastChangedAt: Date.now(),
         idleTimer: null,
@@ -434,6 +522,8 @@
         sent: true,
         completionNotified: true,
         generationObserved: false,
+        generationCompleted: false,
+        completionControlObserved: false,
         lastText: text,
         lastChangedAt: Date.now(),
         idleTimer: null,
@@ -654,7 +744,7 @@
     });
     if (!preview) return;
     const entry = { node, text, messageKey: item.key, chunks, autoPreview: preview, capturedAt: Date.now() };
-    if (shouldSendNow(preview, Date.now(), item)) {
+    if (shouldSendNow(node, preview, Date.now(), item)) {
       item.sent = true;
       node.dataset[AUTO_SENT_FLAG] = '1';
       void reportChunks(entry, Boolean(enabled && settings.enabled));

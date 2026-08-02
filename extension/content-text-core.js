@@ -57,10 +57,44 @@
     return Math.max(stableMs + 400, 3200);
   }
 
+  function canFinalizePreview(preview, options = {}) {
+    const text = normalizePart(preview);
+    if (!text) return false;
+    const minChars = Math.max(1, Number(options.minChars || 40));
+    if (text.length >= minChars) return true;
+    return Boolean(options.completionConfirmed);
+  }
+
+  function stripRepeatedUiLabels(value) {
+    let text = String(value || '');
+    text = text.replace(/\b([A-Za-z][A-Za-z0-9._+-]{2,31})(?:\s+\1){2,}\b/gi, ' ');
+    text = text.replace(/[A-Za-z][A-Za-z0-9._+-]{8,}/g, (segment) => {
+      const normalized = segment.toLowerCase();
+      const maxUnitLength = Math.min(32, Math.floor(segment.length / 3));
+      for (let unitLength = 3; unitLength <= maxUnitLength; unitLength += 1) {
+        const unit = normalized.slice(0, unitLength);
+        let offset = unitLength;
+        let count = 1;
+        while (normalized.slice(offset, offset + unitLength) === unit) {
+          count += 1;
+          offset += unitLength;
+        }
+        if (count >= 3) return segment.slice(offset);
+      }
+      return segment;
+    });
+    return text
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+  }
+
   return {
+    canFinalizePreview,
     coalesceOrphanLines,
     hasTerminalPunctuation,
     joinSpeechParts,
     stableDelayForPreview,
+    stripRepeatedUiLabels,
   };
 });

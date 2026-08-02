@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
@@ -14,7 +15,14 @@ const SOURCE_EXTENSION = path.join(ROOT, 'extension');
 const EXTENSION_DIR = path.join(os.tmpdir(), `local-voice-extension-mock-${process.pid}-${Date.now()}`);
 const EXTENSION = EXTENSION_DIR.replaceAll('\\', '/');
 const PROFILE = path.join(ROOT, `.e2e-profile-mock-${process.pid}-${Date.now()}`);
+const MOCK_RUN_TOKEN = crypto.randomUUID();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function mockFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set('X-Local-Voice-Test-Token', MOCK_RUN_TOKEN);
+  return fetch(url, { ...options, headers });
+}
 const USED_MOCK_PORTS = new Set();
 const MOCK_PORT_MIN = 52000;
 const MOCK_PORT_RANGE = 10000;
@@ -26,6 +34,18 @@ let nextMockPortOffset = 0;
 function prepareTestExtension() {
   fs.rmSync(EXTENSION_DIR, { recursive: true, force: true });
   fs.cpSync(SOURCE_EXTENSION, EXTENSION_DIR, { recursive: true });
+  const backgroundPath = path.join(EXTENSION_DIR, 'background.js');
+  const backgroundSource = fs.readFileSync(backgroundPath, 'utf8');
+  const fetchShim = `
+const __localVoiceTestToken = ${JSON.stringify(MOCK_RUN_TOKEN)};
+const __localVoiceTestFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (input, init = {}) => {
+  const headers = new Headers(init.headers || {});
+  headers.set('X-Local-Voice-Test-Token', __localVoiceTestToken);
+  return __localVoiceTestFetch(input, { ...init, headers });
+};
+`;
+  fs.writeFileSync(backgroundPath, `${fetchShim}${backgroundSource}`, 'utf8');
   const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   manifest.host_permissions = [...new Set([
@@ -69,7 +89,6 @@ function reserveMockPort(port) {
   return false;
 }
 
-
 async function allocateMockPort() {
   for (let attempt = 0; attempt < MOCK_PORT_RANGE; attempt += 1) {
     const port = MOCK_PORT_MIN + ((MOCK_PORT_BASE - MOCK_PORT_MIN + nextMockPortOffset) % MOCK_PORT_RANGE);
@@ -98,7 +117,7 @@ async function allocateMockPort() {
 
 async function mockHealth() {
   try {
-    const response = await fetch(`${API}/health`);
+    const response = await mockFetch(`${API}/health`);
     const body = await response.json();
     return response.ok && body.runtime === 'mock';
   } catch (_) {
@@ -117,7 +136,7 @@ async function waitForMockStopped() {
 
 async function stopMock(proc = null) {
   try {
-    await fetch(`${API}/__test/shutdown`, { method: 'POST' });
+    await mockFetch(`${API}/__test/shutdown`, { method: 'POST' });
   } catch (_) {}
   if (!(await waitForMockStopped()) && proc && proc.exitCode === null) proc.kill();
   if (proc && proc.exitCode === null) {
@@ -133,7 +152,7 @@ async function startMock() {
   MOCK_PORT = FIXED_MOCK_PORT || await allocateMockPort();
   API = `http://127.0.0.1:${MOCK_PORT}`;
   try {
-    const response = await fetch(`${API}/health`);
+    const response = await mockFetch(`${API}/health`);
     if (response.ok) {
       const body = await response.json();
       if (body.runtime !== 'mock') throw new Error(`mock port ${MOCK_PORT} is already used by a non-mock API`);
@@ -145,7 +164,11 @@ async function startMock() {
 
   const proc = spawn(process.execPath, ['scripts/mock-voice-api.js'], {
     cwd: ROOT,
-    env: { ...process.env, MOCK_VOICE_PORT: String(MOCK_PORT) },
+    env: {
+      ...process.env,
+      MOCK_VOICE_PORT: String(MOCK_PORT),
+      MOCK_VOICE_TOKEN: MOCK_RUN_TOKEN,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const until = Date.now() + 15000;
@@ -159,7 +182,7 @@ async function startMock() {
 }
 
 async function apiEvents() {
-  const response = await fetch(`${API}/__test/events`);
+  const response = await mockFetch(`${API}/__test/events`);
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body.ok).toBe(true);
@@ -167,13 +190,13 @@ async function apiEvents() {
 }
 
 async function controlSnapshot() {
-  const response = await fetch(`${API}/v1/control-panel`);
+  const response = await mockFetch(`${API}/v1/control-panel`);
   expect(response.status).toBe(200);
   return response.json();
 }
 
 async function updateControlSettings(payload) {
-  const response = await fetch(`${API}/v1/control-panel/settings`, {
+  const response = await mockFetch(`${API}/v1/control-panel/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -185,7 +208,7 @@ async function updateControlSettings(payload) {
 }
 
 async function sendControlCommand(command) {
-  const response = await fetch(`${API}/v1/control-panel/command`, {
+  const response = await mockFetch(`${API}/v1/control-panel/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command }),
@@ -197,7 +220,7 @@ async function sendControlCommand(command) {
 }
 
 async function sendConversationEvent(type, payload) {
-  const response = await fetch(`${API}/v1/conversation/event`, {
+  const response = await mockFetch(`${API}/v1/conversation/event`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, payload }),
@@ -293,6 +316,10 @@ function microphoneFixtureHtml() {
         reply.dataset.messageAuthorRole = 'assistant';
         reply.dataset.messageId = 'mic-reply-' + window.__sent.length;
         reply.textContent = '音声会話から送信された質問への返答です。';
+        const copy = document.createElement('button');
+        copy.dataset.testid = 'copy-turn-action-button';
+        copy.setAttribute('aria-label', 'Copy');
+        turn.append(copy);
         turn.append(reply);
         document.querySelector('#chat').append(turn);
       });
@@ -346,7 +373,6 @@ function proseMirrorMicrophoneFixtureHtml() {
     </script>
   </body></html>`;
 }
-
 
 test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes transient status text', async () => {
   test.setTimeout(90000);
@@ -520,21 +546,21 @@ test('Next uses the completed streaming reply instead of the short Auto preview 
       const reply = document.createElement('div');
       reply.dataset.messageAuthorRole = 'assistant';
       reply.dataset.messageId = 'streaming-next-reply';
-      reply.textContent = '概ね妥当です。';
+      reply.textContent = '概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。';
       document.querySelector('#chat').append(reply);
     });
     await waitForCounts(1, 1);
 
     await page.evaluate(() => {
       document.querySelector('[data-message-id="streaming-next-reply"]').textContent =
-        '概ね妥当です。\nただし、公開時の誤認防止とブランド統一のために変更すべき項目があります。\nChrome拡張名、EXE名、スタートメニュー名、READMEタイトルを独自名称へ統一します。';
+        '概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。\nただし、公開時の誤認防止とブランド統一のために変更すべき項目があります。\nChrome拡張名、EXE名、スタートメニュー名、READMEタイトルを独自名称へ統一します。';
     });
     await page.waitForTimeout(700);
 
     await sendControlCommand('next');
     await waitForCounts(2, 2);
     const posts = (await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak');
-    expect(posts[1].body.text).not.toBe('概ね妥当です。');
+    expect(posts[1].body.text).not.toBe('概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。');
     expect(posts[1].body.text).toContain('ただし');
   } finally {
     await context.close().catch(() => {});
@@ -581,6 +607,7 @@ test('Auto does not finalize a one-character streaming fragment and repairs the 
     await page.evaluate(() => {
       document.querySelector('[data-message-id="one-character-stream-reply"]').textContent =
         '完\n了状態 最初から再点検しました。';
+      document.querySelector('[data-testid="stop-button"]').remove();
     });
     await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
       && event.path === '/v1/speak'
@@ -635,6 +662,131 @@ test('Auto does not finalize a short unpunctuated streaming fragment before the 
     await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
       && event.path === '/v1/speak'
       && event.body.text.includes('実際のCall of Dutyではなく')), { timeout: 30000 }).toBe(true);
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('Auto ignores a short comma-ended partial until the response shows completion evidence', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/comma-ended-partial', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+
+    await page.evaluate(() => {
+      const turn = document.createElement('article');
+      turn.dataset.testid = 'conversation-turn-assistant-comma-partial';
+      const message = document.createElement('div');
+      message.dataset.messageAuthorRole = 'assistant';
+      message.dataset.messageId = 'comma-ended-partial-reply';
+      message.textContent = 'いや、';
+      turn.append(message);
+      document.querySelector('#chat').append(turn);
+    });
+    await page.waitForTimeout(4200);
+    expect((await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && event.body.text === 'いや、')).toBe(false);
+
+    await page.evaluate(() => {
+      const turn = document.querySelector('[data-testid="conversation-turn-assistant-comma-partial"]');
+      turn.querySelector('[data-message-id="comma-ended-partial-reply"]').textContent = 'いや、残タスクはある。';
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      turn.append(copy);
+    });
+    await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && event.body.text === 'いや、残タスクはある。'), { timeout: 30000 }).toBe(true);
+  } finally {
+    await context.close().catch(() => {});
+    if (api) api.kill();
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('Auto ignores repeated bare GitHub source labels while a short reply is still streaming', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/github-source-labels', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+
+    await page.evaluate(() => {
+      const stopButton = document.createElement('button');
+      stopButton.dataset.testid = 'stop-button';
+      stopButton.textContent = 'Stop generating';
+      document.body.append(stopButton);
+
+      const turn = document.createElement('article');
+      turn.dataset.testid = 'conversation-turn-assistant-github-labels';
+      const message = document.createElement('div');
+      message.dataset.messageAuthorRole = 'assistant';
+      message.dataset.messageId = 'github-labels-reply';
+      const prose = document.createElement('span');
+      prose.dataset.testid = 'reply-prose';
+      prose.textContent = '見つ';
+      message.append(prose);
+      for (let index = 0; index < 8; index += 1) {
+        const source = document.createElement('a');
+        source.href = `https://github.com/example/repo-${index}`;
+        source.textContent = 'GitHub';
+        message.append(source);
+      }
+      turn.append(message);
+      document.querySelector('#chat').append(turn);
+    });
+
+    await page.waitForTimeout(4200);
+    expect((await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && String(event.body.text || '').includes('GitHubGitHub'))).toBe(false);
+
+    await page.evaluate(() => {
+      const turn = document.querySelector('[data-testid="conversation-turn-assistant-github-labels"]');
+      turn.querySelector('[data-testid="reply-prose"]').textContent =
+        '見つかったよ。公開リポジトリの候補を比較して、最も近いものを説明します。';
+      document.querySelector('[data-testid="stop-button"]').remove();
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      turn.append(copy);
+    });
+
+    await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && event.body.text === '見つかったよ。公開リポジトリの候補を比較して、最も近いものを説明します。'), { timeout: 30000 }).toBe(true);
+    expect((await apiEvents()).some((event) => event.method === 'POST'
+      && event.path === '/v1/speak'
+      && String(event.body.text || '').includes('GitHubGitHub'))).toBe(false);
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);
@@ -738,7 +890,7 @@ test('a completed reply marks its background tab until the user focuses it', asy
           const reply = document.createElement('div');
           reply.dataset.messageAuthorRole = 'assistant';
           reply.dataset.messageId = 'completion-marker-reply';
-          reply.textContent = 'バックグラウンドタブで完了した返答です。';
+          reply.textContent = 'バックグラウンドタブで生成中の返答プレビューが読み上げられ、その後に完了状態へ移行します。';
           turn.append(reply);
           document.querySelector('#chat').append(turn);
         },
@@ -931,7 +1083,6 @@ test('microphone transcript commits and sends through a ProseMirror composer tha
   }
 });
 
-
 test('Auto reads a complete assistant reply shorter than 20 characters from the external setting', async () => {
   test.setTimeout(90000);
   const api = await startMock();
@@ -959,6 +1110,10 @@ test('Auto reads a complete assistant reply shorter than 20 characters from the 
       message.dataset.messageAuthorRole = 'assistant';
       message.dataset.messageId = 'short-reply';
       message.textContent = 'はい、返事できます。';
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      turn.append(copy);
       turn.append(message);
       document.body.append(turn);
     });

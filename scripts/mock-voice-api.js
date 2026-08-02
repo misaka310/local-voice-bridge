@@ -8,6 +8,7 @@ const http = require('http');
 
 const host = '127.0.0.1';
 const port = Number(process.env.MOCK_VOICE_PORT || 8717);
+const requiredTestToken = String(process.env.MOCK_VOICE_TOKEN || '');
 const events = [];
 const referenceVoices = [{ id: '', label: 'none' }, { id: 'sample', label: 'sample' }];
 let control;
@@ -193,6 +194,10 @@ function record(method, pathname, body = undefined) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
+  const suppliedTestToken = String(req.headers['x-local-voice-test-token'] || '');
+  if (requiredTestToken && suppliedTestToken !== requiredTestToken) {
+    return json(res, 403, { ok: false, error: 'wrong test run token' });
+  }
 
   if (req.method === 'GET' && url.pathname === '/health') {
     return json(res, 200, {
