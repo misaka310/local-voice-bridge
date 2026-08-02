@@ -492,6 +492,7 @@
 
   return {
     composerText,
+    containsTarget,
     insertComposerText,
     clearInsertedText,
     findComposer,

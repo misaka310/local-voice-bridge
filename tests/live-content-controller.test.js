@@ -52,6 +52,10 @@ function createHarness() {
     extractAssistantText: (node) => node.text,
     isResponseGenerating: () => generating,
     runtimeMessage,
+    composerText: (element) => String(element?.value ?? element?.innerText ?? element?.textContent ?? ''),
+    composerContainsTarget: (composer, target) => Boolean(composer && target && (
+      composer === target || (typeof composer.contains === 'function' && composer.contains(target))
+    )),
     crypto,
     getVoiceSettings: () => ({ liveTtsProfile: 'speed', referenceVoice: 'suguha', voiceVolume: 0.6 }),
     sleep: async () => {},
@@ -122,6 +126,29 @@ test('synthetic transcript input does not interrupt but real input does', async 
 
   assert.equal(harness.calls.filter((call) => call.type === 'live-interrupt').length, 1);
   assert.equal(harness.calls.find((call) => call.type === 'live-interrupt').extra.payload.reason, 'composer-input');
+});
+
+test('delayed native input for the unchanged inserted transcript does not invalidate the armed submission', async () => {
+  const harness = createHarness();
+  const composer = { value: '質問' };
+  const item = {
+    ...harness.controller.metadata('session-1', '質問'),
+    insertedText: '質問',
+    syntheticMarker: 'marker-1',
+    composer,
+  };
+  await harness.controller.prepareSubmission(item);
+
+  assert.equal(harness.controller.handleInput({ target: composer, isTrusted: true }), false);
+  await flush();
+  assert.equal(harness.calls.some((call) => call.type === 'live-interrupt'), false);
+
+  composer.value = '質問を変更';
+  assert.equal(harness.controller.handleInput({ target: composer, isTrusted: true }), true);
+  await flush();
+  const interrupt = harness.calls.find((call) => call.type === 'live-interrupt');
+  assert.ok(interrupt);
+  assert.equal(interrupt.extra.payload.reason, 'composer-input');
 });
 
 test('submit clear event is ignored once but trusted user input still interrupts', async () => {

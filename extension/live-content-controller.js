@@ -29,6 +29,8 @@
     const isResponseGenerating = environment.isResponseGenerating || (() => false);
     const runtimeMessage = environment.runtimeMessage;
     const getVoiceSettings = environment.getVoiceSettings || (() => ({}));
+    const composerText = environment.composerText;
+    const composerContainsTarget = environment.composerContainsTarget;
     const onState = typeof environment.onState === 'function' ? environment.onState : () => {};
     const cryptoObject = environment.crypto || globalThis.crypto;
     const now = typeof environment.now === 'function' ? environment.now : () => Date.now();
@@ -38,6 +40,7 @@
     let sending = Promise.resolve();
 
     if (typeof runtimeMessage !== 'function') throw new Error('runtimeMessage is required');
+    if (typeof composerText !== 'function' || typeof composerContainsTarget !== 'function') throw new Error('composer helpers are required');
 
     function emit(phase, detail = {}) {
       onState({ phase, ...detail });
@@ -96,6 +99,8 @@
         assistantCountBefore: Math.max(0, Number(item.assistantCountBefore) || 0),
         baselineKeys: Array.from(item.baselineKeys || [], (value) => String(value || '')).filter(Boolean),
         inputMarker: String(item.syntheticMarker || ''),
+        inputComposer: item.composer || null,
+        expectedInputText: liveCore.normalizeText(item.insertedText),
         phase: 'arming',
         assistantMessageKey: '',
         node: null,
@@ -324,8 +329,16 @@
       const targetText = target ? liveCore.normalizeText(
         target.value !== undefined ? target.value : (target.innerText !== undefined ? target.innerText : target.textContent),
       ) : '';
+      const eventFromInputComposer = composerContainsTarget(session.inputComposer, target);
+      const inputComposerText = liveCore.normalizeText(composerText(session.inputComposer));
+      if (
+        eventFromInputComposer
+        && (session.phase === 'arming' || session.phase === 'armed')
+        && inputComposerText === session.expectedInputText
+      ) {
+        return false;
+      }
       if (event
-
         && !session.submitClearConsumed
         && now() <= session.submitClearUntil
         && targetText === '') {
