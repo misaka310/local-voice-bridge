@@ -23,8 +23,10 @@ test('normalizes markdown lines for speech without owning chunk policy', () => {
 
 test('recognizes a bare external host label but preserves descriptive repository text', () => {
   const github = { getAttribute: (name) => name === 'href' ? 'https://github.com/example/repo' : '' };
+  const googleOne = { getAttribute: (name) => name === 'href' ? 'https://one.google.com/about/plans' : '' };
   assert.equal(assistantText.isBareHostLabel(github, 'GitHub'), true);
   assert.equal(assistantText.isBareHostLabel(github, 'example/repo'), false);
+  assert.equal(assistantText.isBareHostLabel(googleOne, 'Google One'), true);
 });
 
 test('stable key prefers message id then turn id and finally a generated node id', () => {

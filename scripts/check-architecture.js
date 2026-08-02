@@ -77,7 +77,7 @@ capLines('local-api/control_state.py', 350);
 capLines('local-api/server.py', 810);
 capLines('extension/content.js', 940);
 capLines('extension/background.js', 1030);
-capLines('extension/assistant-text-extractor.js', 180);
+capLines('extension/assistant-text-extractor.js', 210);
 capLines('extension/auto-speech-controller.js', 330);
 capLines('extension/background-settings-core.js', 200);
 capLines('extension/background-runtime-core.js', 190);

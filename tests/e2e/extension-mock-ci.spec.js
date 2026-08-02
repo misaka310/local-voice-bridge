@@ -482,6 +482,60 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
   }
 });
 
+test('Auto excludes compact source chips even when their labels do not match host order', async () => {
+  test.setTimeout(60000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/source-chip', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+
+    await page.evaluate(() => {
+      const turn = document.createElement('article');
+      turn.dataset.testid = 'conversation-turn-assistant-source-chip';
+      const reply = document.createElement('div');
+      reply.dataset.messageAuthorRole = 'assistant';
+      reply.dataset.messageId = 'source-chip-reply';
+      reply.innerHTML = [
+        '<span>おにいちゃん、</span>',
+        '<span class="source-chip">',
+        '<a href="https://one.google.com/about/plans">Google One</a><span>+2</span>',
+        '<a href="https://support.google.com/googleone/answer/9004013">Google ヘルプ</a>',
+        '<a href="https://one.google.com/about/plans">Google One</a>',
+        '</span>',
+        '<span>Googleの個人向けAIサブスクで使えるサービスをまとめるね。</span>',
+      ].join('');
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      turn.append(copy, reply);
+      document.querySelector('#chat').append(turn);
+    });
+
+    await waitForCounts(1, 1);
+    const speak = (await apiEvents()).find((event) => event.method === 'POST' && event.path === '/v1/speak');
+    expect(speak.body.text).toContain('おにいちゃん、Googleの個人向けAIサブスク');
+    expect(speak.body.text).not.toContain('Google One');
+    expect(speak.body.text).not.toContain('Google ヘルプ');
+    expect(speak.body.text).not.toContain('+2');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
 test('inline code text is preserved before Auto finalizes a streaming preview', async () => {
   test.setTimeout(60000);
   const api = await startMock();
