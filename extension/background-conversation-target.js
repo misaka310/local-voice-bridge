@@ -129,7 +129,7 @@
         sttModel: settings.sttModel || 'small',
         error: lastReason,
       }).catch(() => {});
-      return { ok: false, reason: lastReason };
+      return { ok: false, reason: lastReason, retryable: retryableTranscriptFailure(lastReason) };
     }
 
     function shouldQueueAutoFromTab(_tabId) {

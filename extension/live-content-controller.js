@@ -31,6 +31,7 @@
     const getVoiceSettings = environment.getVoiceSettings || (() => ({}));
     const composerText = environment.composerText;
     const composerContainsTarget = environment.composerContainsTarget;
+    const resolveComposer = environment.resolveComposer || (() => null);
     const onState = typeof environment.onState === 'function' ? environment.onState : () => {};
     const cryptoObject = environment.crypto || globalThis.crypto;
     const now = typeof environment.now === 'function' ? environment.now : () => Date.now();
@@ -329,13 +330,15 @@
       const targetText = target ? liveCore.normalizeText(
         target.value !== undefined ? target.value : (target.innerText !== undefined ? target.innerText : target.textContent),
       ) : '';
-      const eventFromInputComposer = composerContainsTarget(session.inputComposer, target);
-      const inputComposerText = liveCore.normalizeText(composerText(session.inputComposer));
+      const currentComposer = resolveComposer(target) || session.inputComposer;
+      const eventFromInputComposer = composerContainsTarget(currentComposer, target);
+      const inputComposerText = liveCore.normalizeText(composerText(currentComposer));
       if (
         eventFromInputComposer
         && (session.phase === 'arming' || session.phase === 'armed')
         && inputComposerText === session.expectedInputText
       ) {
+        session.inputComposer = currentComposer;
         return false;
       }
       if (event

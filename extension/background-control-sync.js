@@ -144,7 +144,7 @@
           sttModel: effectiveSettings.sttModel || 'small',
           error: 'conversation-target-not-found',
         }).catch(() => {});
-        throw new Error('conversation-target-not-found');
+        return { ok: false, reason: 'conversation-target-not-found', retryable: false };
       }
 
       deps.setActiveConversationTargetTabId(targetTabId);
@@ -160,13 +160,15 @@
           sttModel: effectiveSettings.sttModel || 'small',
           error: 'conversation-target-page-changed',
         }).catch(() => {});
-        return;
+        return { ok: false, reason: 'conversation-target-page-changed', retryable: false };
       }
 
       const delivery = await deps.deliverVoiceTranscript(targetTabId, eventPayload, effectiveSettings);
       if (!delivery || delivery.ok !== true) {
+        if (delivery && delivery.retryable === false) return delivery;
         throw new Error(`conversation transcript delivery failed: ${String(delivery && delivery.reason || 'unknown')}`);
       }
+      return delivery;
     }
 
     async function handleConversationEvent(item, effectiveSettings, consumerId) {

@@ -1023,6 +1023,33 @@ test('failed transcript insertion never falls through to another ChatGPT tab', a
   assert.equal(harness.conversationStatePosts.at(-1).error, 'composer-not-found');
 });
 
+test('a permanent transcript rejection is ACKed and does not poison later control polling', async () => {
+  const harness = createHarness();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.setTabResponder(101, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: true, documentFocused: true, visible: true };
+    }
+    if (message.type === 'voice-transcript') return { ok: false, reason: 'composer-not-empty' };
+    return { ok: true };
+  });
+  harness.setControl({
+    commands: [],
+    conversationEvents: [
+      { id: 1, type: 'cancel_pending', payload: { sessionId: 21 } },
+      { id: 2, type: 'transcript', payload: { sessionId: 21, text: '既存入力を上書きしない', cancelGraceMs: 700 } },
+      { id: 3, type: 'cancel_pending', payload: { sessionId: 22 } },
+    ],
+  });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(harness.ackPosts.filter((item) => item.conversationEventId).map((item) => item.conversationEventId), [1, 2, 3]);
+  assert.equal(harness.conversationStatePosts.at(-1).error, 'composer-not-empty');
+  assert.equal(harness.statePosts.length, 1);
+});
+
 test('captured microphone target is not reused after same-tab conversation navigation', async () => {
   const harness = createHarness();
   harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');

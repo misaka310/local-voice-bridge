@@ -351,6 +351,8 @@ function proseMirrorMicrophoneFixtureHtml() {
       window.__delayedInputPulseCount = 0;
       window.__delayedInputPulse = null;
       window.__dispatchDelayedNativeInput = false;
+      window.__replaceComposerBeforeDelayedInput = false;
+      window.__composerReplacementBeforeSendCount = 0;
       let composer = document.querySelector('#prompt-textarea');
       const send = document.querySelector('[data-testid="send-button"]');
       const attachComposer = (element) => {
@@ -360,10 +362,20 @@ function proseMirrorMicrophoneFixtureHtml() {
           if (event.isTrusted) send.disabled = !text;
           if (event.isTrusted && window.__dispatchDelayedNativeInput) {
             window.__dispatchDelayedNativeInput = false;
+            let pulseTarget = element;
+            if (window.__replaceComposerBeforeDelayedInput) {
+              window.__replaceComposerBeforeDelayedInput = false;
+              const replacement = element.cloneNode(true);
+              element.replaceWith(replacement);
+              composer = replacement;
+              attachComposer(composer);
+              pulseTarget = composer;
+              window.__composerReplacementBeforeSendCount += 1;
+            }
             setTimeout(() => {
               window.__delayedInputPulse = setInterval(() => {
                 window.__delayedInputPulseCount += 1;
-                element.dispatchEvent(new InputEvent('input', {
+                pulseTarget.dispatchEvent(new InputEvent('input', {
                   bubbles: true,
                   inputType: 'insertText',
                 }));
@@ -1140,7 +1152,10 @@ test('microphone transcript commits and sends through a ProseMirror composer tha
     await expect(page.locator('[data-testid="send-button"]')).toBeDisabled();
     expect(await page.evaluate(() => window.__sent)).toEqual([]);
 
-    await page.evaluate(() => { window.__dispatchDelayedNativeInput = true; });
+    await page.evaluate(() => {
+      window.__dispatchDelayedNativeInput = true;
+      window.__replaceComposerBeforeDelayedInput = true;
+    });
     await sendConversationEvent('transcript', {
       sessionId: 41,
       text: 'ProseMirrorへ確実に送信する音声入力',
@@ -1153,9 +1168,11 @@ test('microphone transcript commits and sends through a ProseMirror composer tha
       text: document.querySelector('#prompt-textarea')?.innerText || '',
       disabled: document.querySelector('[data-testid="send-button"]')?.disabled,
       events: window.__inputEvents,
+      replacementCount: window.__composerReplacementBeforeSendCount,
     }));
     expect(beforeSend.text).toBe('ProseMirrorへ確実に送信する音声入力');
     expect(beforeSend.disabled).toBe(false);
+    expect(beforeSend.replacementCount).toBe(1);
     expect(beforeSend.events.some((event) => event.trusted && event.inputType === 'insertText')).toBe(true);
     await expect.poll(() => page.evaluate(() => window.__sent.length), { timeout: 5000 }).toBe(1);
     expect(await page.evaluate(() => window.__sent[0])).toBe('ProseMirrorへ確実に送信する音声入力');

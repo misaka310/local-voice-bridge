@@ -15,6 +15,7 @@ function createHarness() {
   const calls = [];
   let generating = true;
   let currentLocation = 'https://chatgpt.com/c/current?model=x';
+  let activeComposer = null;
   const runtimeMessage = async (type, extra = {}) => {
     calls.push({ type, extra });
     if (type === 'live-submission') {
@@ -56,6 +57,7 @@ function createHarness() {
     composerContainsTarget: (composer, target) => Boolean(composer && target && (
       composer === target || (typeof composer.contains === 'function' && composer.contains(target))
     )),
+    resolveComposer: () => activeComposer,
     crypto,
     getVoiceSettings: () => ({ liveTtsProfile: 'speed', referenceVoice: 'suguha', voiceVolume: 0.6 }),
     sleep: async () => {},
@@ -66,6 +68,7 @@ function createHarness() {
     calls,
     setGenerating(value) { generating = value; },
     setLocation(value) { currentLocation = value; },
+    setActiveComposer(value) { activeComposer = value; },
   };
 }
 
@@ -149,6 +152,33 @@ test('delayed native input for the unchanged inserted transcript does not invali
   const interrupt = harness.calls.find((call) => call.type === 'live-interrupt');
   assert.ok(interrupt);
   assert.equal(interrupt.extra.payload.reason, 'composer-input');
+});
+
+test('a replacement composer with the unchanged transcript does not invalidate the armed submission', async () => {
+  const harness = createHarness();
+  const oldComposer = { value: '質問', contains: () => false };
+  const replacementChild = {};
+  const replacementComposer = {
+    value: '質問',
+    contains: (target) => target === replacementChild,
+  };
+  const item = {
+    ...harness.controller.metadata('session-1', '質問'),
+    insertedText: '質問',
+    syntheticMarker: 'marker-1',
+    composer: oldComposer,
+  };
+  await harness.controller.prepareSubmission(item);
+  harness.setActiveComposer(replacementComposer);
+
+  assert.equal(harness.controller.handleInput({ target: replacementChild, isTrusted: true }), false);
+  await flush();
+  assert.equal(harness.calls.some((call) => call.type === 'live-interrupt'), false);
+
+  replacementComposer.value = '質問を変更';
+  assert.equal(harness.controller.handleInput({ target: replacementChild, isTrusted: true }), true);
+  await flush();
+  assert.equal(harness.calls.find((call) => call.type === 'live-interrupt').extra.payload.reason, 'composer-input');
 });
 
 test('submit clear event is ignored once but trusted user input still interrupts', async () => {

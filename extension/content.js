@@ -153,6 +153,7 @@
       runtimeMessage,
       composerText: (element) => globalThis.LocalVoicePromptInput.composerText(element),
       composerContainsTarget: (composer, target) => globalThis.LocalVoicePromptInput.containsTarget(composer, target),
+      resolveComposer: (target) => globalThis.LocalVoicePromptInput.findComposer(document, target),
       crypto: globalThis.crypto,
       getVoiceSettings: () => ({
         liveTtsProfile: normalizeLiveTtsProfile(settings.liveTtsProfile),
