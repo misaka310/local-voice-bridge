@@ -13,7 +13,13 @@ const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-s
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
+const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
+const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
+const BACKGROUND_LOCAL_API_CLIENT_PATH = path.join(ROOT, 'extension', 'background-local-api-client.js');
+const BACKGROUND_RUNTIME_STORE_PATH = path.join(ROOT, 'extension', 'background-runtime-store.js');
+const BACKGROUND_PLAYBACK_QUEUE_PATH = path.join(ROOT, 'extension', 'background-playback-queue.js');
 const BACKGROUND_LIVE_CLIENT_PATH = path.join(ROOT, 'extension', 'background-live-client.js');
+const BACKGROUND_MESSAGE_ROUTER_PATH = path.join(ROOT, 'extension', 'background-message-router.js');
 
 function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -166,7 +172,13 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_RUNTIME_CORE_PATH,
     BACKGROUND_QUEUE_CORE_PATH,
     BACKGROUND_CONTROL_SYNC_PATH,
+    BACKGROUND_TAB_REGISTRY_PATH,
+    BACKGROUND_CONVERSATION_TARGET_PATH,
+    BACKGROUND_LOCAL_API_CLIENT_PATH,
+    BACKGROUND_RUNTIME_STORE_PATH,
+    BACKGROUND_PLAYBACK_QUEUE_PATH,
     BACKGROUND_LIVE_CLIENT_PATH,
+    BACKGROUND_MESSAGE_ROUTER_PATH,
   ]) {
     vm.runInContext(
       fs.readFileSync(dependencyPath, 'utf8'),

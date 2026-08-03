@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Protocol
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,6 +18,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from control_panel_client import ControlPanelApiClient
+from panel_window_state import PanelWindowStateStore, clamp_window_position
+
 
 class ControlPanelClient(Protocol):
     def get_snapshot(self) -> dict[str, Any]: ...
@@ -31,119 +32,6 @@ class ControlPanelClient(Protocol):
     def send_conversation_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
-
-class ControlPanelApiClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8717", *, timeout: float = 0.4) -> None:
-        self.base_url = str(base_url).rstrip("/")
-        self.timeout = max(0.1, float(timeout))
-
-    def _request(self, path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        data = None
-        headers: dict[str, str] = {}
-        if payload is not None:
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}",
-            data=data,
-            headers=headers,
-            method=method,
-        )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        if not isinstance(body, dict) or body.get("ok") is not True:
-            raise RuntimeError(str(body.get("error") if isinstance(body, dict) else "invalid response"))
-        return body
-
-    def get_snapshot(self) -> dict[str, Any]:
-        return self._request("/v1/control-panel")
-
-    def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request("/v1/control-panel/settings", method="POST", payload=payload)
-
-    def send_command(self, command: str) -> dict[str, Any]:
-        return self._request("/v1/control-panel/command", method="POST", payload={"command": command})
-
-    def send_conversation_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "/v1/conversation/event",
-            method="POST",
-            payload={"type": event_type, "payload": payload},
-        )
-
-    def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request("/v1/conversation/state", method="POST", payload=payload)
-
-
-class PanelWindowStateStore:
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-
-    def load_position(self) -> QPoint | None:
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict):
-                return None
-            return QPoint(int(payload["x"]), int(payload["y"]))
-        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-            return None
-
-    def save_position(self, position: QPoint) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "x": int(position.x()), "y": int(position.y())}
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(self.path)
-
-
-def clamp_window_position(
-    position: QPoint,
-    window_size: QSize,
-    screen_geometries: list[QRect],
-    *,
-    margin: int = 8,
-) -> QPoint:
-    """Keep a window fully reachable after monitor topology changes."""
-    if not screen_geometries:
-        return QPoint(position)
-
-    width = max(1, int(window_size.width()))
-    height = max(1, int(window_size.height()))
-    requested = QRect(position, QSize(width, height))
-    safe_geometries: list[QRect] = []
-    for geometry in screen_geometries:
-        safe = geometry.adjusted(margin, margin, -margin, -margin)
-        if safe.width() < 1 or safe.height() < 1:
-            safe = QRect(geometry)
-        safe_geometries.append(safe)
-        if safe.contains(requested):
-            return QPoint(position)
-
-    requested_center = requested.center()
-
-    def target_score(geometry: QRect) -> tuple[int, int]:
-        intersection = geometry.intersected(requested)
-        intersection_area = max(0, intersection.width()) * max(0, intersection.height())
-        dx = 0
-        if requested_center.x() < geometry.left():
-            dx = geometry.left() - requested_center.x()
-        elif requested_center.x() > geometry.right():
-            dx = requested_center.x() - geometry.right()
-        dy = 0
-        if requested_center.y() < geometry.top():
-            dy = geometry.top() - requested_center.y()
-        elif requested_center.y() > geometry.bottom():
-            dy = requested_center.y() - geometry.bottom()
-        return (-intersection_area, dx * dx + dy * dy)
-
-    target = min(safe_geometries, key=target_score)
-    max_x = target.x() + max(0, target.width() - width)
-    max_y = target.y() + max(0, target.height() - height)
-    return QPoint(
-        min(max(position.x(), target.x()), max_x),
-        min(max(position.y(), target.y()), max_y),
-    )
 
 
 class LocalVoiceControlPanel(QWidget):

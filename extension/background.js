@@ -35,11 +35,6 @@ let activeConversationTargetTabId = null;
 let conversationPhase = 'off';
 const conversationSessionTargets = new Map();
 const conversationSessionTargetLocations = new Map();
-let browserRuntimeHydrated = false;
-let browserRuntimeHydrationPromise = null;
-let browserRuntimePersistTimer = null;
-let browserRuntimePersistPromise = null;
-let browserRuntimePersistDirty = false;
 let backgroundInitializationPromise = null;
 
 function rememberReferenceVoice(settings) {
@@ -66,247 +61,58 @@ async function getSettings() {
   return rememberReferenceVoice(sanitized);
 }
 
-function cloneItem(item) {
-  return globalThis.BackgroundRuntimeCore.cloneItem(item);
-}
-
-function browserRuntimeStatePayload() {
-  return globalThis.BackgroundRuntimeCore.createPayload({
-    tabs,
-    selectedTabId,
-    uiOwnerTabId,
-    lastComposerFocusedTabId,
-    activeConversationTargetTabId,
-    conversationSessionTargets,
-    conversationSessionTargetLocations,
-    queue,
-    currentItem,
-    lastPlayedItem,
-    seq,
-  });
-}
-
-function applyBrowserRuntimeSnapshot(value) {
-  const merged = globalThis.BackgroundRuntimeCore.mergeSnapshot(value, {
-    tabs,
-    selectedTabId,
-    uiOwnerTabId,
-    lastComposerFocusedTabId,
-    activeConversationTargetTabId,
-    conversationSessionTargets,
-    conversationSessionTargetLocations,
-    queue,
-    currentItem,
-    isPlaying,
-    lastPlayedItem,
-    seq,
-  });
-  tabs.clear();
-  for (const [tabId, info] of merged.tabs.entries()) tabs.set(tabId, info);
-  conversationSessionTargets.clear();
-  conversationSessionTargetLocations.clear();
-  for (const [sessionId, tabId] of merged.conversationSessionTargets.entries()) {
-    conversationSessionTargets.set(sessionId, tabId);
-    conversationSessionTargetLocations.set(
-      sessionId,
-      String(merged.conversationSessionTargetLocations.get(sessionId) || ''),
-    );
-  }
-  selectedTabId = merged.selectedTabId;
-  uiOwnerTabId = merged.uiOwnerTabId;
-  lastComposerFocusedTabId = merged.lastComposerFocusedTabId;
-  activeConversationTargetTabId = merged.activeConversationTargetTabId;
-  queue = merged.queue;
-  if (merged.resetPlayback) {
-    currentItem = null;
-    currentToken = null;
-    currentPlaybackTabId = null;
-    currentPlaybackDeadlineAt = 0;
-    isPlaying = false;
-    playbackPhase = 'idle';
-  }
-  lastPlayedItem = merged.lastPlayedItem;
-  seq = merged.seq;
-  ensureOwner();
-  browserRuntimeHydrated = true;
-  scheduleBrowserRuntimePersist();
-  return true;
-}
-
-async function hydrateBrowserRuntime() {
-  if (browserRuntimeHydrated) return true;
-  if (browserRuntimeHydrationPromise) return browserRuntimeHydrationPromise;
-  browserRuntimeHydrationPromise = (async () => {
-    try {
-      const settings = await getSettings();
-      const payload = await controlPanelRequest(settings, '/v1/browser-runtime');
-      if (payload.browserRuntime && payload.browserRuntime.currentItem) {
-        await stopLocalAudio().catch(() => {});
-      }
-      applyBrowserRuntimeSnapshot(payload.browserRuntime);
-      if (queue.length && !isPlaying) void playNext();
-      return true;
-    } catch (_error) {
-      browserRuntimeHydrated = false;
-      return false;
-    }
-  })();
-  try {
-    return await browserRuntimeHydrationPromise;
-  } finally {
-    browserRuntimeHydrationPromise = null;
-  }
-}
-
-async function flushBrowserRuntimeState() {
-  if (!browserRuntimeHydrated) return;
-  browserRuntimePersistDirty = true;
-  if (browserRuntimePersistPromise) return browserRuntimePersistPromise;
-  browserRuntimePersistPromise = (async () => {
-    while (browserRuntimePersistDirty) {
-      browserRuntimePersistDirty = false;
-      const settings = await getSettings();
-      await controlPanelRequest(settings, '/v1/browser-runtime', {
-        method: 'POST',
-        body: browserRuntimeStatePayload(),
-      });
-    }
-  })();
-  try {
-    await browserRuntimePersistPromise;
-  } finally {
-    browserRuntimePersistPromise = null;
-  }
-}
-
-function scheduleBrowserRuntimePersist() {
-  if (!browserRuntimeHydrated) return;
-  browserRuntimePersistDirty = true;
-  if (browserRuntimePersistTimer) return;
-  browserRuntimePersistTimer = setTimeout(() => {
-    browserRuntimePersistTimer = null;
-    void flushBrowserRuntimeState().catch(() => {});
-  }, 25);
-  if (browserRuntimePersistTimer && typeof browserRuntimePersistTimer.unref === 'function') {
-    browserRuntimePersistTimer.unref();
-  }
-}
-
 function setStatus(text, level = 'info') {
   lastStatusText = String(text || 'Ready');
   lastStatusLevel = String(level || 'info');
 }
 
-function ensureOwner() {
-  const ids = Array.from(tabs.keys());
-  if (!ids.length) {
-    uiOwnerTabId = null;
-    selectedTabId = null;
-    lastComposerFocusedTabId = null;
-    activeConversationTargetTabId = null;
-    conversationSessionTargets.clear();
-    conversationSessionTargetLocations.clear();
-    return;
-  }
-  if (!uiOwnerTabId || !tabs.has(uiOwnerTabId)) uiOwnerTabId = ids[0];
-  if (!selectedTabId || !tabs.has(selectedTabId)) selectedTabId = uiOwnerTabId;
-  if (lastComposerFocusedTabId && !tabs.has(lastComposerFocusedTabId)) lastComposerFocusedTabId = null;
-  if (activeConversationTargetTabId && !tabs.has(activeConversationTargetTabId)) activeConversationTargetTabId = null;
-}
+const tabRegistry = globalThis.BackgroundTabRegistry.create({
+  chrome,
+  tabs,
+  uiOwnerTabId: () => uiOwnerTabId,
+  selectedTabId: () => selectedTabId,
+  lastComposerFocusedTabId: () => lastComposerFocusedTabId,
+  activeConversationTargetTabId: () => activeConversationTargetTabId,
+  setUiOwnerTabId: (value) => { uiOwnerTabId = value; },
+  setSelectedTabId: (value) => { selectedTabId = value; },
+  setLastComposerFocusedTabId: (value) => { lastComposerFocusedTabId = value; },
+  setActiveConversationTargetTabId: (value) => { activeConversationTargetTabId = value; },
+  conversationSessionTargets,
+  conversationSessionTargetLocations,
+  queue: () => queue,
+  setQueue: (value) => { queue = value; },
+  isPlaying: () => isPlaying,
+  currentPlaybackTabId: () => currentPlaybackTabId,
+  abandonCurrentPlayback: (reason, level) => playbackController.abandonCurrentPlayback(reason, level),
+  broadcastState,
+});
+const {
+  ensureOwner,
+  registerTab,
+  noteComposerFocused,
+  removeTab,
+  activateTab,
+} = tabRegistry;
 
-function preferredConversationTarget() {
-  ensureOwner();
-  if (lastComposerFocusedTabId && tabs.has(lastComposerFocusedTabId)) return lastComposerFocusedTabId;
-  if (selectedTabId && tabs.has(selectedTabId)) return selectedTabId;
-  return uiOwnerTabId && tabs.has(uiOwnerTabId) ? uiOwnerTabId : null;
-}
-
-async function conversationTargetStatus(tabId) {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: 'conversation-target-status' });
-    if (!response || response.ok !== true) return { tabId, ok: false, composerAvailable: false, composerFocused: false };
-    return {
-      tabId,
-      ok: true,
-      composerAvailable: Boolean(response.composerAvailable),
-      composerFocused: Boolean(response.composerFocused),
-      documentFocused: Boolean(response.documentFocused),
-      visible: Boolean(response.visible),
-      url: String(response.url || ''),
-    };
-  } catch (_error) {
-    return { tabId, ok: false, composerAvailable: false, composerFocused: false };
-  }
-}
-
-async function captureConversationTarget() {
-  ensureOwner();
-  const tabIds = Array.from(tabs.keys());
-  if (!tabIds.length) return null;
-  const statuses = await Promise.all(tabIds.map((tabId) => conversationTargetStatus(tabId)));
-  const byTabId = new Map(statuses.map((status) => [status.tabId, status]));
-  const focused = statuses.filter((status) => status.ok && status.composerFocused);
-  if (focused.length) {
-    const preferredFocused = [lastComposerFocusedTabId, selectedTabId, uiOwnerTabId]
-      .map((tabId) => focused.find((status) => status.tabId === tabId))
-      .find(Boolean);
-    return preferredFocused || focused[0];
-  }
-  const candidates = [lastComposerFocusedTabId, selectedTabId, uiOwnerTabId, ...tabIds];
-  for (const tabId of candidates) {
-    const status = byTabId.get(tabId);
-    if (status && status.ok && status.composerAvailable) return status;
-  }
-  return null;
-}
-
-function conversationLocationKey(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    const url = new URL(raw);
-    return `${url.origin}${url.pathname}`;
-  } catch (_error) {
-    return raw.split(/[?#]/, 1)[0];
-  }
-}
-
-function retryableTranscriptFailure(reason) {
-  return ['composer-not-found', 'composer-state-not-updated', 'prompt-input-core-unavailable', 'message-delivery-failed']
-    .includes(String(reason || ''));
-}
-
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function deliverVoiceTranscript(targetTabId, payload, settings) {
-  let lastReason = 'message-delivery-failed';
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const response = await chrome.tabs.sendMessage(targetTabId, { type: 'voice-transcript', payload });
-      if (response && response.ok === true) {
-        return { ok: true, alreadyApplied: Boolean(response.alreadyApplied) };
-      }
-      lastReason = String(response && (response.reason || response.error) || 'message-delivery-failed');
-    } catch (_error) {
-      lastReason = 'message-delivery-failed';
-    }
-    if (!retryableTranscriptFailure(lastReason) || attempt === 2) break;
-    await delay(50 * (attempt + 1));
-  }
-  await postConversationState({
-    phase: 'error',
-    statusText: '音声入力をChatGPT入力欄へ反映できませんでした',
-    sttModel: settings.sttModel || 'small',
-    error: lastReason,
-  }).catch(() => {});
-  return { ok: false, reason: lastReason };
-}
-
-function shouldQueueAutoFromTab(_tabId) {
-  return queueCore.shouldQueueAuto(conversationPhase);
-}
+const conversationTarget = globalThis.BackgroundConversationTarget.create({
+  chrome,
+  tabs,
+  queueCore,
+  ensureOwner,
+  uiOwnerTabId: () => uiOwnerTabId,
+  selectedTabId: () => selectedTabId,
+  lastComposerFocusedTabId: () => lastComposerFocusedTabId,
+  conversationPhase: () => conversationPhase,
+  postConversationState: (payload) => postConversationState(payload),
+});
+const {
+  preferredConversationTarget,
+  conversationTargetStatus,
+  captureConversationTarget,
+  conversationLocationKey,
+  deliverVoiceTranscript,
+  shouldQueueAutoFromTab,
+} = conversationTarget;
 
 function statePayload(forTabId = null) {
   ensureOwner();
@@ -334,184 +140,138 @@ function broadcastState() {
 }
 
 
-function normalizeReferenceVoice(value) {
-  const normalized = String(value ?? '').trim();
-  if (!normalized || ['none', 'qwen3', 'qwen'].includes(normalized.toLowerCase())) return '';
-  return normalized;
-}
-
-async function speak(text, requestId, voiceProfile, referenceVoice, voicePrompt) {
-  const settings = await getSettings();
-  const pickedProfile = DEFAULT_SETTINGS.voiceProfile;
-  const pickedReferenceVoice = normalizeStoredReference(referenceVoice !== undefined ? referenceVoice : settings.referenceVoice);
-  const pickedVoicePrompt = '';
-  const response = await fetch(settings.apiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      requestId,
-      source: 'chatgpt-web',
-      model: pickedProfile,
-      voiceProfile: pickedProfile,
-      voiceId: pickedReferenceVoice,
-      referenceVoice: pickedReferenceVoice,
-      voicePrompt: pickedVoicePrompt,
-      instruct: pickedVoicePrompt,
-      voiceVolume: Number(settings.voiceVolume),
-      playLocal: true,
-    }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
-  const returnedReferenceVoice = normalizeStoredReference(body.referenceVoice ?? body.voiceId);
-  const usedReferenceAudio = String(body.usedReferenceAudio || '').trim();
-  if (pickedReferenceVoice && (returnedReferenceVoice !== pickedReferenceVoice || !usedReferenceAudio)) {
-    throw new Error(`Reference voice was not applied: ${pickedReferenceVoice}`);
-  }
-  return body;
-}
-
-function isAllowedAudioUrl(targetUrl, settings) {
-  try {
-    const target = new URL(String(targetUrl || ''));
-    if (!target.pathname.startsWith('/audio/')) return false;
-    const allowedHosts = new Set(['127.0.0.1', 'localhost']);
-    if (!allowedHosts.has(target.hostname)) return false;
-    const candidates = [settings.apiUrl, settings.healthUrl]
-      .map((value) => {
-        try {
-          return new URL(String(value || ''));
-        } catch (_error) {
-          return null;
-        }
-      })
-      .filter(Boolean);
-    return candidates.some((candidate) => allowedHosts.has(candidate.hostname)
-      && candidate.protocol === target.protocol
-      && candidate.port === target.port);
-  } catch (_error) {
-    return false;
-  }
-}
-
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-async function fetchAudioPayload(url) {
-  const targetUrl = String(url || '');
-  const settings = await getSettings();
-  if (!isAllowedAudioUrl(targetUrl, settings)) {
-    throw new Error('unsupported audio URL');
-  }
-  const cacheBustedUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
-  const response = await fetch(cacheBustedUrl, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`audio fetch failed: ${response.status}`);
-  const contentType = response.headers.get('Content-Type') || 'audio/wav';
-  const buffer = await response.arrayBuffer();
-  if (!buffer || buffer.byteLength === 0) throw new Error('audio blob is empty');
-  return { base64: arrayBufferToBase64(buffer), contentType, size: buffer.byteLength };
-}
-
-async function fetchReferenceVoices() {
-  const settings = await getSettings();
-  const candidates = [];
-  try {
-    const healthUrl = new URL(settings.healthUrl || DEFAULT_SETTINGS.healthUrl);
-    const refUrl = new URL(healthUrl.toString());
-    refUrl.pathname = '/v1/reference-voices';
-    refUrl.search = '';
-    candidates.push(refUrl.toString(), healthUrl.toString());
-  } catch (_error) {
-    candidates.push('http://127.0.0.1:8717/v1/reference-voices', settings.healthUrl || DEFAULT_SETTINGS.healthUrl);
-  }
-
-  for (const url of candidates) {
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body) continue;
-      const voices = Array.isArray(body.voices) ? body.voices : Array.isArray(body.referenceVoices) ? body.referenceVoices : Array.isArray(body.availableReferenceVoices) ? body.availableReferenceVoices : [];
-      return { ok: true, voices };
-    } catch (_error) {}
-  }
-  return { ok: true, voices: [] };
-}
-
-async function syncDesktopPetSelection(petId) {
-  const settings = await getSettings();
-  const url = new URL(settings.healthUrl || DEFAULT_SETTINGS.healthUrl);
-  url.pathname = '/v1/desktop-pet';
-  url.search = '';
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ petId: String(petId || 'placeholder') }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-  return payload;
-}
-
-function controlPanelUrl(settings, pathname, search = '') {
-  const url = new URL(settings.healthUrl || DEFAULT_SETTINGS.healthUrl);
-  url.pathname = pathname;
-  url.search = search;
-  url.hash = '';
-  return url.toString();
-}
-
-async function controlPanelRequest(settings, pathname, options = {}) {
-  const response = await fetch(controlPanelUrl(settings, pathname, options.search || ''), {
-    method: options.method || 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-    cache: 'no-store',
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-  return payload;
-}
-
+const localApiClient = globalThis.BackgroundLocalApiClient.create({
+  fetch,
+  getSettings,
+  defaultSettings: DEFAULT_SETTINGS,
+  normalizeStoredReference,
+});
+const {
+  speak,
+  fetchAudioPayload,
+  fetchReferenceVoices,
+  syncDesktopPetSelection,
+  controlPanelUrl,
+  controlPanelRequest,
+  replayLocalAudio,
+  stopLocalAudio,
+  postConversationState,
+} = localApiClient;
+const runtimeStore = globalThis.BackgroundRuntimeStore.create({
+  runtimeCore: globalThis.BackgroundRuntimeCore,
+  snapshot: () => ({
+    tabs,
+    selectedTabId,
+    uiOwnerTabId,
+    lastComposerFocusedTabId,
+    activeConversationTargetTabId,
+    conversationSessionTargets,
+    conversationSessionTargetLocations,
+    queue,
+    currentItem,
+    isPlaying,
+    lastPlayedItem,
+    seq,
+  }),
+  applyMerged: (merged) => {
+    tabs.clear();
+    for (const [tabId, info] of merged.tabs.entries()) tabs.set(tabId, info);
+    conversationSessionTargets.clear();
+    conversationSessionTargetLocations.clear();
+    for (const [sessionId, tabId] of merged.conversationSessionTargets.entries()) {
+      conversationSessionTargets.set(sessionId, tabId);
+      conversationSessionTargetLocations.set(sessionId, String(merged.conversationSessionTargetLocations.get(sessionId) || ''));
+    }
+    selectedTabId = merged.selectedTabId;
+    uiOwnerTabId = merged.uiOwnerTabId;
+    lastComposerFocusedTabId = merged.lastComposerFocusedTabId;
+    activeConversationTargetTabId = merged.activeConversationTargetTabId;
+    queue = merged.queue;
+    if (merged.resetPlayback) {
+      currentItem = null;
+      currentToken = null;
+      currentPlaybackTabId = null;
+      currentPlaybackDeadlineAt = 0;
+      isPlaying = false;
+      playbackPhase = 'idle';
+    }
+    lastPlayedItem = merged.lastPlayedItem;
+    seq = merged.seq;
+  },
+  ensureOwner,
+  getSettings,
+  controlPanelRequest,
+  stopLocalAudio,
+  queueLength: () => queue.length,
+  isPlaying: () => isPlaying,
+  playNext: () => playbackController.playNext(),
+});
+const {
+  cloneItem,
+  browserRuntimeStatePayload,
+  applyBrowserRuntimeSnapshot,
+  hydrateBrowserRuntime,
+  flushBrowserRuntimeState,
+  scheduleBrowserRuntimePersist,
+} = runtimeStore;
+const playbackController = globalThis.BackgroundPlaybackQueue.create({
+  chrome,
+  queueCore,
+  tabs,
+  defaultVoiceProfile: DEFAULT_SETTINGS.voiceProfile,
+  normalizeReferenceVoice: normalizeStoredReference,
+  referenceSettingsLoaded: () => referenceSettingsLoaded,
+  lastKnownReferenceVoice: () => lastKnownReferenceVoice,
+  nextSequence: () => seq++,
+  selectedTabId: () => selectedTabId,
+  uiOwnerTabId: () => uiOwnerTabId,
+  ensureOwner,
+  getState: () => ({
+    queue,
+    isPlaying,
+    playbackPhase,
+    currentItem,
+    currentToken,
+    currentPlaybackTabId,
+    currentPlaybackDeadlineAt,
+    playbackWatchdogTimer,
+    lastPlayedItem,
+  }),
+  patchState: (patch) => {
+    if (Object.hasOwn(patch, 'queue')) queue = patch.queue;
+    if (Object.hasOwn(patch, 'isPlaying')) isPlaying = patch.isPlaying;
+    if (Object.hasOwn(patch, 'playbackPhase')) playbackPhase = patch.playbackPhase;
+    if (Object.hasOwn(patch, 'currentItem')) currentItem = patch.currentItem;
+    if (Object.hasOwn(patch, 'currentToken')) currentToken = Reflect.get(patch, 'currentToken');
+    if (Object.hasOwn(patch, 'currentPlaybackTabId')) currentPlaybackTabId = patch.currentPlaybackTabId;
+    if (Object.hasOwn(patch, 'currentPlaybackDeadlineAt')) currentPlaybackDeadlineAt = patch.currentPlaybackDeadlineAt;
+    if (Object.hasOwn(patch, 'playbackWatchdogTimer')) playbackWatchdogTimer = patch.playbackWatchdogTimer;
+    if (Object.hasOwn(patch, 'lastPlayedItem')) lastPlayedItem = patch.lastPlayedItem;
+  },
+  setStatus,
+  statusPayload: () => ({ statusText: lastStatusText, statusLevel: lastStatusLevel }),
+  broadcastState,
+  flushBrowserRuntimeState,
+  stopLocalAudio,
+  replayLocalAudio,
+  speak,
+  cloneItem,
+});
+const {
+  enqueue,
+  chunkLabel,
+  playbackLeaseMs,
+  clearPlaybackWatchdog,
+  clearCurrentPlayback,
+  armPlaybackWatchdog,
+  abandonCurrentPlayback,
+  recoverExpiredPlayback,
+  queueCommand,
+  playNext,
+  finishPlayback,
+  executeUiCommand,
+} = playbackController;
 const liveClient = globalThis.BackgroundLiveClient.create({ fetch, getSettings, buildUrl: controlPanelUrl });
-async function replayLocalAudio(text = '') {
-  const settings = await getSettings();
-  return controlPanelRequest(settings, '/v1/playback/replay', {
-    method: 'POST',
-    body: {
-      text: String(text || ''),
-      voiceVolume: Number(settings.voiceVolume),
-    },
-  });
-}
-
-async function stopLocalAudio() {
-  const settings = await getSettings();
-  return controlPanelRequest(settings, '/v1/playback/stop', { method: 'POST', body: {} });
-}
-
-async function postConversationState(payload) {
-  const settings = await getSettings();
-  const safe = payload && typeof payload === 'object' ? payload : {};
-  return controlPanelRequest(settings, '/v1/conversation/state', {
-    method: 'POST',
-    body: {
-      phase: String(safe.phase || 'error'),
-      statusText: String(safe.statusText || ''),
-      sttDevice: String(safe.sttDevice || ''),
-      sttModel: String(safe.sttModel || settings.sttModel || 'small'),
-      error: String(safe.error || ''),
-    },
-  });
-}
 
 async function reconnectChatGptTab(tab) {
   const tabId = Number(tab && tab.id);
@@ -526,7 +286,7 @@ async function reconnectChatGptTab(tab) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content.js'],
+        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content-settings.js', 'content-dom-observer.js', 'content-completion-marker.js', 'content-conversation-bridge.js', 'content-audio-player.js', 'content-message-router.js', 'content.js'],
       });
       const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
       return Boolean(response && response.ok === true);
@@ -612,211 +372,6 @@ async function syncExternalControlPanel() {
   return externalControlSync.synchronize();
 }
 
-function enqueue(base, front = false) {
-  const item = queueCore.createQueueItem(base, {
-    createId: () => `q-${Date.now()}-${seq++}`,
-    defaultVoiceProfile: DEFAULT_SETTINGS.voiceProfile,
-    referenceSettingsLoaded,
-    lastKnownReferenceVoice,
-    normalizeReferenceVoice: normalizeStoredReference,
-  });
-  if (front) queue.unshift(item);
-  else queue.push(item);
-  return item;
-}
-
-function chunkLabel(item) {
-  const index = Math.max(0, Number(item?.chunkIndex || 0)) + 1;
-  const count = Math.max(0, Number(item?.chunkCount || 0));
-  return count > 0 ? `${index}/${count}` : String(index);
-}
-
-function playbackLeaseMs(durationSeconds) {
-  const duration = Number(durationSeconds);
-  if (!Number.isFinite(duration) || duration <= 0) return 90_000;
-  return Math.max(30_000, Math.min(900_000, Math.ceil(duration * 1000) + 15_000));
-}
-
-function clearPlaybackWatchdog() {
-  if (playbackWatchdogTimer) clearTimeout(playbackWatchdogTimer);
-  playbackWatchdogTimer = null;
-  currentPlaybackDeadlineAt = 0;
-}
-
-function clearCurrentPlayback() {
-  clearPlaybackWatchdog();
-  isPlaying = false;
-  playbackPhase = 'idle';
-  currentItem = null;
-  currentToken = null;
-  currentPlaybackTabId = null;
-}
-
-function armPlaybackWatchdog(timeoutMs) {
-  clearPlaybackWatchdog();
-  const safeTimeout = Math.max(1000, Number(timeoutMs) || playbackLeaseMs(0));
-  currentPlaybackDeadlineAt = Date.now() + safeTimeout;
-  playbackWatchdogTimer = setTimeout(() => {
-    playbackWatchdogTimer = null;
-    recoverExpiredPlayback(Date.now());
-  }, safeTimeout + 50);
-  if (playbackWatchdogTimer && typeof playbackWatchdogTimer.unref === 'function') playbackWatchdogTimer.unref();
-}
-
-function abandonCurrentPlayback(reason, level = 'warn') {
-  if (!isPlaying) return false;
-  const done = currentItem;
-  const playbackToken = currentToken;
-  const playbackTabId = currentPlaybackTabId;
-  clearCurrentPlayback();
-  void stopLocalAudio().catch(() => {});
-  if (playbackTabId) {
-    chrome.tabs.sendMessage(playbackTabId, { type: 'stop-audio', payload: { playbackToken } }).catch(() => {});
-  }
-  setStatus(`${reason} chunk ${chunkLabel(done)}`, level);
-  broadcastState();
-  void playNext();
-  return true;
-}
-
-function recoverExpiredPlayback(now = Date.now()) {
-  if (!isPlaying || playbackPhase !== 'playing' || !currentPlaybackDeadlineAt) return false;
-  if (Number(now) < currentPlaybackDeadlineAt) return false;
-  return abandonCurrentPlayback('Playback timed out; skipped', 'warn');
-}
-
-function queueCommand(cmd, senderTabId, _params = {}) {
-  const plan = queueCore.planManualCommand({
-    command: cmd,
-    senderTabId,
-    tabs,
-    selectedTabId,
-  });
-  setStatus(plan.statusText, plan.statusLevel);
-  if (plan.ok) {
-    const info = tabs.get(plan.tabId);
-    info.lastReadIndex = plan.lastReadIndex;
-    enqueue(plan.enqueueBase);
-    void playNext();
-  }
-  return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-}
-
-async function playNext() {
-  if (isPlaying) return;
-  ensureOwner();
-  if (!uiOwnerTabId || !tabs.has(uiOwnerTabId)) return broadcastState();
-  const item = queue.shift();
-  if (!item) return broadcastState();
-  isPlaying = true;
-  playbackPhase = 'generating';
-  currentItem = item;
-  const playbackToken = crypto.randomUUID();
-  currentToken = playbackToken;
-  currentPlaybackTabId = null;
-  setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
-  broadcastState();
-  try {
-    await flushBrowserRuntimeState();
-    let payload;
-    if (item.audioUrl) {
-      payload = await replayLocalAudio(item.text);
-    } else {
-      payload = await speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt);
-      item.audioUrl = payload.audioUrl;
-      item.usedReferenceAudio = String(payload.usedReferenceAudio || '');
-      item.voiceProfile = String(payload.voiceProfile || item.voiceProfile || '');
-      item.referenceVoice = String(payload.referenceVoice || item.referenceVoice || '');
-    }
-    if (!isPlaying || currentToken !== playbackToken || currentItem !== item) return;
-    if (payload && payload.playedLocally === true) {
-      finishPlayback({
-        playbackToken,
-        ok: !payload.stopped && payload.playbackCompleted !== false,
-        stopped: Boolean(payload.stopped),
-        error: payload.error || '',
-      });
-      return;
-    }
-
-    // Compatibility with an older local API during an in-place upgrade.
-    currentPlaybackTabId = uiOwnerTabId;
-    playbackPhase = 'playing';
-    setStatus(`Playing chunk ${chunkLabel(item)} · Ref ${item.referenceVoice || 'none'}`, 'info');
-    armPlaybackWatchdog(playbackLeaseMs(0));
-    broadcastState();
-    await chrome.tabs.sendMessage(currentPlaybackTabId, {
-      type: 'play-audio',
-      payload: { url: item.audioUrl, text: item.text, playbackToken, item: cloneItem(item) },
-    });
-  } catch (error) {
-    if (!isPlaying || currentToken !== playbackToken || currentItem !== item) return;
-    clearCurrentPlayback();
-    setStatus(`Playback failed: ${error.message || String(error)}`, 'error');
-    broadcastState();
-    void playNext();
-  }
-}
-
-function finishPlayback(message) {
-  const token = String((message && message.playbackToken) || '');
-  if (!isPlaying || token !== currentToken) return { ok: true, payload: { ignored: true } };
-  clearPlaybackWatchdog();
-  currentPlaybackTabId = null;
-  const done = currentItem;
-  isPlaying = false;
-  playbackPhase = 'idle';
-  currentItem = null;
-  currentToken = null;
-  if (message.ok && !message.stopped) {
-    lastPlayedItem = { ...cloneItem(done), playedAt: new Date().toISOString() };
-    setStatus(`Played chunk ${chunkLabel(done)}`, 'info');
-  } else {
-    setStatus(message.stopped ? 'Playback stopped' : `Playback error: ${String(message.error || 'unknown')}`, message.stopped ? 'info' : 'error');
-  }
-  broadcastState();
-  void playNext();
-  return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-}
-
-function executeUiCommand(cmd, senderTabId, params = {}) {
-  const normalized = String(cmd || '').toLowerCase();
-  if (normalized === 'stop' || normalized === 'skip') {
-    queue = [];
-    const playbackTabId = currentPlaybackTabId || uiOwnerTabId;
-    const playbackToken = currentToken;
-    void stopLocalAudio().catch(() => {});
-    if (playbackTabId) chrome.tabs.sendMessage(playbackTabId, { type: 'stop-audio', payload: { playbackToken } }).catch(() => {});
-    isPlaying = false;
-    playbackPhase = 'idle';
-    currentItem = null;
-    currentToken = null;
-    clearPlaybackWatchdog();
-    currentPlaybackTabId = null;
-    setStatus(normalized === 'skip' ? 'Skipped' : 'Stopped', 'info');
-    broadcastState();
-    if (normalized === 'skip') void playNext();
-    return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-  }
-  if (normalized === 'replay') {
-    if (lastPlayedItem && lastPlayedItem.audioUrl) {
-      enqueue({ ...lastPlayedItem, mode: 'replay', reason: 'replay' }, true);
-      setStatus(`Replay chunk ${chunkLabel(lastPlayedItem)}`, 'info');
-    } else {
-      setStatus('No replay audio yet', 'warn');
-    }
-    void playNext();
-    return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-  }
-  if (normalized === 'next' || normalized === 'regen') {
-    const result = queueCommand(normalized, senderTabId, params);
-    broadcastState();
-    return result;
-  }
-  setStatus(`Unsupported command: ${normalized}`, 'warn');
-  return { ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } };
-}
-
 async function initializeBackgroundRuntime() {
   if (backgroundInitializationPromise) return backgroundInitializationPromise;
   backgroundInitializationPromise = (async () => {
@@ -841,176 +396,45 @@ chrome.runtime.onStartup.addListener(() => {
 });
 void initializeBackgroundRuntime();
 chrome.tabs.onRemoved.addListener((tabId) => {
-  const ownedCurrentPlayback = isPlaying && currentPlaybackTabId === tabId;
-  tabs.delete(tabId);
-  queue = queue.filter((item) => item.tabId !== tabId);
-  if (uiOwnerTabId === tabId) uiOwnerTabId = null;
-  if (selectedTabId === tabId) selectedTabId = null;
-  if (lastComposerFocusedTabId === tabId) lastComposerFocusedTabId = null;
-  if (activeConversationTargetTabId === tabId) activeConversationTargetTabId = null;
-  for (const [sessionId, targetTabId] of conversationSessionTargets.entries()) {
-    if (targetTabId === tabId) conversationSessionTargets.set(sessionId, 0);
-  }
-  if (ownedCurrentPlayback) abandonCurrentPlayback('Playback tab closed; skipped', 'warn');
-  else broadcastState();
+  removeTab(tabId, 'Playback tab closed; skipped');
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo || changeInfo.status !== 'loading') return;
-  const ownedCurrentPlayback = isPlaying && currentPlaybackTabId === tabId;
-  tabs.delete(tabId);
-  if (uiOwnerTabId === tabId) uiOwnerTabId = null;
-  if (selectedTabId === tabId) selectedTabId = null;
-  if (lastComposerFocusedTabId === tabId) lastComposerFocusedTabId = null;
-  if (activeConversationTargetTabId === tabId) activeConversationTargetTabId = null;
-  for (const [sessionId, targetTabId] of conversationSessionTargets.entries()) {
-    if (targetTabId === tabId) conversationSessionTargets.set(sessionId, 0);
-  }
-  if (ownedCurrentPlayback) abandonCurrentPlayback('Playback tab reloaded; skipped', 'warn');
-  else broadcastState();
+  removeTab(tabId, 'Playback tab reloaded; skipped');
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  if (!tabs.has(tabId)) return;
-  uiOwnerTabId = tabId;
-  selectedTabId = tabId;
-  chrome.tabs.sendMessage(tabId, { type: 'tab-activated' }).catch(() => {});
-  broadcastState();
+  activateTab(tabId);
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || typeof message.type !== 'string') return false;
-  const senderTabId = sender.tab ? sender.tab.id : null;
-
-  if (message.type === 'tab-attention-state') {
-    if (!senderTabId) {
-      sendResponse({ ok: true, payload: { active: false } });
-      return false;
-    }
-    chrome.tabs.get(senderTabId)
-      .then((tab) => sendResponse({ ok: true, payload: { active: Boolean(tab && tab.active) } }))
-      .catch(() => sendResponse({ ok: true, payload: { active: false } }));
-    return true;
-  }
-
-  if (message.type === 'register-tab') {
-    if (senderTabId) {
-      const existing = tabs.get(senderTabId) || { lastAssistantMessage: null, lastReadIndex: -1, lastAutoQueueSignature: '' };
-      existing.title = String(message.title || sender.tab.title || 'ChatGPT');
-      existing.url = sender.tab.url || existing.url || '';
-      tabs.set(senderTabId, existing);
-      if (message.claimOwner === true || (uiOwnerTabId == null && sender.tab.active)) {
-        uiOwnerTabId = senderTabId;
-        selectedTabId = senderTabId;
-      }
-    }
-    sendResponse({ ok: true, payload: statePayload(senderTabId) });
-    broadcastState();
-    return false;
-  }
-
-  if (message.type === 'composer-focused') {
-    if (senderTabId && tabs.has(senderTabId)) {
-      lastComposerFocusedTabId = senderTabId;
-      sendResponse({ ok: true, payload: { targetTabId: senderTabId } });
-    } else {
-      sendResponse({ ok: false, reason: 'tab-not-registered' });
-    }
-    return false;
-  }
-
-  if (message.type === 'report-chunks') {
-    if (senderTabId && tabs.has(senderTabId)) {
-      const report = queueCore.applyAssistantReport(tabs.get(senderTabId), message, {
-        tabId: senderTabId,
-        allowAuto: shouldQueueAutoFromTab(senderTabId),
-        capturedAt: Date.now(),
-      });
-      if (report.changed) tabs.set(senderTabId, report.info);
-      if (report.enqueueBase) {
-        enqueue(report.enqueueBase);
-        void playNext();
-      } else if (report.suppressedAuto) {
-        setStatus('音声入力中のため別の返答は読み上げませんでした', 'info');
-      }
-    }
-    sendResponse({ ok: true, payload: { statusText: lastStatusText, statusLevel: lastStatusLevel } });
-    broadcastState();
-    return false;
-  }
-
-  if (message.type === 'playback-started') {
-    const token = String(message.playbackToken || '');
-    if (isPlaying && token === currentToken && senderTabId === currentPlaybackTabId) {
-      armPlaybackWatchdog(playbackLeaseMs(message.durationSeconds));
-      sendResponse({ ok: true, payload: { accepted: true } });
-    } else {
-      sendResponse({ ok: true, payload: { ignored: true } });
-    }
-    return false;
-  }
-
-  if (message.type === 'playback-done') {
-    sendResponse(finishPlayback(message));
-    return false;
-  }
-
-  if (message.type === 'fetch-audio') {
-    fetchAudioPayload(message.url)
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'reference-voices') {
-    fetchReferenceVoices()
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'desktop-pet-selection') {
-    syncDesktopPetSelection(message.petId)
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'options-settings-updated') {
-    getSettings()
-      .then((settings) => pushOptionSettings(settings))
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'external-control-poll') {
-    syncExternalControlPanel()
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (globalThis.BackgroundLiveClient.MESSAGE_TYPES.has(message.type)) {
-    liveClient.handle(message, senderTabId, Boolean(senderTabId && tabs.has(senderTabId)))
-      .then((result) => sendResponse(result.response || { ok: false, error: 'live-message-unhandled' }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'conversation-state') {
-    postConversationState(message.payload)
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-
-  if (message.type === 'ui-command') {
-    const params = message.params && typeof message.params === 'object' ? message.params : {};
-    const result = executeUiCommand(message.cmd, senderTabId, params);
-    flushBrowserRuntimeState()
-      .then(() => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-    return true;
-  }
-  return false;
-});
+chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
+  chrome,
+  tabs,
+  registerTab,
+  noteComposerFocused,
+  statePayload,
+  broadcastState,
+  queueCore,
+  shouldQueueAutoFromTab,
+  enqueue,
+  playNext,
+  setStatus,
+  statusPayload: () => ({ statusText: lastStatusText, statusLevel: lastStatusLevel }),
+  isPlaying: () => isPlaying,
+  currentToken: () => currentToken,
+  currentPlaybackTabId: () => currentPlaybackTabId,
+  armPlaybackWatchdog,
+  playbackLeaseMs,
+  finishPlayback,
+  fetchAudioPayload,
+  fetchReferenceVoices,
+  syncDesktopPetSelection,
+  getSettings,
+  pushOptionSettings,
+  syncExternalControlPanel,
+  liveMessageTypes: globalThis.BackgroundLiveClient.MESSAGE_TYPES,
+  liveClient,
+  postConversationState,
+  executeUiCommand,
+  flushBrowserRuntimeState,
+}));
 

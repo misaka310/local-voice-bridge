@@ -1,245 +1,19 @@
 (() => {
-  const SETTINGS_VERSION = 11;
-  const DEFAULT_SETTINGS = {
-    settingsVersion: SETTINGS_VERSION,
-    enabled: false,
-    apiUrl: 'http://127.0.0.1:8717/v1/speak',
-    healthUrl: 'http://127.0.0.1:8717/health',
-    voiceProfile: 'irodori-v3',
-    voiceId: '',
-    referenceVoice: '',
-    voicePrompt: '',
-    voiceVolume: 0.6,
-    previewMaxLines: 2,
-    previewMaxChars: 80,
-    previewMinChars: 40,
-    previewStableMs: 1000,
-    micConversationEnabled: false,
-    sttModel: 'small',
-    cancelGraceMs: 700,
-    liveTtsProfile: 'speed',
-  };
-  const AUTO_SENT_FLAG = 'localVoiceSent';
-  const COMPLETION_TITLE_PREFIX = '● ';
-  const COMPLETION_SESSION_KEY = 'localVoiceCompletionPending';
-  const COMPLETION_FAVICON_ID = 'local-voice-completion-favicon';
-  const COMPLETION_FAVICON_DATA_URL = `data:image/svg+xml,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  )}`;
-  const RESPONSE_GENERATING_SELECTOR = [
-    '[data-testid="stop-button"]',
-    'button[aria-label="Stop generating"]',
-    'button[aria-label="Stop streaming"]',
-    'button[aria-label="生成を停止"]',
-    'button[aria-label="応答を停止"]',
-    'button[aria-label="ストリーミングを停止"]',
-  ].join(',');
-  const RESPONSE_COMPLETE_SELECTOR = [
-    'button[data-testid="copy-turn-action-button"]',
-    'button[data-testid="good-response-turn-action-button"]',
-    'button[data-testid="bad-response-turn-action-button"]',
-    'button[aria-label="Copy"]',
-    'button[aria-label="コピー"]',
-    'button[aria-label="Good response"]',
-    'button[aria-label="Bad response"]',
-    'button[aria-label="Regenerate"]',
-    'button[aria-label="再生成する"]',
-  ].join(',');
-  const DEFAULT_PET_ID = 'placeholder';
-  const LEGACY_BROWSER_UI_STORAGE_KEYS = ['petMode', 'selectedPetId', 'petPosition', 'panelPosition', 'panelCollapsed'];
-
+  const contentSettings = globalThis.LocalVoiceContentSettings;
+  if (!contentSettings) throw new Error('content-settings.js must load before content.js');
+  const {
+    DEFAULT_SETTINGS,
+    clampVolume,
+    resolveDesktopPetId,
+    normalizeReferenceVoice,
+    normalizeLiveTtsProfile,
+    sanitizeStoredSettings,
+  } = contentSettings;
   let settings = { ...DEFAULT_SETTINGS };
   let enabled = false;
   let observer = null;
-  let titleObserver = null;
-  let currentAudio = null;
-  let currentObjectUrl = null;
-  let currentPlaybackToken = null;
-  let currentPlaybackCancel = null;
-  let currentConversationPhase = 'off';
-  let pendingSendController = null;
   let liveController = null;
-  let cancelOverlay = null;
   let isUiOwner = null;
-  let completionMarkerPending = false;
-  let baseDocumentTitle = '';
-  let deliveryLedger = null;
-  let autoSpeechController = null;
-  const textCore = globalThis.ContentTextCore;
-  const assistantText = globalThis.LocalVoiceAssistantText;
-  const autoSpeech = globalThis.LocalVoiceAutoSpeech;
-
-  function normalizeText(text) {
-    return assistantText.normalizeText(text);
-  }
-
-  function stripCompletionTitlePrefix(title) {
-    const value = String(title || '');
-    return value.startsWith(COMPLETION_TITLE_PREFIX)
-      ? value.slice(COMPLETION_TITLE_PREFIX.length)
-      : value;
-  }
-
-  function getPlainDocumentTitle() {
-    return stripCompletionTitlePrefix(document.title) || baseDocumentTitle || '';
-  }
-
-  async function isTabActivelyViewed() {
-    try {
-      const attention = await Promise.race([
-        runtimeMessage('tab-attention-state'),
-        new Promise((resolve) => window.setTimeout(() => resolve(null), 500)),
-      ]);
-      return Boolean(attention && attention.active && document.hasFocus());
-    } catch (_error) {
-      return false;
-    }
-  }
-
-  function persistCompletionMarkerState() {
-    try {
-      if (completionMarkerPending) sessionStorage.setItem(COMPLETION_SESSION_KEY, '1');
-      else sessionStorage.removeItem(COMPLETION_SESSION_KEY);
-    } catch (_error) {}
-  }
-
-  function ensureCompletionFavicon() {
-    if (!document.head) return;
-    let favicon = document.getElementById(COMPLETION_FAVICON_ID);
-    if (!favicon) {
-      favicon = document.createElement('link');
-      favicon.id = COMPLETION_FAVICON_ID;
-      favicon.rel = 'icon';
-      favicon.type = 'image/svg+xml';
-      favicon.href = COMPLETION_FAVICON_DATA_URL;
-    }
-    if (document.head.lastElementChild !== favicon) document.head.appendChild(favicon);
-  }
-
-  function syncCompletionMarker() {
-    const currentTitle = stripCompletionTitlePrefix(document.title);
-    if (currentTitle) baseDocumentTitle = currentTitle;
-    if (!completionMarkerPending) {
-      if (document.title.startsWith(COMPLETION_TITLE_PREFIX) && baseDocumentTitle) {
-        document.title = baseDocumentTitle;
-      }
-      document.getElementById(COMPLETION_FAVICON_ID)?.remove();
-      return;
-    }
-    if (baseDocumentTitle) {
-      const markedTitle = `${COMPLETION_TITLE_PREFIX}${baseDocumentTitle}`;
-      if (document.title !== markedTitle) document.title = markedTitle;
-    }
-    ensureCompletionFavicon();
-  }
-
-  function setCompletionMarkerPending(nextPending) {
-    completionMarkerPending = Boolean(nextPending);
-    persistCompletionMarkerState();
-    syncCompletionMarker();
-  }
-
-  function clearCompletionMarker() {
-    if (!completionMarkerPending && !document.getElementById(COMPLETION_FAVICON_ID)) return;
-    setCompletionMarkerPending(false);
-  }
-
-  function markResponseCompleted() {
-    setCompletionMarkerPending(true);
-    void isTabActivelyViewed().then((active) => {
-      if (active) clearCompletionMarker();
-    });
-  }
-
-  function isResponseGenerating() {
-    return Boolean(document.querySelector(RESPONSE_GENERATING_SELECTOR));
-  }
-
-  function responseTurnForNode(node) {
-    if (!node || typeof node.closest !== 'function') return null;
-    return node.closest('[data-testid^="conversation-turn-"]') || node;
-  }
-
-  function hasResponseCompletionControl(node) {
-    const turn = responseTurnForNode(node);
-    return Boolean(turn && typeof turn.querySelector === 'function' && turn.querySelector(RESPONSE_COMPLETE_SELECTOR));
-  }
-
-  function clampVolume(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.voiceVolume;
-    return Math.min(1, Math.max(0, n));
-  }
-
-  function normalizeVoiceId(value) {
-    return String(value || '').trim();
-  }
-
-  function resolveDesktopPetId(value) {
-    const petId = normalizeVoiceId(value).toLowerCase();
-    if (!petId || petId === 'none' || petId === '.' || petId === '..' || /[\\/]/.test(petId)) return DEFAULT_PET_ID;
-    return petId;
-  }
-
-  function normalizeReferenceVoice(value) {
-    const normalized = String(value || '').trim();
-    if (!normalized || ['none', 'qwen3', 'qwen'].includes(normalized.toLowerCase())) return '';
-    return normalized;
-  }
-  function storedReferenceVoice(raw) {
-    const voiceId = normalizeReferenceVoice(raw && raw.voiceId);
-    if (voiceId) return voiceId;
-    return normalizeReferenceVoice(raw && raw.referenceVoice);
-  }
-
-  function clampInteger(value, fallback, minimum, maximum) {
-    if (value === '' || value === null || value === undefined) return fallback;
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.min(maximum, Math.max(minimum, Math.round(number)));
-  }
-
-  function normalizeSttModel(value) {
-    const normalized = String(value || '').trim();
-    return ['small', 'medium', 'large-v3-turbo'].includes(normalized)
-      ? normalized
-      : DEFAULT_SETTINGS.sttModel;
-  }
-
-  function normalizeCancelGraceMs(value) {
-    return clampInteger(value, DEFAULT_SETTINGS.cancelGraceMs, 0, 5000);
-  }
-
-  function normalizeLiveTtsProfile(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    return ['speed', 'balanced', 'bridge'].includes(normalized)
-      ? normalized
-      : DEFAULT_SETTINGS.liveTtsProfile;
-  }
-
-  async function sanitizeStoredSettings(raw) {
-    const next = {
-      ...DEFAULT_SETTINGS,
-      ...raw,
-      settingsVersion: SETTINGS_VERSION,
-      model: DEFAULT_SETTINGS.voiceProfile,
-      voiceId: storedReferenceVoice(raw),
-      voiceProfile: DEFAULT_SETTINGS.voiceProfile,
-      referenceVoice: storedReferenceVoice(raw),
-      voicePrompt: '',
-      previewMaxLines: clampInteger(raw.previewMaxLines, DEFAULT_SETTINGS.previewMaxLines, 1, 20),
-      previewMaxChars: clampInteger(raw.previewMaxChars, DEFAULT_SETTINGS.previewMaxChars, 40, 1000),
-      sttModel: normalizeSttModel(raw.sttModel),
-      cancelGraceMs: normalizeCancelGraceMs(raw.cancelGraceMs),
-      liveTtsProfile: normalizeLiveTtsProfile(raw.liveTtsProfile),
-    };
-    for (const key of LEGACY_BROWSER_UI_STORAGE_KEYS) delete next[key];
-    if (globalThis.chrome && chrome.storage && chrome.storage.local) {
-      await chrome.storage.local.set(next);
-      await chrome.storage.local.remove(LEGACY_BROWSER_UI_STORAGE_KEYS);
-    }
-    return next;
-  }
 
   function getCurrentVoiceProfile() {
     return DEFAULT_SETTINGS.voiceProfile;
@@ -257,141 +31,6 @@
       referenceVoice,
       voicePrompt: '',
     };
-  }
-
-  function splitChunkByMaxChars(text, maxChars, minChars) {
-    const trimmed = normalizeText(text);
-    if (!trimmed) return { head: '', tail: '' };
-    if (trimmed.length <= maxChars) return { head: trimmed, tail: '' };
-    const head = trimmed.slice(0, maxChars);
-    const punctRegex = /[、。！？!?]/g;
-    let punctMatch = null;
-    for (const match of head.matchAll(punctRegex)) punctMatch = match;
-    if (punctMatch && Number(punctMatch.index) >= Math.floor(minChars * 0.6)) {
-      const cut = Number(punctMatch.index) + 1;
-      return { head: normalizeText(trimmed.slice(0, cut)), tail: normalizeText(trimmed.slice(cut)) };
-    }
-    const soft = head.lastIndexOf(' ');
-    if (soft >= Math.floor(minChars * 0.6)) {
-      return { head: normalizeText(head.slice(0, soft)), tail: normalizeText(trimmed.slice(soft)) };
-    }
-    return { head: normalizeText(head), tail: normalizeText(trimmed.slice(maxChars)) };
-  }
-
-  function normalizeSpeakableLines(fullText) {
-    let text = normalizeText(fullText);
-    if (!text) return [];
-    text = text.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/\n{2,}/g, '\n');
-    const lines = text
-      .split('\n')
-      .map((line) => assistantText.normalizeMarkdownLine(line))
-      .filter((line) => Boolean(line) && !assistantText.isTransientAssistantStatus(line));
-    return textCore.coalesceOrphanLines(lines, {
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    });
-  }
-
-  function buildPreviewSourceText(fullText, options = {}) {
-    const maxLines = Number(options.maxLines || DEFAULT_SETTINGS.previewMaxLines);
-    const lines = normalizeSpeakableLines(fullText);
-    const picked = lines.slice(0, Math.max(1, maxLines));
-    const merged = normalizeText(picked.join(' '));
-    return merged;
-  }
-
-  function extractAutoPreview(fullText, options = {}) {
-    const maxChars = Number(options.maxChars || DEFAULT_SETTINGS.previewMaxChars);
-    const minChars = Number(options.minChars || DEFAULT_SETTINGS.previewMinChars);
-    const merged = buildPreviewSourceText(fullText, options);
-    if (!merged) return '';
-    return splitChunkByMaxChars(merged, maxChars, minChars).head;
-  }
-
-  function splitSpeakChunks(fullText, options = {}) {
-    const maxChars = Number(options.maxChars || DEFAULT_SETTINGS.previewMaxChars);
-    const minChars = Number(options.minChars || DEFAULT_SETTINGS.previewMinChars);
-    const maxLines = Math.max(1, Number(options.maxLines || DEFAULT_SETTINGS.previewMaxLines));
-    const lines = normalizeSpeakableLines(fullText);
-    const chunks = [];
-    for (let index = 0; index < lines.length; index += maxLines) {
-      let pending = normalizeText(lines.slice(index, index + maxLines).join(' '));
-      while (pending) {
-        const split = splitChunkByMaxChars(pending, maxChars, minChars);
-        if (!split.head) break;
-        chunks.push(split.head);
-        if (!split.tail || split.tail === pending) break;
-        pending = split.tail;
-      }
-    }
-    return chunks;
-  }
-
-  function stableDelayForPreview(preview) {
-    const minChars = Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars);
-    const stableMs = Number(settings.previewStableMs || DEFAULT_SETTINGS.previewStableMs);
-    return textCore.stableDelayForPreview(preview, { minChars, stableMs });
-  }
-
-  function getAssistantNodes() {
-    return assistantText.getAssistantNodes(document);
-  }
-
-  function getStableKey(node) {
-    return assistantText.getStableKey(node);
-  }
-
-  function extractAssistantText(node) {
-    return assistantText.extractAssistantText(node);
-  }
-
-  function getPreviewOptions() {
-    return {
-      maxLines: Number(settings.previewMaxLines || DEFAULT_SETTINGS.previewMaxLines),
-      maxChars: Number(settings.previewMaxChars || DEFAULT_SETTINGS.previewMaxChars),
-      minChars: Number(settings.previewMinChars || DEFAULT_SETTINGS.previewMinChars),
-    };
-  }
-
-  function isGenerationControlNode(node) {
-    if (!node || node.nodeType !== 1) return false;
-    return node.matches(RESPONSE_GENERATING_SELECTOR)
-      || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));
-  }
-
-  function ensureAutoSpeechController() {
-    if (autoSpeechController) return autoSpeechController;
-    if (!assistantText || !autoSpeech || typeof autoSpeech.createAutoSpeechController !== 'function') {
-      throw new Error('assistant text and auto speech modules must load before content.js');
-    }
-    autoSpeechController = autoSpeech.createAutoSpeechController({
-      sentFlag: AUTO_SENT_FLAG,
-      getAssistantNodes,
-      extractAssistantText,
-      getStableKey,
-      isResponseGenerating,
-      hasResponseCompletionControl,
-      getPreviewOptions,
-      splitSpeakChunks,
-      extractAutoPreview,
-      stableDelayForPreview,
-      canFinalizePreview: textCore.canFinalizePreview,
-      reportChunks,
-      markResponseCompleted,
-      isAutoEnabled: () => Boolean(enabled && settings.enabled),
-      isGenerationControlNode,
-      afterInspectLatest: () => {
-        if (settings.micConversationEnabled) void ensureLiveController()?.inspect();
-      },
-    });
-    return autoSpeechController;
-  }
-
-  function markExistingMessagesAsSeen() {
-    ensureAutoSpeechController().markExistingMessagesAsSeen();
-  }
-
-  function rebaselineAutoMessages() {
-    ensureAutoSpeechController().rebaseline();
   }
 
   function runtimeMessage(type, extra = {}) {
@@ -413,6 +52,93 @@
       });
     });
   }
+
+  const completionMarker = globalThis.LocalVoiceCompletionMarker.create({
+    document,
+    window,
+    sessionStorage,
+    MutationObserver,
+    runtimeMessage,
+  });
+  const {
+    getPlainDocumentTitle,
+    isTabActivelyViewed,
+    clear: clearCompletionMarker,
+    markResponseCompleted,
+    initialize: initializeCompletionMarker,
+  } = completionMarker;
+
+  const domObserverController = globalThis.LocalVoiceContentDomObserver.create({
+    document,
+    defaultSettings: DEFAULT_SETTINGS,
+    getSettings: () => settings,
+    isEnabled: () => enabled,
+    reportChunks: (entry, isAuto) => reportChunks(entry, isAuto),
+    markResponseCompleted,
+    ensureLiveController: () => ensureLiveController(),
+  });
+  const {
+    getAssistantNodes,
+    getStableKey,
+    extractAssistantText,
+    isResponseGenerating,
+    markExistingMessagesAsSeen,
+    rebaseline: rebaselineAutoMessages,
+    reportLatestSnapshot: reportLatestAssistantSnapshot,
+    scheduleInspect,
+  } = domObserverController;
+
+  const conversationBridge = globalThis.LocalVoiceContentConversationBridge.create({
+    chrome,
+    document,
+    window,
+    Event,
+    InputEvent,
+    location,
+    sessionStorage,
+    getSettings: () => settings,
+    updateCancelGraceMs: (value) => { settings.cancelGraceMs = value; },
+    getPlainDocumentTitle,
+    ensureLiveController: () => ensureLiveController(),
+  });
+  const {
+    getPhase: getConversationPhase,
+    reportConversationState,
+    reportComposerFocus,
+    conversationTargetStatus,
+    handleVoiceTranscript,
+    cancelPending: cancelPendingVoiceSend,
+    disable: disableConversationBridge,
+    handlePageHide,
+  } = conversationBridge;
+
+  const audioPlayer = globalThis.LocalVoiceContentAudioPlayer.create({
+    chrome,
+    Audio,
+    URL,
+    atob,
+    runtimeMessage,
+    clampVolume,
+    getSettings: () => settings,
+    getConversationPhase,
+    reportConversationState,
+  });
+  const {
+    playItem,
+    stopCurrentPlayback,
+  } = audioPlayer;
+
+  const contentMessageRouter = globalThis.LocalVoiceContentMessageRouter.create({
+    conversationTargetStatus,
+    clearCompletionMarker,
+    registerCurrentTab: (options) => registerCurrentTab(options),
+    applyOwnerState,
+    playItem,
+    handleVoiceTranscript,
+    cancelPendingVoiceSend,
+    audioPlayer,
+    stopCurrentPlayback,
+  });
 
   function ensureLiveController() {
     if (liveController) return liveController;
@@ -470,10 +196,6 @@
     }).catch(() => {});
   }
 
-  async function reportLatestAssistantSnapshot() {
-    return ensureAutoSpeechController().reportLatestSnapshot();
-  }
-
   async function registerCurrentTab({ claimOwner = false, includeLatest = false } = {}) {
     const response = await runtimeMessage('register-tab', {
       title: getPlainDocumentTitle(),
@@ -484,10 +206,6 @@
     return response || null;
   }
 
-  function scheduleInspect(mutations = []) {
-    ensureAutoSpeechController().scheduleInspect(mutations);
-  }
-
   async function syncDesktopPetSelection(referenceVoice = getCurrentReferenceVoice()) {
     const petId = resolveDesktopPetId(referenceVoice);
     try {
@@ -495,239 +213,8 @@
     } catch (_error) {}
   }
 
-  function releaseObjectUrl() {
-    if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-    currentObjectUrl = null;
-  }
-
-  function releaseSpecificObjectUrl(objectUrl) {
-    if (!objectUrl) return;
-    try { URL.revokeObjectURL(objectUrl); } catch (_error) {}
-    if (currentObjectUrl === objectUrl) currentObjectUrl = null;
-  }
-
-  function playbackLeaseMs(durationSeconds) {
-    const duration = Number(durationSeconds);
-    if (!Number.isFinite(duration) || duration <= 0) return 90_000;
-    return Math.max(30_000, Math.min(900_000, Math.ceil(duration * 1000) + 15_000));
-  }
-
-  function base64ToBlob(base64, contentType) {
-    const binary = atob(String(base64 || ''));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: contentType || 'audio/wav' });
-  }
-
-  async function fetchAudioObjectUrl(url) {
-    const payload = await runtimeMessage('fetch-audio', { url });
-    if (!payload || !payload.base64) throw new Error('audio data is empty');
-    const blob = base64ToBlob(payload.base64, payload.contentType || 'audio/wav');
-    if (!blob || blob.size === 0) throw new Error('audio blob is empty');
-    return URL.createObjectURL(blob);
-  }
-
-
-  async function playItem(url, text, item, playbackToken) {
-    stopCurrentPlayback('replace');
-    const token = String(playbackToken || '');
-    currentPlaybackToken = token;
-    let audioSrc = null;
-    let playbackAudio = null;
-    if (settings.micConversationEnabled) {
-      reportConversationState({ phase: 'speaking', statusText: '読み上げ中', error: '', sttModel: settings.sttModel });
-    }
-    try {
-      audioSrc = await fetchAudioObjectUrl(url);
-      if (currentPlaybackToken !== token) {
-        releaseSpecificObjectUrl(audioSrc);
-        return;
-      }
-      releaseObjectUrl();
-      currentObjectUrl = audioSrc;
-      await new Promise((resolve, reject) => {
-        const audio = new Audio(audioSrc);
-        playbackAudio = audio;
-        audio.volume = clampVolume(settings.voiceVolume);
-        currentAudio = audio;
-        let settled = false;
-        let watchdogTimer = null;
-        const cleanup = () => {
-          if (watchdogTimer) clearTimeout(watchdogTimer);
-          watchdogTimer = null;
-          audio.onended = null;
-          audio.onerror = null;
-          audio.onabort = null;
-        };
-        const settle = (callback, value) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          callback(value);
-        };
-        const armWatchdog = (durationSeconds) => {
-          if (watchdogTimer) clearTimeout(watchdogTimer);
-          watchdogTimer = setTimeout(() => {
-            settle(reject, new Error('audio playback timed out'));
-          }, playbackLeaseMs(durationSeconds));
-        };
-        currentPlaybackCancel = () => {
-          const stopped = new Error('playback stopped');
-          stopped.code = 'PLAYBACK_STOPPED';
-          settle(reject, stopped);
-        };
-        audio.onended = () => settle(resolve);
-        audio.onerror = () => settle(reject, new Error('audio element failed'));
-        audio.onabort = () => settle(reject, new Error('audio playback aborted'));
-        armWatchdog(0);
-        audio.play().then(() => {
-          if (settled || currentPlaybackToken !== token) return;
-          const durationSeconds = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
-          armWatchdog(durationSeconds);
-          chrome.runtime.sendMessage({ type: 'playback-started', playbackToken: token, durationSeconds }).catch(() => {});
-        }).catch((error) => settle(reject, error));
-      });
-      if (currentPlaybackToken !== token) return;
-      releaseSpecificObjectUrl(audioSrc);
-      currentAudio = null;
-      currentPlaybackCancel = null;
-      currentPlaybackToken = null;
-      chrome.runtime.sendMessage({ type: 'playback-done', playbackToken: token, ok: true, stopped: false }).catch(() => {});
-      if (settings.micConversationEnabled && currentConversationPhase === 'speaking') {
-        reportConversationState({ phase: 'idle', statusText: '待機中（右Ctrl＋＼ 長押し）', error: '', sttModel: settings.sttModel });
-      }
-    } catch (error) {
-      const stopped = error && error.code === 'PLAYBACK_STOPPED';
-      const stale = currentPlaybackToken !== token;
-      releaseSpecificObjectUrl(audioSrc);
-      if (currentAudio === playbackAudio) currentAudio = null;
-      if (!stale) currentPlaybackCancel = null;
-      if (stale || stopped) return;
-      currentPlaybackToken = null;
-      chrome.runtime.sendMessage({ type: 'playback-done', playbackToken: token, ok: false, stopped: false, error: error.message || String(error) }).catch(() => {});
-      if (settings.micConversationEnabled && currentConversationPhase === 'speaking') {
-        reportConversationState({ phase: 'error', statusText: '読み上げに失敗しました', error: error.message || String(error), sttModel: settings.sttModel });
-      }
-    }
-  }
-
-  function stopCurrentPlayback(reason = 'stop') {
-    const playbackId = currentPlaybackToken;
-    if (currentAudio) {
-      try { currentAudio.pause(); currentAudio.currentTime = 0; } catch (_error) {}
-    }
-    if (currentPlaybackCancel) currentPlaybackCancel();
-    currentAudio = null;
-    currentPlaybackCancel = null;
-    currentPlaybackToken = null;
-    releaseObjectUrl();
-    return playbackId;
-  }
-
   function applyOwnerState(nextIsOwner) {
     isUiOwner = nextIsOwner;
-  }
-
-  function hideCancelOverlay() {
-    if (cancelOverlay) cancelOverlay.remove();
-    cancelOverlay = null;
-  }
-
-  function showCancelOverlay(graceMs) {
-    hideCancelOverlay();
-    cancelOverlay = document.createElement('div');
-    cancelOverlay.id = 'local-voice-cancel-hint';
-    cancelOverlay.textContent = `Escでキャンセル · ${(Math.max(0, Number(graceMs) || 0) / 1000).toFixed(1)}秒`;
-    Object.assign(cancelOverlay.style, {
-      position: 'fixed',
-      right: '18px',
-      bottom: '18px',
-      zIndex: '2147483647',
-      padding: '7px 10px',
-      borderRadius: '8px',
-      background: 'rgba(16, 18, 24, 0.88)',
-      color: '#f7f8fb',
-      font: '12px system-ui, sans-serif',
-      pointerEvents: 'none',
-      boxShadow: '0 4px 18px rgba(0, 0, 0, 0.25)',
-    });
-    document.documentElement.appendChild(cancelOverlay);
-  }
-
-  function reportConversationState(payload) {
-    currentConversationPhase = String(payload && payload.phase || 'error');
-    if (!globalThis.chrome || !chrome.runtime || !chrome.runtime.sendMessage) return;
-    chrome.runtime.sendMessage({ type: 'conversation-state', payload }).catch(() => {});
-  }
-
-  function reportComposerFocus(target = document.activeElement) {
-    const api = globalThis.LocalVoicePromptInput;
-    if (!api || typeof api.findComposer !== 'function' || !target) return;
-    const composer = api.findComposer(document, target);
-    if (!composer) return;
-    if (typeof api.isComposerTarget === 'function' ? !api.isComposerTarget(document, target) : (target !== composer && !(typeof composer.contains === 'function' && composer.contains(target)))) return;
-    chrome.runtime.sendMessage({ type: 'composer-focused', title: getPlainDocumentTitle() }).catch(() => {});
-  }
-
-  function conversationTargetStatus() {
-    const api = globalThis.LocalVoicePromptInput;
-    if (!api || typeof api.findComposer !== 'function') return { ok: false, reason: 'prompt-input-core-unavailable' };
-    const activeElement = document.activeElement || null;
-    const composer = api.findComposer(document, activeElement);
-    const composerFocused = Boolean(composer && activeElement && (typeof api.isComposerTarget === 'function'
-      ? api.isComposerTarget(document, activeElement)
-      : activeElement === composer || (typeof composer.contains === 'function' && composer.contains(activeElement))));
-    const documentFocused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-    const visible = document.visibilityState !== 'hidden';
-    return {
-      ok: true,
-      composerAvailable: Boolean(composer),
-      composerFocused: Boolean(composerFocused && documentFocused && visible),
-      documentFocused: Boolean(documentFocused),
-      visible,
-      url: location.href,
-    };
-  }
-
-  function appliedDeliveryLedger() {
-    if (deliveryLedger) return deliveryLedger;
-    const api = globalThis.LocalVoiceDeliveryIds;
-    if (!api || typeof api.createLedger !== 'function') return null;
-    deliveryLedger = api.createLedger(sessionStorage, {
-      key: 'localVoiceAppliedDeliveryIds',
-      limit: 128,
-    });
-    return deliveryLedger;
-  }
-
-  function ensurePendingSendController() {
-    if (pendingSendController) return pendingSendController;
-    const api = globalThis.LocalVoicePromptInput;
-    if (!api || typeof api.createPendingSendController !== 'function') return null;
-    const live = ensureLiveController();
-    if (!live) return null;
-    pendingSendController = api.createPendingSendController({
-      document,
-      window,
-      Event,
-      InputEvent,
-      getLocation: () => location.href,
-      prepareSubmission: (item) => live.prepareSubmission(item),
-      commitSubmission: (item) => live.commitSubmission(item),
-      invalidateSubmission: (item, reason) => live.invalidateSubmission(item, reason),
-      markSubmissionClick: (item, composer) => live.markSubmissionClick(item, composer),
-      onState: (state) => {
-        if (state.phase === 'pending_send') showCancelOverlay(settings.cancelGraceMs);
-        else hideCancelOverlay();
-        reportConversationState({
-          phase: state.phase,
-          statusText: state.statusText,
-          error: state.error || '',
-          sttModel: settings.sttModel || 'small',
-        });
-      },
-    });
-    return pendingSendController;
   }
 
   async function loadSettings() {
@@ -742,105 +229,13 @@
     enabled = Boolean(settings.enabled);
   }
 
-  function registerMessageListener() {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (!message || typeof message.type !== 'string') return false;
-      if (message.type === 'conversation-target-status') {
-        sendResponse(conversationTargetStatus());
-        return false;
-      }
-      if (message.type === 'tab-activated') {
-        clearCompletionMarker();
-        return false;
-      }
-      if (message.type === 'bridge-reconnect') {
-        registerCurrentTab({ includeLatest: true })
-          .then((payload) => sendResponse({ ok: true, payload }))
-          .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-        return true;
-      }
-      if (message.type === 'state-update') {
-        applyOwnerState(message.payload.isUiOwner, message.payload);
-        return false;
-      }
-      if (message.type === 'play-audio') {
-        void playItem(message.payload.url, message.payload.text, message.payload.item, String(message.payload.playbackToken || ''));
-        return false;
-      }
-      if (message.type === 'voice-transcript') {
-        if (!settings.micConversationEnabled) {
-          sendResponse({ ok: false, reason: 'mic-conversation-disabled' });
-          return false;
-        }
-        const controller = ensurePendingSendController();
-        if (!controller) {
-          reportConversationState({
-            phase: 'error',
-            statusText: '音声入力モジュールを読み込めませんでした',
-            error: 'prompt-input-core-unavailable',
-            sttModel: settings.sttModel,
-          });
-          sendResponse({ ok: false, reason: 'prompt-input-core-unavailable' });
-          return false;
-        }
-        const payload = message.payload || {};
-        const deliveryId = String(payload.deliveryId || '').trim();
-        const ledger = appliedDeliveryLedger();
-        if (deliveryId && ledger && ledger.has(deliveryId)) {
-          sendResponse({ ok: true, alreadyApplied: true });
-          return false;
-        }
-        settings.cancelGraceMs = Math.max(0, Math.min(5000, Number(payload.cancelGraceMs) || 0));
-        const live = ensureLiveController();
-        if (!live) {
-          sendResponse({ ok: false, reason: 'live-content-controller-unavailable' });
-          return false;
-        }
-        const text = String(payload.text || '');
-        const metadata = live.metadata(String(payload.sessionId || ''), text);
-        Promise.resolve(controller.start({
-          ...metadata,
-          text,
-          graceMs: settings.cancelGraceMs,
-        })).then((result) => {
-          if (result && result.ok === true && deliveryId && ledger) ledger.mark(deliveryId);
-          sendResponse(result);
-        }).catch((error) => sendResponse({ ok: false, reason: error.message || String(error) }));
-        return true;
-      }
-      if (message.type === 'cancel-voice-send') {
-        const controller = ensurePendingSendController();
-        const result = controller ? controller.cancel('new-recording') : { ok: false, reason: 'nothing-pending' };
-        hideCancelOverlay();
-        sendResponse(result);
-        return false;
-      }
-      if (message.type === 'stop-audio') {
-        const incomingToken = String((message.payload && message.payload.playbackToken) || '');
-        if (!incomingToken || incomingToken === currentPlaybackToken) stopCurrentPlayback('stop');
-        sendResponse({ ok: true });
-        return false;
-      }
-      return false;
-    });
-  }
-
   async function start() {
-    registerMessageListener();
+    chrome.runtime.onMessage.addListener(contentMessageRouter);
     document.getElementById('local-voice-pixel-pet')?.remove();
     document.getElementById('local-voice-bridge-panel')?.remove();
     await loadSettings();
     await syncDesktopPetSelection();
-    baseDocumentTitle = stripCompletionTitlePrefix(document.title);
-    try {
-      completionMarkerPending = sessionStorage.getItem(COMPLETION_SESSION_KEY) === '1';
-    } catch (_error) {
-      completionMarkerPending = false;
-    }
-    if (await isTabActivelyViewed()) setCompletionMarkerPending(false);
-    else syncCompletionMarker();
-    titleObserver = new MutationObserver(syncCompletionMarker);
-    titleObserver.observe(document.head, { childList: true, subtree: true, characterData: true });
+    await initializeCompletionMarker();
     markExistingMessagesAsSeen();
     try {
       await registerCurrentTab({ includeLatest: true });
@@ -884,11 +279,7 @@
       if (settings.micConversationEnabled) live?.handlePointer(event);
     }, { capture: true });
     reportComposerFocus();
-    window.addEventListener('pagehide', () => {
-      if (pendingSendController) pendingSendController.cancel('page-changed');
-      void live?.interrupt('pagehide');
-      hideCancelOverlay();
-    });
+    window.addEventListener('pagehide', handlePageHide);
     void pollExternalControl();
     setInterval(() => {
       chrome.runtime.sendMessage({ type: 'register-tab', title: getPlainDocumentTitle() }).catch(() => {});
@@ -905,10 +296,7 @@
       settings.voiceVolume = clampVolume(settings.voiceVolume);
       if (Object.prototype.hasOwnProperty.call(changes, 'micConversationEnabled')) {
         if (!settings.micConversationEnabled) {
-          if (pendingSendController) pendingSendController.cancel('disabled');
-          void ensureLiveController()?.interrupt('disabled');
-          hideCancelOverlay();
-          reportConversationState({ phase: 'off', statusText: 'マイク会話オフ', error: '', sttModel: settings.sttModel });
+          disableConversationBridge();
         } else {
           void ensureLiveController()?.reconcile();
         }

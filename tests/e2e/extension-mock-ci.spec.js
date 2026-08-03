@@ -14,7 +14,10 @@ let API = '';
 const SOURCE_EXTENSION = path.join(ROOT, 'extension');
 const EXTENSION_DIR = path.join(os.tmpdir(), `local-voice-extension-mock-${process.pid}-${Date.now()}`);
 const EXTENSION = EXTENSION_DIR.replaceAll('\\', '/');
-const PROFILE = path.join(ROOT, `.e2e-profile-mock-${process.pid}-${Date.now()}`);
+const PROFILE = process.env.LOCAL_VOICE_TEST_PROFILE
+  ? path.resolve(process.env.LOCAL_VOICE_TEST_PROFILE)
+  : path.join(ROOT, `.e2e-profile-mock-${process.pid}-${Date.now()}`);
+const BROWSER_EXECUTABLE = String(process.env.LOCAL_VOICE_BROWSER_EXECUTABLE || '').trim();
 const MOCK_RUN_TOKEN = crypto.randomUUID();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -103,7 +106,7 @@ async function allocateMockPort() {
       const probe = net.createServer();
       probe.unref();
       probe.once('error', (error) => {
-        if (error && error.code === 'EADDRINUSE') resolve(false);
+        if (error && ['EADDRINUSE', 'EACCES', 'EPERM'].includes(error.code)) resolve(false);
         else reject(error);
       });
       probe.listen(port, '127.0.0.1', () => {
@@ -267,9 +270,8 @@ async function waitForControlReady(tabsCount = 1) {
 
 async function launchContext() {
   fs.rmSync(PROFILE, { recursive: true, force: true });
-  return chromium.launchPersistentContext(PROFILE, {
+  const options = {
     headless: process.env.PLAYWRIGHT_HEADED !== '1',
-    channel: 'chromium',
     viewport: { width: 1280, height: 720 },
     args: [
       `--disable-extensions-except=${EXTENSION}`,
@@ -277,8 +279,12 @@ async function launchContext() {
       '--autoplay-policy=no-user-gesture-required',
       '--no-first-run',
       '--mute-audio',
+      ...(BROWSER_EXECUTABLE ? ['--window-position=-2400,0', '--disable-sync'] : []),
     ],
-  });
+  };
+  if (BROWSER_EXECUTABLE) options.executablePath = BROWSER_EXECUTABLE;
+  else options.channel = 'chromium';
+  return chromium.launchPersistentContext(PROFILE, options);
 }
 
 async function configureWorker(worker, values = {}) {

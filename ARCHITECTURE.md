@@ -14,12 +14,24 @@
 - `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
 - `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
-- `extension/content.js`: 各ChatGPTタブの設定・MutationObserver・Chrome message・ローカル再生・Live controllerを接続する調整層。本文抽出、Auto状態機械、Composer DOM規則は保持しない
+- `extension/content.js`: 各ChatGPTタブの専用Controllerを生成し、起動・停止とページイベントだけを接続する調整層
+- `extension/content-settings.js`: content側設定の既定値、移行、正規化
+- `extension/content-dom-observer.js`: assistant DOM監視、生成中・完了判定、Auto controllerへの通知
+- `extension/content-completion-marker.js`: タイトル・faviconの完了マーカー
+- `extension/content-conversation-bridge.js`: Composer状態、文字起こし配送、送信・取消、Live所有権の接続
+- `extension/content-audio-player.js`: ブラウザ側音声再生、Object URL、再生開始・完了通知
+- `extension/content-message-router.js`: content scriptのChrome message振り分け
 - `extension/assistant-source-filter.js`: ChatGPTの出典・citation UIを周辺証拠付きで判定し、本文を含まない最小コンテナだけを除外する境界
 - `extension/assistant-text-extractor.js`: assistant DOMから本文だけを抽出し、コード、操作ボタン、途中状態を除外したうえで出典フィルタへ委譲する境界
 - `extension/auto-speech-controller.js`: 既存返答の基線、新規返答のstreaming / stable / completed、Auto一回送信、更新差分、完了通知をタブ単位で管理
 - `extension/prompt-input-core.js`: 使用可能なChatGPT Composerの選択、ProseMirrorへのネイティブ挿入・削除、送信ボタン範囲、送信前ACK後のクリックを担当
-- `extension/background.js`: Chromeタブ・HTTP・永続化・再生副作用と、各専用モジュールの接続だけを担当
+- `extension/background.js`: background各Controllerの共有状態と依存関係を組み立てる調整層
+- `extension/background-local-api-client.js`: loopback APIへのHTTP要求、音声取得、Ref・ペット・会話状態同期
+- `extension/background-runtime-store.js`: Service Worker起動時の復元、永続化予約、API復旧時の再水和
+- `extension/background-tab-registry.js`: ChatGPTタブ登録、所有タブ、選択タブ、reload・close処理
+- `extension/background-conversation-target.js`: 録音開始時送信先の選択・固定・文字起こし配送
+- `extension/background-playback-queue.js`: キュー実行、生成・再生、watchdog、Stop / Next / Regen / Replay
+- `extension/background-message-router.js`: runtime messageの検証と専用Controllerへの振り分け
 - `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
 - `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
 - `extension/background-queue-core.js`: Auto許可判定、streaming時の既読境界維持、Auto重複排除、Next / Regen選択、キュー項目正規化を副作用なしで担当
@@ -27,13 +39,20 @@
 - `extension/live-browser-core.js`: assistant基線・一意bind、文境界、prefix整合、429 bounded retryを副作用なしで担当
 - `extension/live-content-controller.js`: `pageInstanceId`、`submissionId`、assistant bind、Liveチャンク送信、入力・送信・Regen・遷移による失効を担当
 - `extension/background-live-client.js`: content scriptから受けたLive要求へ送信元tab IDを上書きし、loopback Live APIへ転送
-- `local-api/server.py`: 永続状態API、Irodori v3 direct、ローカル再生、Live API、参照音声一覧、外部パネルAPI、ペット選択同期を担当
+- `local-api/server.py`: サーバー起動、依存サービス生成、RequestHandlerとrouter contextの組み立て
+- `local-api/api_router.py`: 永続状態、音声、Live、Ref、外部パネル、ペットAPIのGET / POSTルーティング
 - `local-api/voice_runtime.py`: 起動時モデル準備と、独立した生成ワーカー・再生ワーカー、Replay、世代付きStopを担当
 - `local-api/conversation_submission.py`: 送信前`arm`、送信後`commit`、assistant `bind`、失効・完了を永続管理
 - `local-api/live_conversation.py`: bind済み所有権、最大2チャンク先読み、重複排除、Live完了・失敗を管理
 - `local-api/gpu_arbiter.py`: Windows名前付きGate/GPU MutexでSTTを次のTTSより優先
 - `local-api/runtime_events.py`: 本文・絶対パスを含めないLive JSONLイベントを記録
-- `local-api/conversation_controller.py`: 右Ctrl＋`＼ / _`の録音状態、ローカルSTT、ChatGPT送信に加え、対応するYouTube Dictation Pause Controlへの入力元別状態通知を担当
+- `local-api/conversation_controller.py`: 録音・モデル準備・文字起こし・ChatGPT送信の状態遷移を調整
+- `local-api/audio_recorder.py`: sounddevice録音と音声バッファ管理
+- `local-api/stt_runtime.py`: faster-whisperモデル準備とCUDA文字起こし
+- `local-api/windows_push_to_talk.py`: 右Ctrl＋`＼ / _`のWindows低レベルキーボードフック
+- `local-api/dictation_pause_notifier.py`: YouTube Dictation Pause Controlへの任意状態通知
+- `local-api/control_panel_client.py`: Windows小窓・マイクControllerから使うloopback API client
+- `local-api/panel_window_state.py`: 小窓位置の保存・画面内復元
 
 ## Windows Local Voice小窓
 
@@ -65,20 +84,22 @@ POST /v1/control-panel/state
 
 ## 返答検知と全タブAuto
 
-1. 開いている各ChatGPTタブが`background.js`へ登録されます。
+1. 開いている各ChatGPTタブが`background-message-router.js`経由で`background-tab-registry.js`へ登録されます。
 2. `assistant-source-filter.js`が出典UIだけを除外し、`assistant-text-extractor.js`がassistant本文を取り出し、`auto-speech-controller.js`が既存返答を基準として記録します。
 3. 外部小窓で`Auto`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
 4. その後で各タブへ新しく表示されたassistant返答をAuto状態機械が検知・安定判定します。
-5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、1つの共通キューへ追加します。
-6. `background.js`がローカル音声APIと再生副作用を実行し、共通キューの順番で1件ずつ読み上げます。
+5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、`background-playback-queue.js`が共通キューへ追加します。
+6. `background-playback-queue.js`が`background-local-api-client.js`を使って音声生成・再生を実行し、共通キューの順番で1件ずつ読み上げます。
 
 Autoの対象は、最後に触った1タブだけではありません。開いている全ChatGPTタブです。`思考中`、`考え中`、`Thinking`、`画像を分析しています`だけの途中状態と、Autoをオンにする前から表示されていた返答は読みません。
 
 ## 音声生成と再生
 
 ```text
-各ChatGPT content.js
-  -> background.js がローカル永続キューへ同期
+各ChatGPT content-dom-observer.js
+  -> content-message-router.js / background-message-router.js
+  -> background-runtime-store.js がローカル永続キューへ同期
+  -> background-playback-queue.js / background-local-api-client.js
   -> POST http://127.0.0.1:8717/v1/speak { playLocal: true }
   -> voice_runtime.py の生成ワーカーで生成
   -> 独立した再生ワーカーがPCの音声デバイスで再生
@@ -166,7 +187,7 @@ Voice、Tab、Petの独立選択設定は保存しません。
 
 ## 変更時の設計ゲート
 
-`npm run check:architecture`は、責務分離に必要なモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`control_state.py`、`server.py`、`content.js`、`background.js`へ本文抽出・Auto状態・Composer規則・キュー規則などの新しい責務を戻す変更や、上限を超える変更はCIで失敗します。
+`npm run check:architecture`は、責務分離に必要なController / routerモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`server.py`、`control_panel.py`、`conversation_controller.py`、`content.js`、`background.js`へHTTP routing、録音・STT・Windows hook、設定、DOM監視、メッセージ分岐、再生キューなどの責務を戻す変更や、上限を超える変更はCIで失敗します。
 
 ## テスト
 
