@@ -43,6 +43,7 @@ from conversation_controller import GlobalRightCtrlHook, VoiceConversationContro
 from desktop_pet import DesktopPetWindow  # noqa: E402
 from desktop_pet_config import DesktopPetSettingsStore  # noqa: E402
 from maintenance import clear_generated_audio, format_bytes  # noqa: E402
+from runtime_events import RuntimeEventLogger, default_event_log_path  # noqa: E402
 
 VENV_SCRIPTS = LOCAL_API_DIR / ".venv" / "Scripts"
 SERVER_PYTHON = VENV_SCRIPTS / "python.exe"
@@ -713,6 +714,7 @@ class VoiceBridgeQtRuntime(QObject):
         self._setup_after_exit = False
         self._restart_after_exit = False
         self._uninstall_after_exit = False
+        self._voice_bridge_status = "Starting"
         self.status_relay = StatusRelay(self)
         self.status_relay.status_changed.connect(self._apply_status)
 
@@ -723,7 +725,10 @@ class VoiceBridgeQtRuntime(QObject):
             state_path=panel_state_path,
             start_polling=start_panel_polling,
         )
-        self.voice_conversation = conversation_controller or VoiceConversationController(self.control_panel_client)
+        self.voice_conversation = conversation_controller or VoiceConversationController(
+            self.control_panel_client,
+            event_logger=RuntimeEventLogger(default_event_log_path(APP_ROOT)),
+        )
         self.right_ctrl_hook = keyboard_hook or GlobalRightCtrlHook(self.voice_conversation.handle_key_event)
         self.conversation_settings_timer = QTimer(self)
         self.conversation_settings_timer.setInterval(500)
@@ -805,6 +810,7 @@ class VoiceBridgeQtRuntime(QObject):
         self.pet.show_pet()
 
     def _apply_status(self, status: str) -> None:
+        self._voice_bridge_status = str(status or "")
         self.status_action.setText(f"Status: {status}")
         self.tray_icon.setToolTip(f"{APP_NAME}\n{status}")
         self.pet.set_voice_bridge_status(status)
@@ -814,6 +820,27 @@ class VoiceBridgeQtRuntime(QObject):
             self.pet.sync_settings_from_disk()
         except (OSError, ValueError):
             LOGGER.warning("Desktop pet settings could not be synchronized", exc_info=True)
+
+    def _sync_pet_playback_state(self, snapshot: Any) -> None:
+        if not self._voice_bridge_status.startswith("Ready"):
+            return
+        data = snapshot if isinstance(snapshot, dict) else {}
+        extension = data.get("extension") if isinstance(data.get("extension"), dict) else {}
+        voice_runtime = data.get("voiceRuntime") if isinstance(data.get("voiceRuntime"), dict) else {}
+        phases = {
+            str(extension.get("playbackPhase") or "idle").strip().lower(),
+            str(voice_runtime.get("phase") or "idle").strip().lower(),
+        }
+        if bool(extension.get("isPlaying")) or "playing" in phases:
+            state = "talking"
+        elif "generating" in phases:
+            state = "thinking"
+        elif "error" in phases or str(extension.get("statusLevel") or "").strip().lower() == "error":
+            state = "error"
+        else:
+            state = "idle"
+        if self.pet.current_state != state:
+            self.pet.set_state(state)
 
     def sync_conversation_settings(self) -> None:
         try:
@@ -832,6 +859,7 @@ class VoiceBridgeQtRuntime(QObject):
             reconcile = getattr(self.voice_conversation, "reconcile_reported_state", None)
             if callable(reconcile):
                 reconcile(conversation)
+            self._sync_pet_playback_state(snapshot)
         except (OSError, RuntimeError, ValueError, TypeError, urllib.error.URLError):
             return
 

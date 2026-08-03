@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added GPT Live-style microphone conversation with persisted pre-send submission ownership, fail-closed assistant binding, stable-sentence streaming, local playback, input/Enter/Regen/navigation interruption, and restart invalidation without changing normal Auto, Next, Regen, or Replay recovery.
+- Split TTS generation and playback workers, added `speed`/`balanced`/`bridge` Irodori profiles, Suguha reference-latent reuse, cross-process Windows GPU arbitration with STT priority, and strict CUDA STT without automatic CPU fallback.
+- Added generated-WAV quality gates, privacy-safe structured Live event logs, a 17-item Live verification gate, and real GPU/STT/Suguha performance evidence kept outside the public tree.
+
+- Added a safe Windows-panel action that acknowledges a pending extension update before calling `chrome.runtime.reload()`, preventing reload loops and keeping the first unsupported upgrade as an explicit one-time manual step.
+
 - Pinned the required `hf-xet==1.5.1` runtime dependency so strict startup preflight succeeds after a clean environment setup.
 - Allowed the documented Irodori `sentencepiece<0.2` metadata conflict while still enforcing the security-fixed `sentencepiece==0.2.1` runtime baseline.
 - Fixed background-tab completion markers to use the live Chrome tab state and react immediately when response generation ends.

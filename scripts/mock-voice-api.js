@@ -8,6 +8,7 @@ const http = require('http');
 
 const host = '127.0.0.1';
 const port = Number(process.env.MOCK_VOICE_PORT || 8717);
+const requiredTestToken = String(process.env.MOCK_VOICE_TOKEN || '');
 const events = [];
 const referenceVoices = [{ id: '', label: 'none' }, { id: 'sample', label: 'sample' }];
 let control;
@@ -36,6 +37,7 @@ function resetControl() {
       micConversationEnabled: false,
       sttModel: 'small',
       cancelGraceMs: 700,
+      liveTtsProfile: 'speed',
     },
     commands: [],
     consumerAcks: {},
@@ -49,6 +51,14 @@ function resetControl() {
       sttDevice: '',
       sttModel: 'small',
       error: '',
+    },
+    live: {
+      submission: { phase: 'idle', current: {} },
+      pendingChunks: 0,
+      capacity: 2,
+      maxPendingChunks: 2,
+      cancelEpoch: 0,
+      chunks: [],
     },
     extension: {
       connected: false,
@@ -184,6 +194,10 @@ function record(method, pathname, body = undefined) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
+  const suppliedTestToken = String(req.headers['x-local-voice-test-token'] || '');
+  if (requiredTestToken && suppliedTestToken !== requiredTestToken) {
+    return json(res, 403, { ok: false, error: 'wrong test run token' });
+  }
 
   if (req.method === 'GET' && url.pathname === '/health') {
     return json(res, 200, {
@@ -203,6 +217,21 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && url.pathname === '/v1/browser-runtime') {
     return json(res, 200, { ok: true, browserRuntime: { ...control.browserRuntime } });
+  }
+  if (req.method === 'GET' && url.pathname === '/v1/live/state') {
+    return json(res, 200, {
+      ok: true,
+      submission: { ...control.live.submission, current: { ...(control.live.submission.current || {}) } },
+      conversationPhase: control.live.submission.phase === 'bound' ? 'responding' : 'idle',
+      generationPhase: 'idle',
+      playbackPhase: 'idle',
+      turnId: String((control.live.submission.current || {}).turnId || ''),
+      cancelEpoch: control.live.cancelEpoch,
+      pendingChunks: control.live.pendingChunks,
+      capacity: control.live.capacity,
+      maxPendingChunks: control.live.maxPendingChunks,
+      lastError: '',
+    });
   }
   if (req.method === 'GET' && url.pathname === '/v1/control-panel/poll') {
     const after = Number(url.searchParams.get('after') || 0);
@@ -236,6 +265,11 @@ const server = http.createServer((req, res) => {
     resetControl();
     return json(res, 200, { ok: true });
   }
+  if (req.method === 'POST' && url.pathname === '/__test/shutdown') {
+    json(res, 200, { ok: true, stopping: true });
+    setImmediate(() => server.close(() => process.exit(0)));
+    return;
+  }
   if (req.method === 'POST' && url.pathname === '/v1/control-panel/settings') {
     return readJson(req, res, (body) => {
       if (Object.prototype.hasOwnProperty.call(body, 'enabled')) control.settings.enabled = Boolean(body.enabled);
@@ -260,6 +294,10 @@ const server = http.createServer((req, res) => {
       }
       if (Object.prototype.hasOwnProperty.call(body, 'cancelGraceMs')) {
         control.settings.cancelGraceMs = Math.max(0, Math.min(5000, Math.round(Number(body.cancelGraceMs) || 0)));
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'liveTtsProfile')) {
+        const profile = String(body.liveTtsProfile || '').trim().toLowerCase();
+        control.settings.liveTtsProfile = ['speed', 'balanced', 'bridge'].includes(profile) ? profile : 'speed';
       }
       control.initialized = true;
       control.settingsRevision += 1;
@@ -353,6 +391,105 @@ const server = http.createServer((req, res) => {
       control.conversationEvents.push(item);
       record('POST', url.pathname, body);
       return json(res, 200, { ok: true, event: item });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/conversation/submission') {
+    return readJson(req, res, (body) => {
+      const action = String(body.action || '').trim().toLowerCase();
+      const current = control.live.submission.current || {};
+      if (action === 'arm') {
+        control.live.cancelEpoch = Math.max(0, Number(body.cancelEpoch) || 0);
+        control.live.submission = {
+          phase: 'armed',
+          current: { ...body, phase: 'armed' },
+        };
+      } else {
+        if (!current.submissionId || String(current.submissionId) !== String(body.submissionId || '')) {
+          return json(res, 409, { ok: false, error: 'submission identity conflict' });
+        }
+        if (action === 'commit') {
+          control.live.submission = { phase: 'committed', current: { ...current, phase: 'committed' } };
+        } else if (action === 'bind') {
+          if (Number(body.candidateCount) !== 1) {
+            return json(res, 409, { ok: false, error: 'assistant reply binding is ambiguous' });
+          }
+          control.live.submission = {
+            phase: 'bound',
+            current: { ...current, phase: 'bound', assistantMessageKey: String(body.assistantMessageKey || '') },
+          };
+        } else if (action === 'invalidate') {
+          control.live.submission = {
+            phase: 'invalidated',
+            current: { ...current, phase: 'invalidated', invalidatedReason: String(body.reason || 'invalidated') },
+          };
+        } else if (action === 'complete') {
+          control.live.submission = { phase: 'completed', current: { ...current, phase: 'completed' } };
+        } else {
+          return json(res, 400, { ok: false, error: 'unsupported submission action' });
+        }
+      }
+      record('POST', url.pathname, body);
+      return json(res, 200, {
+        ok: true,
+        action,
+        submission: { ...(control.live.submission.current || {}) },
+        sendAllowed: action === 'arm' && control.live.submission.phase === 'armed',
+      });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/live/chunks') {
+    return readJson(req, res, (body) => {
+      const current = control.live.submission.current || {};
+      if (control.live.submission.phase !== 'bound'
+        || String(current.submissionId || '') !== String(body.submissionId || '')
+        || String(current.assistantMessageKey || '') !== String(body.assistantMessageKey || '')) {
+        return json(res, 409, { ok: false, error: 'microphone submission is not bound' });
+      }
+      const key = `${body.generationId}:${body.chunkIndex}:${body.textHash}`;
+      const existing = control.live.chunks.find((item) => item.key === key);
+      if (existing) {
+        if (body.isFinal) existing.isFinal = true;
+        if (existing.isFinal) {
+          control.live.submission = { phase: 'completed', current: { ...current, phase: 'completed' } };
+        }
+        record('POST', url.pathname, body);
+        return json(res, 202, {
+          ok: true,
+          accepted: true,
+          duplicate: true,
+          generationId: body.generationId,
+          chunkIndex: Number(body.chunkIndex),
+          pendingChunks: 0,
+          capacity: 2,
+        });
+      }
+      control.live.chunks.push({ key, ...body });
+      if (body.isFinal) {
+        control.live.submission = { phase: 'completed', current: { ...current, phase: 'completed' } };
+      }
+      record('POST', url.pathname, body);
+      return json(res, 202, {
+        ok: true,
+        accepted: true,
+        duplicate: false,
+        generationId: body.generationId,
+        chunkIndex: Number(body.chunkIndex),
+        pendingChunks: 0,
+        capacity: 2,
+        profile: String(body.profile || 'speed'),
+      });
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/interrupt') {
+    return readJson(req, res, (body) => {
+      const current = control.live.submission.current || {};
+      control.live.cancelEpoch = Math.max(control.live.cancelEpoch, Number(body.cancelEpoch || 0) + 1);
+      control.live.submission = {
+        phase: 'invalidated',
+        current: { ...current, phase: 'invalidated', invalidatedReason: String(body.reason || 'interrupt') },
+      };
+      record('POST', url.pathname, body);
+      return json(res, 200, { ok: true, stopping: true, cancelEpoch: control.live.cancelEpoch });
     });
   }
   if (req.method === 'POST' && url.pathname === '/v1/desktop-pet') {

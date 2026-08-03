@@ -72,6 +72,9 @@ class FakeController:
 class FakeControlClient:
     def __init__(self, *, cancel_grace_ms: int = 700) -> None:
         self.cancel_grace_ms = cancel_grace_ms
+        self.playback_phase = "idle"
+        self.voice_runtime_phase = "idle"
+        self.is_playing = False
         self.settings_calls: list[dict[str, object]] = []
         self.commands: list[str] = []
 
@@ -94,10 +97,13 @@ class FakeControlClient:
                 "statusLevel": "info",
                 "currentText": "",
                 "queueSize": 0,
-                "isPlaying": False,
-                "playbackPhase": "idle",
+                "isPlaying": self.is_playing,
+                "playbackPhase": self.playback_phase,
                 "replayAvailable": False,
                 "tabsCount": 0,
+            },
+            "voiceRuntime": {
+                "phase": self.voice_runtime_phase,
             },
         }
 
@@ -249,6 +255,29 @@ class TrayQtRuntimeTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertEqual(id(runtime.pet), pet_identity)
+            self.assertEqual(runtime.pet.current_state, "idle")
+            runtime.shutdown()
+
+    def test_pet_follows_voice_generation_and_playback_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            runtime = self._create_runtime(temp_dir, control_panel_client=client)
+
+            runtime.pet.set_state = mock.Mock(wraps=runtime.pet.set_state)  # type: ignore[method-assign]
+            client.playback_phase = "generating"
+            runtime.sync_conversation_settings()
+            runtime.sync_conversation_settings()
+            self.assertEqual(runtime.pet.current_state, "thinking")
+            runtime.pet.set_state.assert_called_once_with("thinking")
+
+            client.playback_phase = "playing"
+            client.is_playing = True
+            runtime.sync_conversation_settings()
+            self.assertEqual(runtime.pet.current_state, "talking")
+
+            client.playback_phase = "idle"
+            client.is_playing = False
+            runtime.sync_conversation_settings()
             self.assertEqual(runtime.pet.current_state, "idle")
             runtime.shutdown()
 

@@ -7,7 +7,15 @@ importScripts(
   'background-core.js',
   'background-settings-core.js',
   'background-runtime-core.js',
+  'background-queue-core.js',
   'background-control-sync.js',
+  'background-tab-registry.js',
+  'background-conversation-target.js',
+  'background-local-api-client.js',
+  'background-runtime-store.js',
+  'background-playback-queue.js',
+  'background-live-client.js',
+  'background-message-router.js',
   'background.js',
 );
 

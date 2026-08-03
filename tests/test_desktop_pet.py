@@ -89,6 +89,7 @@ class DesktopPetQtTests(unittest.TestCase):
                     "displayScale": 1,
                     "animations": {
                         "idle": {"frames": [0, 1], "speed": 1000},
+                        "walking": {"frames": [0, 1, 0], "speed": 10},
                         "error": {"frames": [1], "speed": 1000},
                     },
                 }
@@ -312,6 +313,39 @@ class DesktopPetQtTests(unittest.TestCase):
             self.assertEqual(saved.selected_pet_id, "misaka")
             self.assertEqual(window.current_pet.selection_id, "misaka")
             self.assertEqual((saved.x, saved.y), (42, 58))
+            window.shutdown()
+
+    def test_idle_activity_uses_walking_frames_without_moving_the_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = self._create_pet_root(temp_dir)
+            window = DesktopPetWindow(root, DesktopPetSettingsStore(Path(temp_dir) / "settings.json"))
+            origin = window.pos()
+            window._idle_activity_timer.stop()
+
+            window._play_idle_activity()
+
+            self.assertEqual(window.current_state, "idle")
+            self.assertEqual(window._active_animation_state, "walking")
+            self.assertEqual(window.pos(), origin)
+
+            window._finish_idle_activity()
+
+            self.assertEqual(window.current_state, "idle")
+            self.assertEqual(window._active_animation_state, "idle")
+            self.assertEqual(window.pos(), origin)
+            window.shutdown()
+
+    def test_same_state_does_not_restart_the_current_animation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = self._create_pet_root(temp_dir)
+            window = DesktopPetWindow(root, DesktopPetSettingsStore(Path(temp_dir) / "settings.json"))
+            window.set_state("error")
+            window._frame_index = 1
+
+            window.set_state("error")
+
+            self.assertEqual(window.current_state, "error")
+            self.assertEqual(window._frame_index, 1)
             window.shutdown()
 
     def test_voice_bridge_status_only_uses_idle_and_error_states(self) -> None:

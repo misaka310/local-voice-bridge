@@ -15,9 +15,18 @@ Local Voice Bridgeへの変更では、利用者向けREADMEに記載された�
 
 - `local-api/control_state.py`
 - `local-api/server.py`
+- `extension/content.js`
 - `extension/background.js`
 
 設定と入力正規化、永続outbox、ブラウザ状態、HTTP I/O、readiness、音声生成・再生は、既存の専用モジュールに実装します。行数上限や必須モジュール検査を弱めてCIを通す変更は行わないでください。
+
+ChatGPT固有の責務は次の境界を維持します。
+
+- assistant本文抽出は `assistant-text-extractor.js`
+- 出典・citation UI判定は `assistant-source-filter.js`
+- Autoのbaseline、streaming安定性、完了判定は `auto-speech-controller.js`
+- ProseMirror入力、送信ボタン、送信前ACKは `prompt-input-core.js`
+- Auto受付、既読境界、Next・Regen、キュー項目生成は `background-queue-core.js`
 
 ## Public-tree rules
 
@@ -32,6 +41,16 @@ npm run check:architecture
 npm run test:ci
 ```
 
-永続化、ACK・再配信、Service Worker復旧、キュー復元、文字起こし配送を変更した場合は、同じHEADでフルCIが安定して通ることを確認してください。
+永続化、ACK・再配信、Service Worker復旧、キュー復元、文字起こし配送を変更した場合は、同じHEADでフルCIが安定して通ることを確認してください。文字起こし配送の恒久エラーは状態を報告してACKし、後続イベントを止めないでください。一時的なDOM欠落など、再試行で回復し得る失敗だけを未ACKで残します。
+
+マイク送信を変更した場合は、通常のmock E2Eに加えて次を実行してください。
+
+```bat
+npm run test:e2e:brave-mic
+```
+
+この検証は専用Braveプロファイル、テスト用拡張コピー、別APIポートを使用します。利用者の普段使いプロファイルを再起動・再利用してはいけません。ChatGPTに近いProseMirror入力欄、ネイティブ入力、送信前後のComposerノード差し替え、送信クリック、submission commitまで確認します。
+
+assistant本文・出典フィルタを変更した場合は、`tests/e2e/assistant-text-extractor-dom.spec.js`のDOMマトリクスを更新してください。消すべき出典だけでなく、通常リンク、説明付きリンク、本文中の数字・年・容量表記、出典チップの前後や隣にある本文が残ることも確認します。スクリーンショット1件だけを再現するテストでは完了扱いにしません。
 
 ブラウザ自動検証では、予期しない音声再生を避けるため `voiceVolume=0` と `--mute-audio` を使用してください。

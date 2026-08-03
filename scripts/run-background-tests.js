@@ -36,10 +36,17 @@ if (status === 0) {
     '--test',
     'tests/background-reference-queue.test.js',
     'tests/background-external-panel.test.js',
+    'tests/background-queue-core.test.js',
     'tests/content-text-core.test.js',
+    'tests/assistant-text-extractor.test.js',
+    'tests/auto-speech-controller.test.js',
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
+    'tests/options-settings.test.js',
     'tests/prompt-input-core.test.js',
+    'tests/live-browser-core.test.js',
+    'tests/live-content-controller.test.js',
+    'tests/background-live-client.test.js',
   ]);
 }
 

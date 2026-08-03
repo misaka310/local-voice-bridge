@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Protocol
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,6 +18,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from control_panel_client import ControlPanelApiClient
+from panel_window_state import PanelWindowStateStore, clamp_window_position
+
 
 class ControlPanelClient(Protocol):
     def get_snapshot(self) -> dict[str, Any]: ...
@@ -31,119 +32,6 @@ class ControlPanelClient(Protocol):
     def send_conversation_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
-
-class ControlPanelApiClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8717", *, timeout: float = 0.4) -> None:
-        self.base_url = str(base_url).rstrip("/")
-        self.timeout = max(0.1, float(timeout))
-
-    def _request(self, path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        data = None
-        headers: dict[str, str] = {}
-        if payload is not None:
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}",
-            data=data,
-            headers=headers,
-            method=method,
-        )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        if not isinstance(body, dict) or body.get("ok") is not True:
-            raise RuntimeError(str(body.get("error") if isinstance(body, dict) else "invalid response"))
-        return body
-
-    def get_snapshot(self) -> dict[str, Any]:
-        return self._request("/v1/control-panel")
-
-    def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request("/v1/control-panel/settings", method="POST", payload=payload)
-
-    def send_command(self, command: str) -> dict[str, Any]:
-        return self._request("/v1/control-panel/command", method="POST", payload={"command": command})
-
-    def send_conversation_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "/v1/conversation/event",
-            method="POST",
-            payload={"type": event_type, "payload": payload},
-        )
-
-    def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request("/v1/conversation/state", method="POST", payload=payload)
-
-
-class PanelWindowStateStore:
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-
-    def load_position(self) -> QPoint | None:
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict):
-                return None
-            return QPoint(int(payload["x"]), int(payload["y"]))
-        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-            return None
-
-    def save_position(self, position: QPoint) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "x": int(position.x()), "y": int(position.y())}
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(self.path)
-
-
-def clamp_window_position(
-    position: QPoint,
-    window_size: QSize,
-    screen_geometries: list[QRect],
-    *,
-    margin: int = 8,
-) -> QPoint:
-    """Keep a window fully reachable after monitor topology changes."""
-    if not screen_geometries:
-        return QPoint(position)
-
-    width = max(1, int(window_size.width()))
-    height = max(1, int(window_size.height()))
-    requested = QRect(position, QSize(width, height))
-    safe_geometries: list[QRect] = []
-    for geometry in screen_geometries:
-        safe = geometry.adjusted(margin, margin, -margin, -margin)
-        if safe.width() < 1 or safe.height() < 1:
-            safe = QRect(geometry)
-        safe_geometries.append(safe)
-        if safe.contains(requested):
-            return QPoint(position)
-
-    requested_center = requested.center()
-
-    def target_score(geometry: QRect) -> tuple[int, int]:
-        intersection = geometry.intersected(requested)
-        intersection_area = max(0, intersection.width()) * max(0, intersection.height())
-        dx = 0
-        if requested_center.x() < geometry.left():
-            dx = geometry.left() - requested_center.x()
-        elif requested_center.x() > geometry.right():
-            dx = requested_center.x() - geometry.right()
-        dy = 0
-        if requested_center.y() < geometry.top():
-            dy = geometry.top() - requested_center.y()
-        elif requested_center.y() > geometry.bottom():
-            dy = requested_center.y() - geometry.bottom()
-        return (-intersection_area, dx * dx + dy * dy)
-
-    target = min(safe_geometries, key=target_score)
-    max_x = target.x() + max(0, target.width() - width)
-    max_y = target.y() + max(0, target.height() - height)
-    return QPoint(
-        min(max(position.x(), target.x()), max_x),
-        min(max(position.y(), target.y()), max_y),
-    )
 
 
 class LocalVoiceControlPanel(QWidget):
@@ -164,6 +52,7 @@ class LocalVoiceControlPanel(QWidget):
         self._shutting_down = False
         self._poll_when_visible = bool(start_polling)
         self._current_text_full = "No assistant response yet"
+        self._reload_extension_requested = False
         self._drag_offset: QPoint | None = None
 
         self.setObjectName("local-voice-control-panel")
@@ -218,6 +107,13 @@ class LocalVoiceControlPanel(QWidget):
         self.current_text_label.setWordWrap(False)
         self.current_text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(self.current_text_label)
+
+        self.reload_extension_button = QPushButton("拡張機能を再読み込み", card)
+        self.reload_extension_button.setObjectName("panel-reload-extension")
+        self.reload_extension_button.setMinimumHeight(30)
+        self.reload_extension_button.clicked.connect(self._reload_extension)
+        self.reload_extension_button.hide()
+        card_layout.addWidget(self.reload_extension_button)
 
         self.queue_label = QLabel("Queue 0 · 0 tabs", card)
         self.queue_label.setObjectName("panel-queue")
@@ -314,6 +210,9 @@ class LocalVoiceControlPanel(QWidget):
         self.status_label.setText("Voice Bridge starting")
         self._set_current_text("Waiting for local API", tooltip="")
         self.queue_label.setText("Queue 0 · 0 tabs")
+        self._reload_extension_requested = False
+        self.reload_extension_button.hide()
+        self.reload_extension_button.setEnabled(False)
         for button in (self.next_button, self.regen_button, self.replay_button):
             button.setEnabled(False)
 
@@ -347,6 +246,13 @@ class LocalVoiceControlPanel(QWidget):
             self._updating_controls = False
 
         connected = bool(extension.get("connected"))
+        update_required = bool(extension.get("updateRequired"))
+        reload_supported = bool(extension.get("supportsExtensionReload"))
+        if not update_required:
+            self._reload_extension_requested = False
+        show_reload_button = connected and update_required and reload_supported
+        self.reload_extension_button.setVisible(show_reload_button)
+        self.reload_extension_button.setEnabled(show_reload_button and not self._reload_extension_requested)
         model_state = str(readiness.get("deviceOrModel") or voice_runtime.get("readiness") or "").strip().lower()
         repair_required = bool(readiness.get("repairRequired") or voice_runtime.get("repairRequired"))
         runtime_error = str(voice_runtime.get("error") or "").strip()
@@ -361,7 +267,7 @@ class LocalVoiceControlPanel(QWidget):
             )
         elif runtime_loading:
             self.status_label.setText("音声モデルを準備中")
-            self._set_current_text("初回起動時の音声モデル準備中です。完了後に自動で利用可能になります。")
+            self._set_current_text("音声モデルをGPUへ読み込み中です。保存済みモデルは再利用し、完了後に自動で利用可能になります。")
         elif connected:
             status = str(extension.get("statusText") or "").strip()
             phase = str(extension.get("playbackPhase") or voice_runtime.get("phase") or "idle")
@@ -425,13 +331,17 @@ class LocalVoiceControlPanel(QWidget):
         self.regen_button.setEnabled(controls_available)
         self.replay_button.setEnabled(controls_available and not runtime_loading and replay_available)
 
-        if bool(extension.get("updateRequired")):
+        if update_required:
             loaded = str(extension.get("loadedVersion") or "旧版")
             expected = str(extension.get("expectedVersion") or "最新版")
             self.status_label.setText("拡張機能の再読み込みが必要")
             self._set_current_text(
-                f"Chrome / Braveの拡張機能画面でLocal Voice Bridgeを再読み込みしてください（{loaded} → {expected}）"
+                f"{'下のボタンでLocal Voice Bridgeを再読み込みできます' if reload_supported else 'この更新だけはChrome / Braveの拡張機能画面で手動再読み込みしてください'}（{loaded} → {expected}）"
             )
+
+        if self._reload_extension_requested and show_reload_button:
+            self.status_label.setText("拡張機能を再読み込みしています")
+            self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
 
     def _set_current_text(self, text: str, *, tooltip: str | None = None) -> None:
         self._current_text_full = str(text or "")
@@ -509,6 +419,21 @@ class LocalVoiceControlPanel(QWidget):
             self.client.update_settings(payload)
         except (OSError, RuntimeError, ValueError, urllib.error.URLError):
             self.status_label.setText("Control update failed")
+
+    def _reload_extension(self) -> None:
+        if self._reload_extension_requested:
+            return
+        self._reload_extension_requested = True
+        self.reload_extension_button.setEnabled(False)
+        try:
+            self.client.send_command("reload_extension")
+        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
+            self._reload_extension_requested = False
+            self.reload_extension_button.setEnabled(True)
+            self.status_label.setText("拡張機能の再読み込み要求に失敗しました")
+            return
+        self.status_label.setText("拡張機能を再読み込みしています")
+        self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
 
     def _send_command(self, command: str) -> None:
         try:

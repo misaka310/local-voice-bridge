@@ -11,7 +11,15 @@ const BACKGROUND_PATH = path.join(ROOT, 'extension', 'background.js');
 const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
+const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
+const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
+const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
+const BACKGROUND_LOCAL_API_CLIENT_PATH = path.join(ROOT, 'extension', 'background-local-api-client.js');
+const BACKGROUND_RUNTIME_STORE_PATH = path.join(ROOT, 'extension', 'background-runtime-store.js');
+const BACKGROUND_PLAYBACK_QUEUE_PATH = path.join(ROOT, 'extension', 'background-playback-queue.js');
+const BACKGROUND_LIVE_CLIENT_PATH = path.join(ROOT, 'extension', 'background-live-client.js');
+const BACKGROUND_MESSAGE_ROUTER_PATH = path.join(ROOT, 'extension', 'background-message-router.js');
 
 function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -62,6 +70,8 @@ function createHarness({
   const settingsPosts = [];
   const sentMessages = [];
   const injectedScripts = [];
+  const lifecycleEvents = [];
+  let runtimeReloads = 0;
   const injectedTabs = new Set();
   const missingContentScripts = new Set(missingContentScriptTabs.map(Number));
   const tabMessageResponders = new Map();
@@ -119,6 +129,10 @@ function createHarness({
     },
     runtime: {
       getManifest() { return { version: '0.2.0' }; },
+      reload() {
+        lifecycleEvents.push('reload');
+        runtimeReloads += 1;
+      },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
       onMessage: { addListener(listener) { runtimeListener = listener; } },
@@ -189,6 +203,7 @@ function createHarness({
       if (ackError) throw new Error(ackError);
       const body = JSON.parse(options.body || '{}');
       ackPosts.push(body);
+      lifecycleEvents.push('ack');
       const consumer = String(body.consumerId || 'legacy');
       const cursor = acknowledged.get(consumer) || { command: 0, event: 0 };
       if (Object.prototype.hasOwnProperty.call(body, 'commandId')) cursor.command = Math.max(cursor.command, Number(body.commandId) || 0);
@@ -269,7 +284,15 @@ function createHarness({
       BACKGROUND_CORE_PATH,
       BACKGROUND_SETTINGS_CORE_PATH,
       BACKGROUND_RUNTIME_CORE_PATH,
+      BACKGROUND_QUEUE_CORE_PATH,
       BACKGROUND_CONTROL_SYNC_PATH,
+      BACKGROUND_TAB_REGISTRY_PATH,
+      BACKGROUND_CONVERSATION_TARGET_PATH,
+      BACKGROUND_LOCAL_API_CLIENT_PATH,
+      BACKGROUND_RUNTIME_STORE_PATH,
+      BACKGROUND_PLAYBACK_QUEUE_PATH,
+      BACKGROUND_LIVE_CLIENT_PATH,
+      BACKGROUND_MESSAGE_ROUTER_PATH,
     ]) {
       vm.runInContext(
         fs.readFileSync(dependencyPath, 'utf8'),
@@ -316,6 +339,8 @@ function createHarness({
     },
     setTabResponder(tabId, responder) { tabMessageResponders.set(tabId, responder); },
     reloadBackground() { bootBackground(); },
+    runtimeReloads: () => runtimeReloads,
+    lifecycleEvents,
     ready() { return vm.runInContext('initializeBackgroundRuntime()', backgroundContext); },
     ackPosts,
     browserRuntime: () => browserRuntime,
@@ -395,7 +420,7 @@ test('missing receivers are injected into already-open ChatGPT tabs before recon
   await waitFor(() => harness.injectedScripts.length === 1);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
     target: { tabId: 303 },
-    files: ['prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'content.js'],
+    files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content-settings.js', 'content-dom-observer.js', 'content-completion-marker.js', 'content-conversation-bridge.js', 'content-audio-player.js', 'content-message-router.js', 'content.js'],
   });
   await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
 });
@@ -622,10 +647,42 @@ test('external panel poll applies settings, executes each command once, and post
   assert.equal(harness.speakPosts[0].referenceVoice, 'asuka');
   assert.equal(harness.statePosts.at(-1).tabsCount, 1);
   assert.equal(harness.statePosts.at(-1).currentText, '最初のチャンクです。');
+  assert.equal(harness.statePosts.at(-1).supportsExtensionReload, true);
 
   await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(harness.speakPosts.length, 1);
+});
+
+test('extension reload command is acknowledged before reloading and is not replayed', async () => {
+  const harness = createHarness();
+  harness.setControl({ commands: [{ id: 21, command: 'reload_extension' }], conversationEvents: [] });
+
+  const first = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(first.ok, true);
+  assert.deepEqual(harness.lifecycleEvents.slice(0, 2), ['ack', 'reload']);
+  assert.equal(harness.runtimeReloads(), 1);
+  assert.deepEqual(harness.ackPosts.at(-1), { consumerId: 'playback-id', commandId: 21 });
+
+  await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(harness.runtimeReloads(), 1);
+});
+
+test('extension reload does not run until its command can be acknowledged', async () => {
+  const harness = createHarness();
+  harness.setControl({ commands: [{ id: 22, command: 'reload_extension' }], conversationEvents: [] });
+  harness.setAckError('ack temporarily unavailable');
+
+  const failed = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(failed.ok, false);
+  assert.equal(harness.runtimeReloads(), 0);
+
+  harness.setAckError(null);
+  const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(recovered.ok, true);
+  assert.equal(harness.runtimeReloads(), 1);
 });
 
 test('streaming updates preserve the already-read Auto text as the Next boundary', async () => {
@@ -964,6 +1021,33 @@ test('failed transcript insertion never falls through to another ChatGPT tab', a
   assert.deepEqual(transcripts.map(({ tabId }) => tabId), [101, 101, 101]);
   assert.equal(harness.conversationStatePosts.at(-1).phase, 'error');
   assert.equal(harness.conversationStatePosts.at(-1).error, 'composer-not-found');
+});
+
+test('a permanent transcript rejection is ACKed and does not poison later control polling', async () => {
+  const harness = createHarness();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.setTabResponder(101, (message) => {
+    if (message.type === 'conversation-target-status') {
+      return { ok: true, composerAvailable: true, composerFocused: true, documentFocused: true, visible: true };
+    }
+    if (message.type === 'voice-transcript') return { ok: false, reason: 'composer-not-empty' };
+    return { ok: true };
+  });
+  harness.setControl({
+    commands: [],
+    conversationEvents: [
+      { id: 1, type: 'cancel_pending', payload: { sessionId: 21 } },
+      { id: 2, type: 'transcript', payload: { sessionId: 21, text: '既存入力を上書きしない', cancelGraceMs: 700 } },
+      { id: 3, type: 'cancel_pending', payload: { sessionId: 22 } },
+    ],
+  });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(harness.ackPosts.filter((item) => item.conversationEventId).map((item) => item.conversationEventId), [1, 2, 3]);
+  assert.equal(harness.conversationStatePosts.at(-1).error, 'composer-not-empty');
+  assert.equal(harness.statePosts.length, 1);
 });
 
 test('captured microphone target is not reused after same-tab conversation navigation', async () => {

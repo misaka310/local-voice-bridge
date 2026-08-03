@@ -71,6 +71,16 @@
             </div>
             <span class="field-help">文字起こし後、Escで送信を取り消せる時間です。</span>
           </label>
+
+          <label class="field" for="live-tts-profile">
+            <span class="field-label">Live TTSプロファイル</span>
+            <select id="live-tts-profile" name="liveTtsProfile">
+              <option value="speed">Speed — 12 steps・低遅延</option>
+              <option value="balanced">Balanced — 16 steps</option>
+              <option value="bridge">Bridge — 32 steps・品質重視</option>
+            </select>
+            <span class="field-help">マイク会話の逐次読み上げだけに適用されます。通常のAuto・Next・Regen・Replayには影響しません。</span>
+          </label>
         </div>
       </section>
 

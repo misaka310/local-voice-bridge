@@ -7,7 +7,7 @@ from typing import Any
 
 from state_normalization import normalize_cancel_grace_ms
 
-ALLOWED_COMMANDS = {"next", "regen", "replay", "stop"}
+ALLOWED_COMMANDS = {"next", "regen", "replay", "stop", "reload_extension"}
 ALLOWED_CONVERSATION_EVENTS = {"cancel_pending", "transcript"}
 COMMAND_OUTBOX_LIMIT = 256
 CONVERSATION_EVENT_OUTBOX_LIMIT = 128

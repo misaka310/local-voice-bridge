@@ -86,6 +86,14 @@
     async function handleCommand(item, effectiveSettings, consumerId) {
       const commandId = Number(item && item.id || 0);
       if (!commandId || commandId <= lastCommandId) return;
+      const command = String(item.command || '');
+      if (command === 'reload_extension') {
+        await deps.flushBrowserRuntimeState();
+        await acknowledge(effectiveSettings, consumerId, { commandId });
+        lastCommandId = commandId;
+        chrome.runtime.reload();
+        return;
+      }
       const referenceVoice = settingsCore.normalizeStoredReference(effectiveSettings.referenceVoice);
       const result = deps.executeUiCommand(
         String(item.command || ''),
@@ -136,7 +144,7 @@
           sttModel: effectiveSettings.sttModel || 'small',
           error: 'conversation-target-not-found',
         }).catch(() => {});
-        throw new Error('conversation-target-not-found');
+        return { ok: false, reason: 'conversation-target-not-found', retryable: false };
       }
 
       deps.setActiveConversationTargetTabId(targetTabId);
@@ -152,13 +160,15 @@
           sttModel: effectiveSettings.sttModel || 'small',
           error: 'conversation-target-page-changed',
         }).catch(() => {});
-        return;
+        return { ok: false, reason: 'conversation-target-page-changed', retryable: false };
       }
 
       const delivery = await deps.deliverVoiceTranscript(targetTabId, eventPayload, effectiveSettings);
       if (!delivery || delivery.ok !== true) {
+        if (delivery && delivery.retryable === false) return delivery;
         throw new Error(`conversation transcript delivery failed: ${String(delivery && delivery.reason || 'unknown')}`);
       }
+      return delivery;
     }
 
     async function handleConversationEvent(item, effectiveSettings, consumerId) {

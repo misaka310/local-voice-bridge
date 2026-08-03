@@ -145,7 +145,8 @@ class ControlPanelQtTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertEqual(panel.status_label.text(), "音声モデルを準備中")
-            self.assertIn("初回起動時", panel.current_text_label.toolTip())
+            self.assertIn("保存済みモデルは再利用", panel.current_text_label.toolTip())
+            self.assertNotIn("初回起動時", panel.current_text_label.toolTip())
             self.assertTrue(panel.next_button.isEnabled())
             self.assertFalse(panel.replay_button.isEnabled())
             self.assertIn("Queue 2", panel.queue_label.text())
@@ -325,6 +326,50 @@ class ControlPanelQtTests(unittest.TestCase):
 
             self.assertEqual(panel.status_label.text(), "拡張機能の再読み込みが必要")
             self.assertIn("0.1.0 → 0.2.0", panel.current_text_label.toolTip())
+            self.assertTrue(panel.reload_extension_button.isHidden())
+            panel.shutdown()
+
+    def test_supported_old_extension_can_reload_itself_from_the_panel(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def snapshot_with_reload_support() -> dict[str, object]:
+                payload = original()
+                extension = dict(payload["extension"])
+                extension.update(
+                    {
+                        "loadedVersion": "0.2.0",
+                        "expectedVersion": "0.3.0",
+                        "updateRequired": True,
+                        "supportsExtensionReload": True,
+                    }
+                )
+                payload["extension"] = extension
+                return payload
+
+            client.get_snapshot = snapshot_with_reload_support  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+            )
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertFalse(panel.reload_extension_button.isHidden())
+            self.assertTrue(panel.reload_extension_button.isEnabled())
+            panel.reload_extension_button.click()
+            self.app.processEvents()
+
+            self.assertEqual(client.commands, ["reload_extension"])
+            self.assertFalse(panel.reload_extension_button.isEnabled())
+            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
+
+            panel.refresh_now()
+            self.app.processEvents()
+            self.assertFalse(panel.reload_extension_button.isEnabled())
+            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
             panel.shutdown()
 
     def test_toggle_visibility_and_close_hide_the_panel(self) -> None:
