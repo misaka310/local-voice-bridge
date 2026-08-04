@@ -3,6 +3,32 @@
 (function initBackgroundPlaybackQueue(global) {
   function create(ctx) {
     const state = () => ctx.getState();
+    const runtimePersistMicrotaskBudget = Math.max(
+      1,
+      Math.min(50, Number(ctx.runtimePersistMicrotaskBudget ?? 12)),
+    );
+
+    async function flushBeforePlayback() {
+      let flushPromise;
+      try {
+        flushPromise = Promise.resolve(ctx.flushBrowserRuntimeState());
+      } catch (error) {
+        throw error;
+      }
+      const flushResult = flushPromise.then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, error }),
+      );
+      let continuePlayback = Promise.resolve();
+      for (let index = 0; index < runtimePersistMicrotaskBudget; index += 1) {
+        continuePlayback = continuePlayback.then(() => undefined);
+      }
+      const result = await Promise.race([
+        flushResult,
+        continuePlayback.then(() => ({ ok: true, pending: true })),
+      ]);
+      if (!result.ok) throw result.error;
+    }
 
     function enqueue(base, front = false) {
       const item = ctx.queueCore.createQueueItem(base, {
@@ -125,7 +151,7 @@
       ctx.setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
       ctx.broadcastState();
       try {
-        await ctx.flushBrowserRuntimeState();
+        await flushBeforePlayback();
         let payload;
         if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text);
         else {

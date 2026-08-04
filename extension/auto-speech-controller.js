@@ -19,6 +19,12 @@
     const markResponseCompleted = environment.markResponseCompleted;
     const isAutoEnabled = environment.isAutoEnabled;
     const isGenerationControlNode = environment.isGenerationControlNode;
+    const isCompletionControlNode = typeof environment.isCompletionControlNode === 'function'
+      ? environment.isCompletionControlNode
+      : () => false;
+    const requestRecheck = typeof environment.requestRecheck === 'function'
+      ? environment.requestRecheck
+      : () => {};
     const afterInspectLatest = typeof environment.afterInspectLatest === 'function'
       ? environment.afterInspectLatest
       : () => {};
@@ -33,6 +39,7 @@
     );
     const stateByElement = new WeakMap();
     const initializedElements = new WeakSet();
+    const pendingElements = new WeakSet();
     let inspectTimer = null;
 
     for (const [name, value] of Object.entries({
@@ -163,6 +170,7 @@
     }
 
     function schedulePendingSend(node, item, preview) {
+      const delay = pendingDelay(preview, item);
       if (item.idleTimer) clearTimer(item.idleTimer);
       item.idleTimer = setTimer(() => {
         item.idleTimer = null;
@@ -183,12 +191,16 @@
         if (node.dataset) node.dataset[sentFlag] = '1';
         void reportEntry(node, item, latest, chunks, pendingPreview, isAutoEnabled());
         notifyCompleted(item);
-      }, pendingDelay(preview, item));
+      }, delay);
+      void Promise.resolve(requestRecheck(delay)).catch(() => {});
     }
 
     function processNode(node) {
       const text = extractAssistantText(node);
-      if (!text) return false;
+      if (!text) {
+        pendingElements.add(node);
+        return false;
+      }
       const item = ensureElementState(node, text);
       if (isResponseGenerating()) {
         item.generationObserved = true;
@@ -230,6 +242,11 @@
     function markExistingMessagesAsSeen() {
       for (const node of getAssistantNodes()) {
         const text = extractAssistantText(node);
+        if (!text) {
+          pendingElements.add(node);
+          continue;
+        }
+        if (pendingElements.has(node)) continue;
         initializedElements.add(node);
         clearStateTimers(stateByElement.get(node));
         stateByElement.set(node, createState(node, text, {
@@ -263,7 +280,9 @@
     function scheduleInspect(mutations = []) {
       const generationEnded = Array.from(mutations || []).some((mutation) => Array.from(mutation.removedNodes || [])
         .some((node) => isGenerationControlNode(node)));
-      if (generationEnded) {
+      const completionControlAdded = Array.from(mutations || []).some((mutation) => Array.from(mutation.addedNodes || [])
+        .some((node) => isCompletionControlNode(node)));
+      if (generationEnded || completionControlAdded) {
         if (inspectTimer) clearTimer(inspectTimer);
         inspectTimer = null;
         inspectLatestAssistant();

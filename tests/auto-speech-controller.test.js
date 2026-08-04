@@ -85,6 +85,43 @@ test('baseline marks visible replies as consumed and does not Auto queue later g
   assert.equal(harness.reports[0].isAuto, false);
 });
 
+test('baseline leaves an empty assistant shell eligible for its later completed reply', () => {
+  const harness = createHarness();
+  const node = { key: 'pending', text: '', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.controller.markExistingMessagesAsSeen();
+  assert.equal(node.dataset.sent, undefined);
+
+  node.text = 'Auto反映後に完成した新しい返答です。';
+  node.complete = true;
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].isAuto, true);
+});
+
+test('reply shell observed while Auto is off remains eligible when it completes as Auto turns on', () => {
+  const harness = createHarness();
+  const node = { key: 'activation-race', text: '', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.setAutoEnabled(false);
+  harness.controller.processNode(node);
+
+  node.text = 'Auto切替と同時に完成した新しい返答です。';
+  node.complete = true;
+  harness.controller.processNode(node);
+  assert.equal(harness.reports.length, 0);
+
+  harness.setAutoEnabled(true);
+  harness.controller.markExistingMessagesAsSeen();
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].isAuto, true);
+});
+
 test('new completed reply queues exactly one Auto preview and one completion marker', () => {
   const harness = createHarness();
   const node = { key: 'new', text: '十分な長さを持つ新しい返答です。', dataset: {}, complete: true };

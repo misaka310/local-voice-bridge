@@ -976,6 +976,14 @@ test('a completed reply marks its background tab until the user focuses it', asy
       await expect(page.locator('#chat')).toBeVisible();
     }
 
+    await backgroundPage.evaluate(() => {
+      const originalFavicon = document.createElement('link');
+      originalFavicon.id = 'fixture-original-favicon';
+      originalFavicon.rel = 'icon';
+      originalFavicon.href = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"%3E%3Crect width="32" height="32" fill="red"/%3E%3C/svg%3E';
+      document.head.append(originalFavicon);
+    });
+
     const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
     await configureWorker(worker, { voiceId: 'sample', referenceVoice: 'sample' });
     await waitForControlReady(2);
@@ -1042,14 +1050,17 @@ test('a completed reply marks its background tab until the user focuses it', asy
       });
     }, backgroundTabId);
     await waitForCounts(1, 1);
-    await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('● Local Voice Demo Fixture');
+    await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
+    await expect(backgroundPage.locator('#fixture-original-favicon')).not.toHaveAttribute('rel', /(^|\s)icon(\s|$)/i);
+    expect(await backgroundPage.locator('link[rel~="icon"]').count()).toBe(1);
     expect(await foregroundPage.title()).toBe('Local Voice Demo Fixture');
     await expect(foregroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
 
     await backgroundPage.bringToFront();
     await expect.poll(() => backgroundPage.title(), { timeout: 5000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
+    await expect(backgroundPage.locator('#fixture-original-favicon')).toHaveAttribute('rel', 'icon');
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);

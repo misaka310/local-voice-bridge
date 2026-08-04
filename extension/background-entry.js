@@ -8,6 +8,7 @@ importScripts(
   'background-settings-core.js',
   'background-runtime-core.js',
   'background-queue-core.js',
+  'background-auto-recheck.js',
   'background-control-sync.js',
   'background-tab-registry.js',
   'background-conversation-target.js',

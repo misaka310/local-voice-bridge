@@ -12,6 +12,7 @@ const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
+const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
 const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
@@ -285,6 +286,7 @@ function createHarness({
       BACKGROUND_SETTINGS_CORE_PATH,
       BACKGROUND_RUNTIME_CORE_PATH,
       BACKGROUND_QUEUE_CORE_PATH,
+      BACKGROUND_AUTO_RECHECK_PATH,
       BACKGROUND_CONTROL_SYNC_PATH,
       BACKGROUND_TAB_REGISTRY_PATH,
       BACKGROUND_CONVERSATION_TARGET_PATH,
@@ -620,6 +622,27 @@ test('API recovery retries browser-runtime hydration and resumes the persisted q
   assert.equal(harness.speakPosts[0].text, '復元キューです。');
 });
 
+test('control polling uses one recovery sweep instead of repeated all-tab rechecks', async () => {
+  const harness = createHarness();
+  await harness.ready();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({ type: 'register-tab', title: 'Tab B' }, 202, 'Tab B');
+  harness.sentMessages.length = 0;
+
+  const first = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  const second = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.deepEqual(
+    harness.sentMessages
+      .filter((entry) => entry.message.type === 'auto-recheck')
+      .map((entry) => entry.tabId)
+      .sort((a, b) => a - b),
+    [101, 202],
+  );
+});
+
 test('external panel poll applies settings, executes each command once, and posts global state', async () => {
   const harness = createHarness();
   harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
@@ -635,6 +658,22 @@ test('external panel poll applies settings, executes each command once, and post
   await waitFor(() => harness.speakPosts.length === 1 && harness.statePosts.length >= 1);
 
   assert.equal(first.ok, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(harness.sentMessages.filter((entry) => entry.message.type === 'settings-update'))),
+    [{
+      tabId: 101,
+      message: {
+        type: 'settings-update',
+        payload: {
+          enabled: true,
+          voiceVolume: 0.25,
+          voiceId: 'asuka',
+          referenceVoice: 'asuka',
+          micConversationEnabled: true,
+        },
+      },
+    }],
+  );
   assert.equal(harness.storage.enabled, true);
   assert.equal(harness.storage.voiceVolume, 0.25);
   assert.equal(harness.storage.voiceId, 'asuka');
@@ -661,7 +700,7 @@ test('extension reload command is acknowledged before reloading and is not repla
   const first = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
 
   assert.equal(first.ok, true);
-  assert.deepEqual(harness.lifecycleEvents.slice(0, 2), ['ack', 'reload']);
+  assert.deepEqual(harness.lifecycleEvents, ['ack', 'reload']);
   assert.equal(harness.runtimeReloads(), 1);
   assert.deepEqual(harness.ackPosts.at(-1), { consumerId: 'playback-id', commandId: 21 });
 

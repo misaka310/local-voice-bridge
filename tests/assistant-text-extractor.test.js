@@ -14,7 +14,23 @@ test('normalizes assistant text without flattening meaningful line boundaries', 
 test('recognizes transient ChatGPT generation labels only when they are the whole message', () => {
   assert.equal(assistantText.isTransientAssistantStatus('画像を分析しています…'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinking...'), true);
+  assert.equal(assistantText.isTransientAssistantStatus('<|SpawnThinking|>'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinkingについて説明します。'), false);
+});
+
+test('removes internal ChatGPT control tokens before assistant speech extraction', () => {
+  const node = (innerText) => ({
+    cloneNode: () => ({
+      innerText,
+      querySelectorAll: () => [],
+    }),
+  });
+
+  assert.equal(assistantText.extractAssistantText(node('<|SpawnThinking|>')), '');
+  assert.equal(
+    assistantText.extractAssistantText(node('<|SpawnThinking|>\n最終回答です。')),
+    '最終回答です。',
+  );
 });
 
 test('normalizes markdown lines for speech without owning chunk policy', () => {

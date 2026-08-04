@@ -5,7 +5,7 @@
     let hydrated = false;
     let hydrationPromise = null;
     let persistTimer = null;
-    let persistPromise = null;
+    let persistTail = Promise.resolve();
     let persistDirty = false;
 
     function cloneItem(item) {
@@ -52,22 +52,25 @@
 
     async function flushBrowserRuntimeState() {
       if (!hydrated) return;
-      persistDirty = true;
-      if (persistPromise) return persistPromise;
-      persistPromise = (async () => {
-        while (persistDirty) {
-          persistDirty = false;
-          const settings = await ctx.getSettings();
-          await ctx.controlPanelRequest(settings, '/v1/browser-runtime', {
-            method: 'POST',
-            body: browserRuntimeStatePayload(),
-          });
-        }
-      })();
+      if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+      }
+      persistDirty = false;
+      const body = browserRuntimeStatePayload();
+      const operation = persistTail.catch(() => {}).then(async () => {
+        const settings = await ctx.getSettings();
+        await ctx.controlPanelRequest(settings, '/v1/browser-runtime', {
+          method: 'POST',
+          body,
+        });
+      });
+      persistTail = operation;
       try {
-        await persistPromise;
+        await operation;
       } finally {
-        persistPromise = null;
+        if (persistTail === operation) persistTail = Promise.resolve();
+        if (persistDirty) scheduleBrowserRuntimePersist();
       }
     }
 

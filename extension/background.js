@@ -36,6 +36,7 @@ let conversationPhase = 'off';
 const conversationSessionTargets = new Map();
 const conversationSessionTargetLocations = new Map();
 let backgroundInitializationPromise = null;
+let externalControlPollTimer = null;
 
 function rememberReferenceVoice(settings) {
   const safe = settings && typeof settings === 'object' ? settings : {};
@@ -66,6 +67,10 @@ function setStatus(text, level = 'info') {
   lastStatusLevel = String(level || 'info');
 }
 
+const autoRecheck = globalThis.BackgroundAutoRecheck.create({ chrome, tabs });
+const clearAutoRecheck = autoRecheck.clear;
+const requestAutoRecheckForRegisteredTabs = autoRecheck.heartbeat;
+const scheduleAutoRecheck = autoRecheck.schedule;
 const tabRegistry = globalThis.BackgroundTabRegistry.create({
   chrome,
   tabs,
@@ -356,6 +361,7 @@ const externalControlSync = globalThis.BackgroundControlSync.create({
   deliverVoiceTranscript,
   postConversationState,
   ensureOwner,
+  requestAutoRecheckForRegisteredTabs,
   reconnectOpenChatGptTabs,
   externalStateSnapshot,
   getConversationPhase: () => conversationPhase,
@@ -370,6 +376,24 @@ async function pushOptionSettings(settings = null) {
 
 async function syncExternalControlPanel() {
   return externalControlSync.synchronize();
+}
+
+function scheduleExternalControlPoll(delayMs = 0) {
+  if (externalControlPollTimer) return;
+  const delay = Math.max(0, Math.min(5000, Number(delayMs) || 0));
+  externalControlPollTimer = setTimeout(async () => {
+    externalControlPollTimer = null;
+    let nextDelay = 750;
+    try {
+      await syncExternalControlPanel();
+      const current = await getSettings();
+      nextDelay = current.micConversationEnabled ? 50 : 750;
+    } catch (_error) {}
+    scheduleExternalControlPoll(nextDelay);
+  }, delay);
+  if (externalControlPollTimer && typeof externalControlPollTimer.unref === 'function') {
+    externalControlPollTimer.unref();
+  }
 }
 
 async function initializeBackgroundRuntime() {
@@ -394,12 +418,16 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   void initializeBackgroundRuntime();
 });
-void initializeBackgroundRuntime();
+void initializeBackgroundRuntime().finally(() => {
+  if (chrome.runtime && chrome.runtime.id) scheduleExternalControlPoll(0);
+});
 chrome.tabs.onRemoved.addListener((tabId) => {
+  clearAutoRecheck(tabId);
   removeTab(tabId, 'Playback tab closed; skipped');
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo || changeInfo.status !== 'loading') return;
+  clearAutoRecheck(tabId);
   removeTab(tabId, 'Playback tab reloaded; skipped');
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -413,6 +441,7 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   noteComposerFocused,
   statePayload,
   broadcastState,
+  scheduleAutoRecheck,
   queueCore,
   shouldQueueAutoFromTab,
   enqueue,

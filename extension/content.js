@@ -75,6 +75,9 @@
     isEnabled: () => enabled,
     reportChunks: (entry, isAuto) => reportChunks(entry, isAuto),
     markResponseCompleted,
+    requestAutoRecheck: (delayMs) => runtimeMessage('schedule-auto-recheck', {
+      delayMs: Math.max(50, Math.min(5000, Number(delayMs) || 500)),
+    }),
     ensureLiveController: () => ensureLiveController(),
   });
   const {
@@ -85,6 +88,7 @@
     markExistingMessagesAsSeen,
     rebaseline: rebaselineAutoMessages,
     reportLatestSnapshot: reportLatestAssistantSnapshot,
+    inspectLatestAssistant,
     scheduleInspect,
   } = domObserverController;
 
@@ -128,11 +132,36 @@
     stopCurrentPlayback,
   } = audioPlayer;
 
+  function applySettingsSnapshot(values = {}) {
+    const incoming = values && typeof values === 'object' ? values : {};
+    const wasEnabled = enabled;
+    for (const [key, value] of Object.entries(incoming)) settings[key] = value;
+    enabled = Boolean(settings.enabled);
+    if (!wasEnabled && enabled) {
+      rebaselineAutoMessages();
+      scheduleInspect();
+    }
+    settings.voiceVolume = clampVolume(settings.voiceVolume);
+    if (Object.prototype.hasOwnProperty.call(incoming, 'micConversationEnabled')) {
+      if (!settings.micConversationEnabled) {
+        disableConversationBridge();
+      } else {
+        void ensureLiveController()?.reconcile();
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(incoming, 'voiceId')
+      || Object.prototype.hasOwnProperty.call(incoming, 'referenceVoice')) {
+      void syncDesktopPetSelection();
+    }
+  }
+
   const contentMessageRouter = globalThis.LocalVoiceContentMessageRouter.create({
     conversationTargetStatus,
     clearCompletionMarker,
     registerCurrentTab: (options) => registerCurrentTab(options),
     applyOwnerState,
+    applySettingsSnapshot,
+    inspectLatestAssistant,
     playItem,
     handleVoiceTranscript,
     cancelPendingVoiceSend,
@@ -240,24 +269,18 @@
     await syncDesktopPetSelection();
     await initializeCompletionMarker();
     markExistingMessagesAsSeen();
+    observer = new MutationObserver(scheduleInspect);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     try {
       await registerCurrentTab({ includeLatest: true });
     } catch (_error) {
       applyOwnerState(null);
     }
+    scheduleInspect();
     const live = ensureLiveController();
     if (settings.micConversationEnabled) void live?.reconcile();
-    observer = new MutationObserver(scheduleInspect);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     const claimUiOwnership = () => {
       chrome.runtime.sendMessage({ type: 'register-tab', title: getPlainDocumentTitle(), claimOwner: true }).catch(() => {});
-    };
-    const pollExternalControl = () => {
-      if (isUiOwner !== false) {
-        chrome.runtime.sendMessage({ type: 'external-control-poll' }).catch(() => {});
-      }
-      const delay = settings.micConversationEnabled ? 50 : 750;
-      window.setTimeout(pollExternalControl, delay);
     };
     window.addEventListener('focus', clearCompletionMarker);
     document.addEventListener('visibilitychange', () => {
@@ -283,7 +306,6 @@
     }, { capture: true });
     reportComposerFocus();
     window.addEventListener('pagehide', handlePageHide);
-    void pollExternalControl();
     setInterval(() => {
       chrome.runtime.sendMessage({ type: 'register-tab', title: getPlainDocumentTitle() }).catch(() => {});
     }, 5000);
@@ -292,22 +314,9 @@
   if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
-      const wasEnabled = enabled;
-      for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
-      enabled = Boolean(settings.enabled);
-      if (!wasEnabled && enabled) rebaselineAutoMessages();
-      settings.voiceVolume = clampVolume(settings.voiceVolume);
-      if (Object.prototype.hasOwnProperty.call(changes, 'micConversationEnabled')) {
-        if (!settings.micConversationEnabled) {
-          disableConversationBridge();
-        } else {
-          void ensureLiveController()?.reconcile();
-        }
-      }
-      if (Object.prototype.hasOwnProperty.call(changes, 'voiceId')
-        || Object.prototype.hasOwnProperty.call(changes, 'referenceVoice')) {
-        void syncDesktopPetSelection();
-      }
+      applySettingsSnapshot(Object.fromEntries(
+        Object.entries(changes).map(([key, change]) => [key, change.newValue]),
+      ));
     });
   }
 

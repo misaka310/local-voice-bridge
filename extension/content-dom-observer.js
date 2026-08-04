@@ -154,6 +154,12 @@
         || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));
     }
 
+    function isCompletionControlNode(node) {
+      if (!node || node.nodeType !== 1) return false;
+      return node.matches(RESPONSE_COMPLETE_SELECTOR)
+        || Boolean(node.querySelector(RESPONSE_COMPLETE_SELECTOR));
+    }
+
     function ensureController() {
       if (autoSpeechController) return autoSpeechController;
       if (!assistantText || !autoSpeech || typeof autoSpeech.createAutoSpeechController !== 'function') {
@@ -174,6 +180,8 @@
         markResponseCompleted: ctx.markResponseCompleted,
         isAutoEnabled: () => Boolean(ctx.isEnabled() && settings().enabled),
         isGenerationControlNode,
+        isCompletionControlNode,
+        requestRecheck: (delayMs) => ctx.requestAutoRecheck(delayMs),
         afterInspectLatest: () => {
           if (settings().micConversationEnabled) void ctx.ensureLiveController()?.inspect();
         },
@@ -189,6 +197,7 @@
       markExistingMessagesAsSeen: () => ensureController().markExistingMessagesAsSeen(),
       rebaseline: () => ensureController().rebaseline(),
       reportLatestSnapshot: () => ensureController().reportLatestSnapshot(),
+      inspectLatestAssistant: () => ensureController().inspectLatestAssistant(),
       scheduleInspect: (mutations = []) => ensureController().scheduleInspect(mutations),
     };
   }

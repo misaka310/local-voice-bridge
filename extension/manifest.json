@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Local Voice Bridge",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Unofficial local voice assistance for chatgpt.com, with optional push-to-talk input and local reply playback.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [

@@ -18,6 +18,16 @@
           .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
         return true;
       }
+      if (message.type === 'auto-recheck') {
+        ctx.inspectLatestAssistant();
+        sendResponse({ ok: true });
+        return false;
+      }
+      if (message.type === 'settings-update') {
+        ctx.applySettingsSnapshot(message.payload || {});
+        sendResponse({ ok: true });
+        return false;
+      }
       if (message.type === 'state-update') {
         ctx.applyOwnerState(message.payload.isUiOwner, message.payload);
         return false;

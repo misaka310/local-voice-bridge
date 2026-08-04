@@ -150,9 +150,14 @@ class TrayControllerContractTests(unittest.TestCase):
     def test_public_tree_has_no_vbs_launcher(self) -> None:
         self.assertFalse((ROOT / "start-voice-bridge.vbs").exists())
 
-    def test_public_contributor_contract_replaces_agent_handoff(self) -> None:
+    def test_public_contributor_contract_requires_agent_entrypoint(self) -> None:
         self.assertTrue((ROOT / "CONTRIBUTING.md").is_file())
-        self.assertFalse((ROOT / "AGENTS.md").exists())
+        agents_path = ROOT / "AGENTS.md"
+        self.assertTrue(agents_path.is_file())
+        agents = agents_path.read_text(encoding="utf-8")
+        self.assertIn("README.md", agents)
+        self.assertIn("CONTRIBUTING.md", agents)
+        self.assertIn("拡張機能を再読み込み", agents)
 
     def test_windows_directories_open_with_explicit_explorer_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -130,3 +130,27 @@ test('runtime restore never requeues persisted current item over active playback
   assert.equal(merged.resetPlayback, false);
   assert.deepEqual(merged.queue, []);
 });
+test('runtime restore drops internal control-token-only speech items', () => {
+  const merged = runtimeCore.mergeSnapshot({
+    currentItem: { id: 'thinking-current', text: '<|SpawnThinking|>' },
+    queue: [
+      { id: 'thinking-queued', text: '<|SpawnThinking|>' },
+      { id: 'final-queued', text: '<|SpawnThinking|> 最終回答です。' },
+    ],
+    lastPlayedItem: { id: 'thinking-last', text: '<|SpawnThinking|>' },
+  }, {
+    tabs: new Map(),
+    queue: [],
+    currentItem: null,
+    isPlaying: false,
+    lastPlayedItem: null,
+    seq: 1,
+    conversationSessionTargets: new Map(),
+    conversationSessionTargetLocations: new Map(),
+  });
+
+  assert.deepEqual(merged.queue.map((item) => [item.id, item.text]), [
+    ['final-queued', '最終回答です。'],
+  ]);
+  assert.equal(merged.lastPlayedItem, null);
+});
