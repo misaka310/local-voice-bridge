@@ -607,7 +607,10 @@ test('inline code text is preserved before Auto finalizes a streaming preview', 
       window.setTimeout(() => {
         const code = document.createElement('code');
         code.textContent = 'Partial Content（部分コンテンツ）」で、動画を一部分だけ正常に返したという成功ステータスです。';
-        reply.append(code);
+        const copy = document.createElement('button');
+        copy.dataset.testid = 'copy-turn-action-button';
+        copy.setAttribute('aria-label', 'Copy');
+        reply.append(code, copy);
       }, 250);
     });
 
@@ -623,7 +626,7 @@ test('inline code text is preserved before Auto finalizes a streaming preview', 
   }
 });
 
-test('Next uses the completed streaming reply instead of the short Auto preview snapshot', async () => {
+test('Auto waits for the completed streaming reply and Next uses its following chunk', async () => {
   test.setTimeout(90000);
   const api = await startMock();
   const context = await launchContext();
@@ -643,25 +646,39 @@ test('Next uses the completed streaming reply instead of the short Auto preview 
     await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
 
     await page.evaluate(() => {
+      const stopButton = document.createElement('button');
+      stopButton.dataset.testid = 'stop-button';
+      stopButton.textContent = 'Stop generating';
+      document.body.append(stopButton);
+      const turn = document.createElement('article');
+      turn.dataset.testid = 'conversation-turn-assistant-streaming-next';
       const reply = document.createElement('div');
       reply.dataset.messageAuthorRole = 'assistant';
       reply.dataset.messageId = 'streaming-next-reply';
       reply.textContent = '概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。';
-      document.querySelector('#chat').append(reply);
+      turn.append(reply);
+      document.querySelector('#chat').append(turn);
     });
-    await waitForCounts(1, 1);
+    await page.waitForTimeout(1800);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
 
     await page.evaluate(() => {
-      document.querySelector('[data-message-id="streaming-next-reply"]').textContent =
+      const turn = document.querySelector('[data-testid="conversation-turn-assistant-streaming-next"]');
+      turn.querySelector('[data-message-id="streaming-next-reply"]').textContent =
         '概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。\nただし、公開時の誤認防止とブランド統一のために変更すべき項目があります。\nChrome拡張名、EXE名、スタートメニュー名、READMEタイトルを独自名称へ統一します。';
+      document.querySelector('[data-testid="stop-button"]')?.remove();
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      turn.append(copy);
     });
-    await page.waitForTimeout(700);
+    await waitForCounts(1, 1);
 
     await sendControlCommand('next');
     await waitForCounts(2, 2);
     const posts = (await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak');
-    expect(posts[1].body.text).not.toBe('概ね妥当です。公開時の説明として成立していますが、追加で確認すべき項目があります。');
-    expect(posts[1].body.text).toContain('ただし');
+    expect(posts[0].body.text).toContain('ただし');
+    expect(posts[1].body.text).toContain('Chrome拡張名');
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);
@@ -705,9 +722,13 @@ test('Auto does not finalize a one-character streaming fragment and repairs the 
       && event.body.text === '完')).toBe(false);
 
     await page.evaluate(() => {
-      document.querySelector('[data-message-id="one-character-stream-reply"]').textContent =
-        '完\n了状態 最初から再点検しました。';
+      const reply = document.querySelector('[data-message-id="one-character-stream-reply"]');
+      reply.textContent = '完\n了状態 最初から再点検しました。';
       document.querySelector('[data-testid="stop-button"]').remove();
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      reply.append(copy);
     });
     await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
       && event.path === '/v1/speak'
@@ -755,9 +776,14 @@ test('Auto does not finalize a short unpunctuated streaming fragment before the 
       && event.body.text === 'ごめん')).toBe(false);
 
     await page.evaluate(() => {
-      document.querySelector('[data-message-id="short-fragment-stream-reply"]').textContent =
+      const reply = document.querySelector('[data-message-id="short-fragment-stream-reply"]');
+      reply.textContent =
         'ごめん、実際のCall of Dutyではなく、前に比較したブラウザゲームの話です。さっきの説明はズレていました。';
       document.querySelector('[data-testid="stop-button"]').remove();
+      const copy = document.createElement('button');
+      copy.dataset.testid = 'copy-turn-action-button';
+      copy.setAttribute('aria-label', 'Copy');
+      reply.append(copy);
     });
     await expect.poll(async () => (await apiEvents()).some((event) => event.method === 'POST'
       && event.path === '/v1/speak'
@@ -990,24 +1016,32 @@ test('a completed reply marks its background tab until the user focuses it', asy
           const reply = document.createElement('div');
           reply.dataset.messageAuthorRole = 'assistant';
           reply.dataset.messageId = 'completion-marker-reply';
-          reply.textContent = 'バックグラウンドタブで生成中の返答プレビューが読み上げられ、その後に完了状態へ移行します。';
+          reply.textContent = 'バックグラウンドタブでは生成中に読み上げず、返答完了後に一度だけ通知します。';
           turn.append(reply);
           document.querySelector('#chat').append(turn);
         },
       });
     }, backgroundTabId);
 
-    await waitForCounts(1, 1);
-    await wait(1200);
+    await wait(1800);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
     expect(await backgroundPage.title()).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
 
     await controllerPage.evaluate(async (tabId) => {
       await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => document.querySelector('[data-testid="stop-button"]')?.remove(),
+        func: () => {
+          document.querySelector('[data-testid="stop-button"]')?.remove();
+          const turn = document.querySelector('[data-testid="conversation-turn-assistant-completion-marker"]');
+          const copy = document.createElement('button');
+          copy.dataset.testid = 'copy-turn-action-button';
+          copy.setAttribute('aria-label', 'Copy');
+          turn.append(copy);
+        },
       });
     }, backgroundTabId);
+    await waitForCounts(1, 1);
     await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('● Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
     expect(await foregroundPage.title()).toBe('Local Voice Demo Fixture');

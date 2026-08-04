@@ -15,7 +15,6 @@
     const splitSpeakChunks = environment.splitSpeakChunks;
     const extractAutoPreview = environment.extractAutoPreview;
     const stableDelayForPreview = environment.stableDelayForPreview;
-    const canFinalizePreview = environment.canFinalizePreview;
     const reportChunks = environment.reportChunks;
     const markResponseCompleted = environment.markResponseCompleted;
     const isAutoEnabled = environment.isAutoEnabled;
@@ -28,6 +27,10 @@
     const clearTimer = environment.clearTimeout || globalThis.clearTimeout.bind(globalThis);
     const sentFlag = String(environment.sentFlag || 'localVoiceSent');
     const inspectDelayMs = Math.max(0, Number(environment.inspectDelayMs || 200));
+    const completionEvidenceStableMs = Math.max(
+      100,
+      Number(environment.completionEvidenceStableMs || 1200),
+    );
     const stateByElement = new WeakMap();
     const initializedElements = new WeakSet();
     let inspectTimer = null;
@@ -42,7 +45,6 @@
       splitSpeakChunks,
       extractAutoPreview,
       stableDelayForPreview,
-      canFinalizePreview,
       reportChunks,
       markResponseCompleted,
       isAutoEnabled,
@@ -57,12 +59,12 @@
         sent: false,
         completionNotified: false,
         generationObserved: false,
-        generationCompleted: false,
-        completionControlObserved: false,
+        completionCandidateText: '',
+        completionCandidateSince: 0,
+        completionReason: '',
         lastText: text,
         lastChangedAt: now(),
         idleTimer: null,
-        completionTimer: null,
         ...overrides,
       };
     }
@@ -70,9 +72,7 @@
     function clearStateTimers(item) {
       if (!item) return;
       if (item.idleTimer) clearTimer(item.idleTimer);
-      if (item.completionTimer) clearTimer(item.completionTimer);
       item.idleTimer = null;
-      item.completionTimer = null;
     }
 
     function ensureElementState(node, text) {
@@ -95,60 +95,48 @@
       return { chunks, preview };
     }
 
-    function observeCompletion(node, item) {
+    function resetCompletionCandidate(item) {
+      item.completionCandidateText = '';
+      item.completionCandidateSince = 0;
+      item.completionReason = '';
+    }
+
+    function observeCompletion(node, item, text, timestamp) {
       const generating = Boolean(isResponseGenerating());
-      if (generating) item.generationObserved = true;
-      else if (item.generationObserved) item.generationCompleted = true;
-      if (hasResponseCompletionControl(node)) item.completionControlObserved = true;
+      if (generating) {
+        item.generationObserved = true;
+        resetCompletionCandidate(item);
+        return { generating: true, confirmed: false, reason: '' };
+      }
+      if (!hasResponseCompletionControl(node)) {
+        resetCompletionCandidate(item);
+        return { generating: false, confirmed: false, reason: '' };
+      }
+      const reason = item.generationObserved
+        ? 'generation-ended-with-action-control'
+        : 'action-control';
+      if (item.completionCandidateText !== text || item.completionReason !== reason) {
+        item.completionCandidateText = text;
+        item.completionCandidateSince = timestamp;
+        item.completionReason = reason;
+      }
       return {
-        generating,
-        confirmed: Boolean(item.generationCompleted || item.completionControlObserved),
+        generating: false,
+        confirmed: timestamp - item.completionCandidateSince >= completionEvidenceStableMs,
+        reason,
       };
     }
 
-    function shouldSendNow(node, preview, timestamp, item) {
+    function shouldSendNow(node, text, preview, timestamp, item) {
       if (!preview) return false;
-      const options = getPreviewOptions();
-      const minChars = Math.max(1, Number(options.minChars || 40));
-      const completion = observeCompletion(node, item);
-      if (!canFinalizePreview(preview, {
-        minChars,
-        completionConfirmed: completion.confirmed,
-      })) return false;
-      if (completion.generating && preview.length < minChars) return false;
+      const completion = observeCompletion(node, item, text, timestamp);
+      if (!completion.confirmed) return false;
       return timestamp - item.lastChangedAt >= stableDelayForPreview(preview);
     }
 
-    function maybeMarkCompleted(node, item, text) {
-      if (!item.sent || item.completionNotified) return;
-      if (isResponseGenerating()) {
-        item.generationObserved = true;
-        if (item.completionTimer) clearTimer(item.completionTimer);
-        item.completionTimer = null;
-        return;
-      }
-      const { preview } = previewParts(text);
-      if (!preview) return;
-      const stableMs = stableDelayForPreview(preview);
-      const requiredStableMs = item.generationObserved ? 0 : Math.max(stableMs, 1800);
-      const remainingMs = requiredStableMs - (now() - item.lastChangedAt);
-      if (remainingMs > 0) {
-        if (item.completionTimer) clearTimer(item.completionTimer);
-        item.completionTimer = setTimer(() => {
-          item.completionTimer = null;
-          const latest = extractAssistantText(node);
-          if (!latest) return;
-          if (latest !== item.lastText) {
-            processNode(node);
-            return;
-          }
-          maybeMarkCompleted(node, item, latest);
-        }, remainingMs + 50);
-        return;
-      }
+    function notifyCompleted(item) {
+      if (item.completionNotified) return;
       item.completionNotified = true;
-      if (item.completionTimer) clearTimer(item.completionTimer);
-      item.completionTimer = null;
       markResponseCompleted();
     }
 
@@ -159,22 +147,23 @@
         messageKey: item.key,
         chunks,
         autoPreview: preview,
+        completionReason: item.completionReason,
+        completionObservedAt: item.completionCandidateSince,
         capturedAt: now(),
       }, Boolean(isAuto));
     }
 
+    function pendingDelay(preview, item) {
+      const timestamp = now();
+      const stableRemaining = stableDelayForPreview(preview) - (timestamp - item.lastChangedAt);
+      const completionRemaining = item.completionCandidateText
+        ? completionEvidenceStableMs - (timestamp - item.completionCandidateSince)
+        : 500;
+      return Math.max(50, Math.min(500, Math.max(stableRemaining, completionRemaining)));
+    }
+
     function schedulePendingSend(node, item, preview) {
       if (item.idleTimer) clearTimer(item.idleTimer);
-      const options = getPreviewOptions();
-      const minChars = Math.max(1, Number(options.minChars || 40));
-      const generationRetryMs = isResponseGenerating() ? 500 : 0;
-      const completionRetryMs = preview.length < minChars ? 500 : 0;
-      const remainingMs = Math.max(
-        50,
-        generationRetryMs,
-        completionRetryMs,
-        stableDelayForPreview(preview) - (now() - item.lastChangedAt) + 50,
-      );
       item.idleTimer = setTimer(() => {
         item.idleTimer = null;
         if (item.sent) return;
@@ -186,34 +175,32 @@
         }
         const { chunks, preview: pendingPreview } = previewParts(latest);
         if (!pendingPreview) return;
-        if (!shouldSendNow(node, pendingPreview, now(), item)) {
+        if (!shouldSendNow(node, latest, pendingPreview, now(), item)) {
           schedulePendingSend(node, item, pendingPreview);
           return;
         }
         item.sent = true;
         if (node.dataset) node.dataset[sentFlag] = '1';
         void reportEntry(node, item, latest, chunks, pendingPreview, isAutoEnabled());
-        maybeMarkCompleted(node, item, latest);
-      }, remainingMs);
+        notifyCompleted(item);
+      }, pendingDelay(preview, item));
     }
 
     function processNode(node) {
       const text = extractAssistantText(node);
       if (!text) return false;
       const item = ensureElementState(node, text);
-      if (isResponseGenerating()) item.generationObserved = true;
+      if (isResponseGenerating()) {
+        item.generationObserved = true;
+        resetCompletionCandidate(item);
+      }
       if (item.sent) {
-        if (text === item.lastText) {
-          maybeMarkCompleted(node, item, text);
-          return true;
-        }
+        if (text === item.lastText) return true;
         item.lastText = text;
         item.lastChangedAt = now();
+        resetCompletionCandidate(item);
         const { chunks, preview } = previewParts(text);
-        if (chunks.length && preview) {
-          void reportEntry(node, item, text, chunks, preview, false);
-          maybeMarkCompleted(node, item, text);
-        }
+        if (chunks.length && preview) void reportEntry(node, item, text, chunks, preview, false);
         return true;
       }
       if (!initializedElements.has(node)) {
@@ -225,14 +212,15 @@
       if (text !== item.lastText) {
         item.lastText = text;
         item.lastChangedAt = now();
+        resetCompletionCandidate(item);
       }
       const { chunks, preview } = previewParts(text);
       if (!preview) return false;
-      if (shouldSendNow(node, preview, now(), item)) {
+      if (shouldSendNow(node, text, preview, now(), item)) {
         item.sent = true;
         if (node.dataset) node.dataset[sentFlag] = '1';
         void reportEntry(node, item, text, chunks, preview, isAutoEnabled());
-        maybeMarkCompleted(node, item, text);
+        notifyCompleted(item);
         return true;
       }
       schedulePendingSend(node, item, preview);

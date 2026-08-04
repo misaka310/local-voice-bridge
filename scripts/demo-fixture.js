@@ -34,7 +34,7 @@ document.querySelector('#add-reply').addEventListener('click',()=>{
   const turn=document.createElement('article');turn.className='turn assistant';turn.dataset.testid='conversation-turn-assistant';
   turn.innerHTML='<div class="avatar">AI</div><div><div class="role">ChatGPT</div><div class="message" data-message-author-role="assistant" data-message-id="new-reply"></div></div>';
   document.querySelector('#chat').append(turn);
-  setTimeout(()=>{turn.querySelector('.message').textContent=reply;window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});},500);
+  setTimeout(()=>{turn.querySelector('.message').textContent=reply;const copy=document.createElement('button');copy.dataset.testid='copy-turn-action-button';copy.setAttribute('aria-label','Copy');turn.append(copy);window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});},500);
 });
 </script>
 </body></html>`;

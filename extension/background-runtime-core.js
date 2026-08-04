@@ -33,6 +33,8 @@
           chunks: Array.isArray(info.lastAssistantMessage.chunks)
             ? info.lastAssistantMessage.chunks.map((chunk) => String(chunk || ''))
             : [],
+          completionReason: String(info.lastAssistantMessage.completionReason || ''),
+          completionObservedAt: Number(info.lastAssistantMessage.completionObservedAt || 0),
           capturedAt: Number(info.lastAssistantMessage.capturedAt || 0),
         } : null,
       })),
@@ -61,6 +63,8 @@
         chunks: Array.isArray(item.lastAssistantMessage.chunks)
           ? item.lastAssistantMessage.chunks.map((chunk) => String(chunk || '').trim()).filter(Boolean)
           : [],
+        completionReason: String(item.lastAssistantMessage.completionReason || ''),
+        completionObservedAt: Number(item.lastAssistantMessage.completionObservedAt || 0),
         capturedAt: Number(item.lastAssistantMessage.capturedAt || 0),
       }
       : null;

@@ -41,21 +41,6 @@ test('still schedules valid short complete replies and normal previews', () => {
   );
 });
 
-test('requires positive completion evidence before finalizing a short preview', () => {
-  assert.equal(
-    textCore.canFinalizePreview('いや、', { minChars: 40, completionConfirmed: false }),
-    false,
-  );
-  assert.equal(
-    textCore.canFinalizePreview('はい、返事できます。', { minChars: 40, completionConfirmed: true }),
-    true,
-  );
-  assert.equal(
-    textCore.canFinalizePreview('これは十分な長さを持つ通常の返答プレビューとして扱われる文章です。追加の文字列です。', { minChars: 40, completionConfirmed: false }),
-    true,
-  );
-});
-
 test('removes concatenated or spaced repeated UI source labels', () => {
   assert.equal(
     textCore.stripRepeatedUiLabels('見つGitHubGitHubGitHubGitHubGitHubGitHubGitHubGitHub'),

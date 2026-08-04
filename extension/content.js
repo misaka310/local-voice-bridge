@@ -190,6 +190,8 @@
       messageKey: entry.messageKey,
       chunks: entry.chunks,
       autoPreview: entry.autoPreview,
+      completionReason: entry.completionReason,
+      completionObservedAt: entry.completionObservedAt,
       isAuto,
       voiceProfile: getCurrentVoiceProfile(),
       ...getSpeakParams(),

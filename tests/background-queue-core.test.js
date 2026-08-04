@@ -75,7 +75,7 @@ test('Next and Regen planning is pure and keeps the documented read boundary', (
   assert.equal(regen.enqueueBase.text, 'first');
 });
 
-test('assistant reports update latest chunks, dedupe Auto, and suppress during Live', () => {
+test('assistant reports update latest chunks, completion evidence, dedupe Auto, and suppress during Live', () => {
   const initial = {
     title: 'Tab',
     lastReadIndex: -1,
@@ -86,26 +86,43 @@ test('assistant reports update latest chunks, dedupe Auto, and suppress during L
     messageKey: 'm1',
     chunks: ['preview', 'rest'],
     autoPreview: 'preview',
+    completionReason: 'action-control',
+    completionObservedAt: 7,
     isAuto: true,
   }, { tabId: 9, allowAuto: true, capturedAt: 10 });
   assert.equal(first.changed, true);
   assert.equal(first.enqueueBase.text, 'preview');
   assert.equal(first.info.lastReadIndex, 0);
   assert.equal(first.info.lastAssistantMessage.capturedAt, 10);
+  assert.equal(first.info.lastAssistantMessage.completionReason, 'action-control');
+  assert.equal(first.info.lastAssistantMessage.completionObservedAt, 7);
 
   const duplicate = queueCore.applyAssistantReport(first.info, {
     messageKey: 'm1',
     chunks: ['preview', 'rest'],
     autoPreview: 'preview',
+    completionReason: 'action-control',
+    completionObservedAt: 7,
     isAuto: true,
   }, { tabId: 9, allowAuto: true, capturedAt: 11 });
   assert.equal(duplicate.enqueueBase, null);
   assert.equal(duplicate.suppressedAuto, false);
 
+  const reconnectSnapshot = queueCore.applyAssistantReport(first.info, {
+    messageKey: 'm1',
+    chunks: ['preview', 'rest'],
+    autoPreview: 'preview',
+    isAuto: false,
+  }, { tabId: 9, allowAuto: true, capturedAt: 12 });
+  assert.equal(reconnectSnapshot.info.lastAssistantMessage.completionReason, 'action-control');
+  assert.equal(reconnectSnapshot.info.lastAssistantMessage.completionObservedAt, 7);
+
   const blocked = queueCore.applyAssistantReport(initial, {
     messageKey: 'm2',
     chunks: ['blocked'],
     autoPreview: 'blocked',
+    completionReason: 'action-control',
+    completionObservedAt: 8,
     isAuto: true,
   }, { tabId: 9, allowAuto: false, capturedAt: 12 });
   assert.equal(blocked.enqueueBase, null);

@@ -12,14 +12,8 @@
   ].join(',');
   const RESPONSE_COMPLETE_SELECTOR = [
     'button[data-testid="copy-turn-action-button"]',
-    'button[data-testid="good-response-turn-action-button"]',
-    'button[data-testid="bad-response-turn-action-button"]',
     'button[aria-label="Copy"]',
     'button[aria-label="コピー"]',
-    'button[aria-label="Good response"]',
-    'button[aria-label="Bad response"]',
-    'button[aria-label="Regenerate"]',
-    'button[aria-label="再生成する"]',
   ].join(',');
 
   function create(ctx) {
@@ -176,7 +170,6 @@
         splitSpeakChunks,
         extractAutoPreview,
         stableDelayForPreview,
-        canFinalizePreview: textCore.canFinalizePreview,
         reportChunks: ctx.reportChunks,
         markResponseCompleted: ctx.markResponseCompleted,
         isAutoEnabled: () => Boolean(ctx.isEnabled() && settings().enabled),

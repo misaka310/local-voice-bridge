@@ -186,9 +186,13 @@
     const updatedChunks = sameMessage
       ? preserveReadChunkBoundary(previousMessage, chunks, Number.isInteger(next.lastReadIndex) ? next.lastReadIndex : -1)
       : chunks;
+    const incomingCompletionReason = String((report && report.completionReason) || '');
+    const incomingCompletionObservedAt = Number((report && report.completionObservedAt) || 0);
     next.lastAssistantMessage = {
       messageKey,
       chunks: updatedChunks,
+      completionReason: incomingCompletionReason || (sameMessage ? String(previousMessage.completionReason || '') : ''),
+      completionObservedAt: incomingCompletionObservedAt || (sameMessage ? Number(previousMessage.completionObservedAt || 0) : 0),
       capturedAt: Number(options.capturedAt || Date.now()),
     };
 
