@@ -9,9 +9,9 @@
 
 ## Local Voice Bridgeの更新導線
 
-拡張機能ソース更新後の通常導線は、Windows Local Voice小窓に表示される`拡張機能を再読み込み`ボタンです。この既存導線を廃止したり、Chrome / Braveの拡張機能管理画面での手動操作へ置き換えたりしないでください。
+拡張機能ソース`extension/`の更新時は共有`browser-extension-update-delivery`を適用します。エージェントの正式導線は`scripts/reload-extension.ps1`です。ローカル制御経路へ`reload_extension`を送信し、ACK後に拡張機能側の`chrome.runtime.reload()`を実行させ、再接続後の`loadedVersion == expectedVersion`まで確認します。
 
-旧版など小窓から再読み込みできない場合だけ、READMEおよび`extension/INSTALL.md`に記載された手動手順を使用します。
+Windows Local Voice小窓の`拡張機能を再読み込み`ボタンは通常利用者向けの同じ導線として維持します。エージェントは`chrome://extensions`をユーザーの前面へ開いたり、ユーザーへReload操作を依頼したりして完了扱いにしません。旧版や切断で自己再読み込み不能なら、安全なbootstrapまたは制御経路の修復を先に行い、現在環境で不可能な場合だけblockedとして報告します。
 
 ## ブラウザ実機検証
 
