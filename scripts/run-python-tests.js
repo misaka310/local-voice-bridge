@@ -32,6 +32,7 @@ const TEST_MODULES = [
   'tests.test_tray_qt_runtime',
   'tests.test_windows_gui_smoke_script',
   'tests.test_windows_process_identity',
+  'tests.test_extension_reload_script',
 ];
 
 function pythonCandidates() {
@@ -57,6 +58,7 @@ function resolvePython() {
     const probe = spawnSync(command, ['--version'], {
       cwd: ROOT,
       encoding: 'utf8',
+      windowsHide: true,
       shell: false,
       timeout: 10000,
     });
@@ -88,6 +90,7 @@ for (const moduleName of TEST_MODULES) {
   const result = spawnSync(python, ['-m', 'unittest', '-v', moduleName], {
     cwd: ROOT,
     stdio: 'inherit',
+    windowsHide: true,
     shell: false,
     timeout: timeoutMs,
   });
