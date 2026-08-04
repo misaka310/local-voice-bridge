@@ -32,8 +32,18 @@
       .trim();
   }
 
+  function stripInternalControlTokens(text) {
+    return normalizeText(String(text || '').replace(
+      /<\|[A-Za-z][A-Za-z0-9_:+.-]{0,63}\|>/g,
+      ' ',
+    ));
+  }
+
   function isTransientAssistantStatus(text) {
-    const normalized = normalizeText(text).replace(/\s+/g, '');
+    const original = normalizeText(text);
+    const cleaned = stripInternalControlTokens(original);
+    if (original && !cleaned) return true;
+    const normalized = cleaned.replace(/\s+/g, '');
     return /^(?:(?:\d+|個の)?画像を(?:分析|解析)(?:中|しています)|思考中|考え中|Thinking|Analyzing(?:the)?images?)(?:ストリーミングが中断されました。?完全なメッセージを待機しています)?(?:[.…。・]+)?$/i.test(normalized);
   }
 
@@ -68,7 +78,7 @@
       clone.querySelectorAll(REMOVED_CONTENT_SELECTOR).forEach((item) => item.remove());
     }
     removeDecorativeSourceLinks(clone);
-    const raw = normalizeText(clone.innerText || clone.textContent || '');
+    const raw = stripInternalControlTokens(clone.innerText || clone.textContent || '');
     const stripped = textCore && typeof textCore.stripRepeatedUiLabels === 'function'
       ? textCore.stripRepeatedUiLabels(raw)
       : raw;
@@ -111,6 +121,7 @@
     isTransientAssistantStatus,
     normalizeMarkdownLine,
     normalizeText,
+    stripInternalControlTokens,
     normalizedLinkLabel,
     removeDecorativeSourceLinks,
   };

@@ -1,9 +1,10 @@
 'use strict';
 
 (function initContentCompletionMarker(global) {
-  const TITLE_PREFIX = '● ';
+  const LEGACY_TITLE_PREFIX = '● ';
   const SESSION_KEY = 'localVoiceCompletionPending';
   const FAVICON_ID = 'local-voice-completion-favicon';
+  const ORIGINAL_REL_ATTRIBUTE = 'data-local-voice-original-rel';
   const FAVICON_DATA_URL = `data:image/svg+xml,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   )}`;
@@ -15,7 +16,7 @@
 
     function stripPrefix(title) {
       const value = String(title || '');
-      return value.startsWith(TITLE_PREFIX) ? value.slice(TITLE_PREFIX.length) : value;
+      return value.startsWith(LEGACY_TITLE_PREFIX) ? value.slice(LEGACY_TITLE_PREFIX.length) : value;
     }
 
     function getPlainDocumentTitle() {
@@ -41,6 +42,36 @@
       } catch (_error) {}
     }
 
+    function isIconRel(value) {
+      return String(value || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon');
+    }
+
+    function suppressOriginalFavicons() {
+      for (const link of ctx.document.querySelectorAll('link')) {
+        if (link.id === FAVICON_ID) continue;
+        const storedRel = link.getAttribute(ORIGINAL_REL_ATTRIBUTE);
+        const currentRel = link.getAttribute('rel');
+        if (storedRel !== null) {
+          if (isIconRel(currentRel)) link.removeAttribute('rel');
+          continue;
+        }
+        if (!isIconRel(currentRel)) continue;
+        link.setAttribute(ORIGINAL_REL_ATTRIBUTE, currentRel);
+        link.removeAttribute('rel');
+      }
+    }
+
+    function restoreOriginalFavicons() {
+      for (const link of ctx.document.querySelectorAll(`link[${ORIGINAL_REL_ATTRIBUTE}]`)) {
+        const originalRel = link.getAttribute(ORIGINAL_REL_ATTRIBUTE);
+        if (originalRel) link.setAttribute('rel', originalRel);
+        else link.removeAttribute('rel');
+        link.removeAttribute(ORIGINAL_REL_ATTRIBUTE);
+      }
+    }
+
     function ensureFavicon() {
       if (!ctx.document.head) return;
       let favicon = ctx.document.getElementById(FAVICON_ID);
@@ -56,16 +87,16 @@
 
     function sync() {
       const currentTitle = stripPrefix(ctx.document.title);
-      if (currentTitle) baseTitle = currentTitle;
+      if (currentTitle) {
+        baseTitle = currentTitle;
+        if (ctx.document.title !== currentTitle) ctx.document.title = currentTitle;
+      }
       if (!pending) {
-        if (ctx.document.title.startsWith(TITLE_PREFIX) && baseTitle) ctx.document.title = baseTitle;
         ctx.document.getElementById(FAVICON_ID)?.remove();
+        restoreOriginalFavicons();
         return;
       }
-      if (baseTitle) {
-        const markedTitle = `${TITLE_PREFIX}${baseTitle}`;
-        if (ctx.document.title !== markedTitle) ctx.document.title = markedTitle;
-      }
+      suppressOriginalFavicons();
       ensureFavicon();
     }
 
@@ -97,7 +128,13 @@
       if (await isTabActivelyViewed()) setPending(false);
       else sync();
       titleObserver = new ctx.MutationObserver(sync);
-      titleObserver.observe(ctx.document.head, { childList: true, subtree: true, characterData: true });
+      titleObserver.observe(ctx.document.head, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['rel', 'href'],
+      });
     }
 
     function dispose() {

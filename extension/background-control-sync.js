@@ -24,6 +24,7 @@
     const conversationSessionTargets = requireDependency(deps, 'conversationSessionTargets');
     const conversationSessionTargetLocations = requireDependency(deps, 'conversationSessionTargetLocations');
     const tabs = requireDependency(deps, 'tabs');
+    const requestAutoRecheckForRegisteredTabs = requireDependency(deps, 'requestAutoRecheckForRegisteredTabs');
 
     let pollPromise = null;
     let localApiConnected = false;
@@ -58,10 +59,23 @@
       });
     }
 
+    async function pushSettingsToRegisteredTabs(nextSettings) {
+      const message = { type: 'settings-update', payload: { ...nextSettings } };
+      await Promise.all(Array.from(tabs.keys()).map(async (tabId) => {
+        await Promise.race([
+          chrome.tabs.sendMessage(Number(tabId), message).catch(() => null),
+          new Promise((resolve) => setTimeout(resolve, 750)),
+        ]);
+      }));
+    }
+
     async function applyExternalSettings(payload, settingsRevision) {
       const current = await deps.getSettings();
       const plan = settingsCore.planExternalSettings(current, payload);
-      if (plan.changed) await chrome.storage.local.set(plan.next);
+      if (plan.changed) {
+        await pushSettingsToRegisteredTabs(plan.next);
+        await chrome.storage.local.set(plan.next);
+      }
       if (plan.changedReference) {
         await deps.syncDesktopPetSelection(plan.referenceVoice || 'placeholder');
       }
@@ -266,6 +280,7 @@
           ? payload.conversation
           : {};
         deps.setConversationPhase(String(conversation.phase || deps.getConversationPhase() || 'off'));
+        requestAutoRecheckForRegisteredTabs(Boolean(effectiveSettings.enabled));
         for (const item of (Array.isArray(payload.commands) ? payload.commands : [])
           .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))) {
           await handleCommand(item, effectiveSettings, consumerId);

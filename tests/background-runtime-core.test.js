@@ -12,7 +12,13 @@ test('runtime payload serializes tabs sessions and queue without sharing item ob
       url: 'https://chatgpt.com/c/1',
       lastReadIndex: 0,
       lastAutoQueueSignature: 'sig',
-      lastAssistantMessage: { messageKey: 'm1', chunks: ['a'], capturedAt: 1 },
+      lastAssistantMessage: {
+        messageKey: 'm1',
+        chunks: ['a'],
+        completionReason: 'action-control',
+        completionObservedAt: 1,
+        capturedAt: 1,
+      },
     }]]),
     selectedTabId: 1,
     uiOwnerTabId: 1,
@@ -27,6 +33,7 @@ test('runtime payload serializes tabs sessions and queue without sharing item ob
   });
 
   assert.equal(payload.tabs[0].lastAssistantMessage.messageKey, 'm1');
+  assert.equal(payload.tabs[0].lastAssistantMessage.completionReason, 'action-control');
   assert.deepEqual(payload.conversationSessions, [{
     sessionId: 7,
     tabId: 1,
@@ -76,6 +83,8 @@ test('runtime restore normalizes persisted messages and merges conversation sess
         lastAssistantMessage: {
           messageKey: 'm2',
           chunks: [' first ', '', 'second'],
+          completionReason: 'generation-ended-with-action-control',
+          completionObservedAt: 3,
           capturedAt: 4,
         },
       },
@@ -96,6 +105,7 @@ test('runtime restore normalizes persisted messages and merges conversation sess
   });
 
   assert.deepEqual(merged.tabs.get(2).lastAssistantMessage.chunks, ['first', 'second']);
+  assert.equal(merged.tabs.get(2).lastAssistantMessage.completionReason, 'generation-ended-with-action-control');
   assert.equal(merged.conversationSessionTargets.get(8), 2);
   assert.equal(merged.conversationSessionTargets.get(9), 3);
   assert.equal(merged.conversationSessionTargetLocations.get(9), 'https://chatgpt.com/c/3');
@@ -119,4 +129,28 @@ test('runtime restore never requeues persisted current item over active playback
 
   assert.equal(merged.resetPlayback, false);
   assert.deepEqual(merged.queue, []);
+});
+test('runtime restore drops internal control-token-only speech items', () => {
+  const merged = runtimeCore.mergeSnapshot({
+    currentItem: { id: 'thinking-current', text: '<|SpawnThinking|>' },
+    queue: [
+      { id: 'thinking-queued', text: '<|SpawnThinking|>' },
+      { id: 'final-queued', text: '<|SpawnThinking|> 最終回答です。' },
+    ],
+    lastPlayedItem: { id: 'thinking-last', text: '<|SpawnThinking|>' },
+  }, {
+    tabs: new Map(),
+    queue: [],
+    currentItem: null,
+    isPlaying: false,
+    lastPlayedItem: null,
+    seq: 1,
+    conversationSessionTargets: new Map(),
+    conversationSessionTargetLocations: new Map(),
+  });
+
+  assert.deepEqual(merged.queue.map((item) => [item.id, item.text]), [
+    ['final-queued', '最終回答です。'],
+  ]);
+  assert.equal(merged.lastPlayedItem, null);
 });

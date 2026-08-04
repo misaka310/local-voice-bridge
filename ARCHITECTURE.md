@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-このリポジトリは、ChatGPTの新しいassistant返答を検知し、PC上のIrodori v3 direct APIで冒頭プレビューを読み上げるChrome / Brave拡張とWindows常駐アプリです。通信は127.0.0.1のローカルAPIだけを使用します。
+このリポジトリは、ChatGPTの新しいassistant返答の完了を検知し、PC上のIrodori v3 direct APIで冒頭プレビューを一度だけ読み上げるChrome / Brave拡張とWindows常駐アプリです。通信は127.0.0.1のローカルAPIだけを使用します。
 
 ## 役割
 
@@ -23,7 +23,7 @@
 - `extension/content-message-router.js`: content scriptのChrome message振り分け
 - `extension/assistant-source-filter.js`: ChatGPTの出典・citation UIを周辺証拠付きで判定し、本文を含まない最小コンテナだけを除外する境界
 - `extension/assistant-text-extractor.js`: assistant DOMから本文だけを抽出し、コード、操作ボタン、途中状態を除外したうえで出典フィルタへ委譲する境界
-- `extension/auto-speech-controller.js`: 既存返答の基線、新規返答のstreaming / stable / completed、Auto一回送信、更新差分、完了通知をタブ単位で管理
+- `extension/auto-speech-controller.js`: 既存返答の基線、新規返答の生成中・完了候補・完了確定、可逆な完了証拠、Auto一回送信、完了通知をタブ単位で管理
 - `extension/prompt-input-core.js`: 使用可能なChatGPT Composerの選択、ProseMirrorへのネイティブ挿入・削除、送信ボタン範囲、送信前ACK後のクリックを担当
 - `extension/background.js`: background各Controllerの共有状態と依存関係を組み立てる調整層
 - `extension/background-local-api-client.js`: loopback APIへのHTTP要求、音声取得、Ref・ペット・会話状態同期

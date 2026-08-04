@@ -57,14 +57,6 @@
     return Math.max(stableMs + 400, 3200);
   }
 
-  function canFinalizePreview(preview, options = {}) {
-    const text = normalizePart(preview);
-    if (!text) return false;
-    const minChars = Math.max(1, Number(options.minChars || 40));
-    if (text.length >= minChars) return true;
-    return Boolean(options.completionConfirmed);
-  }
-
   function stripRepeatedUiLabels(value) {
     let text = String(value || '');
     text = text.replace(/\b([A-Za-z][A-Za-z0-9._+-]{2,31})(?:\s+\1){2,}\b/gi, ' ');
@@ -90,7 +82,6 @@
   }
 
   return {
-    canFinalizePreview,
     coalesceOrphanLines,
     hasTerminalPunctuation,
     joinSpeechParts,

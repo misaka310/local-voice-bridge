@@ -274,6 +274,8 @@ class ControlStateStoreTests(unittest.TestCase):
                             "lastAssistantMessage": {
                                 "messageKey": "reply-1",
                                 "chunks": ["最初です。", "続きです。"],
+                                "completionReason": "generation-ended-with-action-control",
+                                "completionObservedAt": 9,
                                 "capturedAt": 10,
                             },
                         }
@@ -313,6 +315,11 @@ class ControlStateStoreTests(unittest.TestCase):
             self.assertEqual(saved["queue"][0]["text"], "続きです。")
             reloaded = ControlStateStore(path).browser_runtime_snapshot()
             self.assertEqual(reloaded["tabs"][0]["lastAssistantMessage"]["chunks"], ["最初です。", "続きです。"])
+            self.assertEqual(
+                reloaded["tabs"][0]["lastAssistantMessage"]["completionReason"],
+                "generation-ended-with-action-control",
+            )
+            self.assertEqual(reloaded["tabs"][0]["lastAssistantMessage"]["completionObservedAt"], 9)
             self.assertEqual(reloaded["queue"][0]["referenceVoice"], "asuka")
             self.assertEqual(reloaded["queue"][0]["id"], "q-1700000000000-7")
             self.assertEqual(reloaded["lastComposerFocusedTabId"], 101)

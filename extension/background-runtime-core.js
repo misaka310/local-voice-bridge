@@ -12,6 +12,20 @@
     return item ? { ...item } : null;
   }
 
+  function stripInternalControlTokens(value) {
+    return String(value || '')
+      .replace(/<\|[A-Za-z][A-Za-z0-9_:+.-]{0,63}\|>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function normalizeSpeechItem(item) {
+    const cloned = cloneItem(item);
+    if (!cloned) return null;
+    const text = stripInternalControlTokens(cloned.text);
+    return text ? { ...cloned, text } : null;
+  }
+
   function createPayload(state) {
     const safe = state && typeof state === 'object' ? state : {};
     const tabs = safe.tabs instanceof Map ? safe.tabs : new Map();
@@ -33,6 +47,8 @@
           chunks: Array.isArray(info.lastAssistantMessage.chunks)
             ? info.lastAssistantMessage.chunks.map((chunk) => String(chunk || ''))
             : [],
+          completionReason: String(info.lastAssistantMessage.completionReason || ''),
+          completionObservedAt: Number(info.lastAssistantMessage.completionObservedAt || 0),
           capturedAt: Number(info.lastAssistantMessage.capturedAt || 0),
         } : null,
       })),
@@ -61,6 +77,8 @@
         chunks: Array.isArray(item.lastAssistantMessage.chunks)
           ? item.lastAssistantMessage.chunks.map((chunk) => String(chunk || '').trim()).filter(Boolean)
           : [],
+        completionReason: String(item.lastAssistantMessage.completionReason || ''),
+        completionObservedAt: Number(item.lastAssistantMessage.completionObservedAt || 0),
         capturedAt: Number(item.lastAssistantMessage.capturedAt || 0),
       }
       : null;
@@ -113,7 +131,7 @@
       ...(persistedCurrentItem ? [persistedCurrentItem] : []),
       ...(Array.isArray(raw.queue) ? raw.queue : []),
       ...(Array.isArray(live.queue) ? live.queue : []),
-    ].map(cloneItem).filter((item) => item && String(item.text || '').trim());
+    ].map(normalizeSpeechItem).filter(Boolean);
     const seen = new Set();
     const queue = restoredQueue.filter((item) => {
       const key = queueIdentity(item);
@@ -136,10 +154,18 @@
         || null,
       queue,
       resetPlayback: !hadLivePlayback,
-      lastPlayedItem: cloneItem(live.lastPlayedItem) || cloneItem(raw.lastPlayedItem),
+      lastPlayedItem: normalizeSpeechItem(live.lastPlayedItem)
+        || normalizeSpeechItem(raw.lastPlayedItem),
       seq: Math.max(1, Number(raw.seq || 1), Number(live.seq || 1)),
     };
   }
 
-  return { cloneItem, createPayload, mergeSnapshot, queueIdentity };
+  return {
+    cloneItem,
+    createPayload,
+    mergeSnapshot,
+    normalizeSpeechItem,
+    queueIdentity,
+    stripInternalControlTokens,
+  };
 });

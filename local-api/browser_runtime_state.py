@@ -74,6 +74,8 @@ def normalize_browser_runtime(value: Any, *, now: float | None = None) -> dict[s
                 normalized_message = {
                     "messageKey": message_key,
                     "chunks": chunks,
+                    "completionReason": str(message.get("completionReason") or "")[:128],
+                    "completionObservedAt": float(message.get("completionObservedAt") or 0.0),
                     "capturedAt": float(message.get("capturedAt") or 0.0),
                 }
         tabs.append(

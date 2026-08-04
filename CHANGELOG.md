@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Changed normal Auto from stable streaming-preview playback to completion-gated playback, requiring stable final Copy controls for the same response turn, revoking transient completion candidates when generation resumes, and persisting the completion reason for diagnosis.
+
 - Added GPT Live-style microphone conversation with persisted pre-send submission ownership, fail-closed assistant binding, stable-sentence streaming, local playback, input/Enter/Regen/navigation interruption, and restart invalidation without changing normal Auto, Next, Regen, or Replay recovery.
 - Split TTS generation and playback workers, added `speed`/`balanced`/`bridge` Irodori profiles, Suguha reference-latent reuse, cross-process Windows GPU arbitration with STT priority, and strict CUDA STT without automatic CPU fallback.
 - Added generated-WAV quality gates, privacy-safe structured Live event logs, a 17-item Live verification gate, and real GPU/STT/Suguha performance evidence kept outside the public tree.

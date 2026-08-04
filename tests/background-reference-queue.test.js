@@ -12,6 +12,7 @@ const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
+const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
 const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
@@ -171,6 +172,7 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_SETTINGS_CORE_PATH,
     BACKGROUND_RUNTIME_CORE_PATH,
     BACKGROUND_QUEUE_CORE_PATH,
+    BACKGROUND_AUTO_RECHECK_PATH,
     BACKGROUND_CONTROL_SYNC_PATH,
     BACKGROUND_TAB_REGISTRY_PATH,
     BACKGROUND_CONVERSATION_TARGET_PATH,

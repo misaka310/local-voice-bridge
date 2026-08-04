@@ -33,6 +33,13 @@
         return false;
       }
 
+      if (message.type === 'schedule-auto-recheck') {
+        const delayMs = Number(message.payload && message.payload.delayMs);
+        const scheduled = Boolean(senderTabId && ctx.scheduleAutoRecheck(senderTabId, delayMs));
+        sendResponse({ ok: scheduled, payload: { scheduled } });
+        return false;
+      }
+
       if (message.type === 'report-chunks') {
         if (senderTabId && ctx.tabs.has(senderTabId)) {
           const report = ctx.queueCore.applyAssistantReport(ctx.tabs.get(senderTabId), message, {
