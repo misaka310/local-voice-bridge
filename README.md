@@ -7,6 +7,12 @@ chatgpt.comにローカル音声読み上げと、任意のプッシュ・トゥ
 > **非公式・非提携について**
 > このプロジェクトは独立して開発された非公式ツールであり、OpenAIの公式製品、提携製品、承認製品、スポンサー製品ではありません。ChatGPT、OpenAIおよび関連する名称・商標は各権利者に帰属します。
 
+<p align="center">
+  <img src="docs/media/system-overview.png" alt="Local Voice Bridgeの処理フロー概要" width="100%">
+</p>
+
+ChatGPTの返答検出からローカル音声生成・再生、任意のプッシュ・トゥ・トーク入力までの経路を示しています。
+
 https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 
 再生ボタンから、ChatGPTの新しい返答を自動で読み上げる流れを映像と音声で確認できます。
