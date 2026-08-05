@@ -12,6 +12,7 @@ EXPECTED_MEDIA = {
     "docs/media/demo.mp4": 10_000_000,
     "docs/media/demo.gif": 3_000_000,
     "docs/media/demo-poster.png": 3_000_000,
+    "docs/media/system-overview.png": 3_000_000,
 }
 
 FORBIDDEN_PATH_PARTS = (
@@ -125,15 +126,15 @@ def main() -> int:
     }
     if actual_media != set(EXPECTED_MEDIA):
         errors.append(
-            "docs/media must contain only the public demo files: "
+            "docs/media must contain only the approved public media files: "
             + ", ".join(sorted(EXPECTED_MEDIA))
         )
     for relative, limit in EXPECTED_MEDIA.items():
         path = ROOT / relative
         if not path.is_file():
-            errors.append(f"missing public demo file: {relative}")
+            errors.append(f"missing public media file: {relative}")
         elif path.stat().st_size > limit:
-            errors.append(f"public demo file too large: {relative} ({path.stat().st_size} bytes)")
+            errors.append(f"public media file too large: {relative} ({path.stat().st_size} bytes)")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     if not GITHUB_VIDEO_ATTACHMENT.search(readme):
