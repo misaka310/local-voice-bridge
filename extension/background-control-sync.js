@@ -25,7 +25,7 @@
     const conversationSessionTargetLocations = requireDependency(deps, 'conversationSessionTargetLocations');
     const tabs = requireDependency(deps, 'tabs');
     const requestAutoRecheckForRegisteredTabs = requireDependency(deps, 'requestAutoRecheckForRegisteredTabs');
-
+    const statePublisher = requireDependency(deps, 'statePublisher');
     let pollPromise = null;
     let localApiConnected = false;
     let lastCommandId = 0;
@@ -293,14 +293,21 @@
         }
 
         const state = deps.externalStateSnapshot();
-        await deps.controlPanelRequest(await deps.getSettings(), '/v1/control-panel/state', {
-          method: 'POST',
-          body: state,
+        await statePublisher.publishIfNeeded({
+          connected: localApiConnected,
+          state,
+          publish: async (body) => deps.controlPanelRequest(await deps.getSettings(), '/v1/control-panel/state', {
+            method: 'POST',
+            body,
+          }),
         });
         const recovered = !localApiConnected;
         localApiConnected = true;
         if (recovered) await deps.reconnectOpenChatGptTabs();
-        return state;
+        return {
+          ...state,
+          pollIntervalMs: effectiveSettings.micConversationEnabled ? 50 : 5000,
+        };
       })();
       try {
         return await pollPromise;

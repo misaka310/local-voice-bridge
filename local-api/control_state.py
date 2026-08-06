@@ -41,7 +41,7 @@ class ControlStateStore:
     normalization, browser-state schemas, or ACK/outbox algorithms itself.
     """
 
-    def __init__(self, path: Path, *, stale_after_seconds: float = 3.0) -> None:
+    def __init__(self, path: Path, *, stale_after_seconds: float = 90.0) -> None:
         self.path = Path(path)
         self.stale_after_seconds = max(0.5, float(stale_after_seconds))
         self._lock = threading.RLock()
@@ -73,7 +73,7 @@ class ControlStateStore:
         return self._outbox.next_conversation_event_id
 
     @property
-    def _consumer_acks(self) -> dict[str, dict[str, int]]:
+    def _consumer_acks(self) -> dict[str, dict[str, int | float]]:
         return self._outbox.consumer_acks
 
     def _load(self) -> None:
@@ -97,7 +97,7 @@ class ControlStateStore:
 
     def _persist_locked(self) -> None:
         payload = {
-            "version": 5,
+            "version": 6,
             "savedAt": time.time(),
             "initialized": self._initialized,
             "settingsRevision": self._settings_revision,
@@ -110,6 +110,7 @@ class ControlStateStore:
         try:
             temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             temporary.replace(self.path)
+            self._outbox.mark_persisted()
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -156,13 +157,12 @@ class ControlStateStore:
         replay_existing: bool = False,
     ) -> list[dict[str, Any]]:
         with self._lock:
-            known_consumers = len(self._outbox.consumer_acks)
             items = self._outbox.poll_commands(
                 after_id,
                 consumer_id=consumer_id,
                 replay_existing=replay_existing,
             )
-            if len(self._outbox.consumer_acks) != known_consumers:
+            if self._outbox.dirty:
                 self._persist_locked()
             return items
 
@@ -262,14 +262,14 @@ class ControlStateStore:
         event_cursor = 0 if after_event_id is None else after_event_id
         with self._lock:
             snapshot = self.snapshot(now=now)
-            known_consumers = len(self._outbox.consumer_acks)
             commands, conversation_events = self._outbox.poll(
                 after_command_id=command_cursor,
                 after_event_id=event_cursor,
                 consumer_id=consumer_id,
                 replay_existing=replay_existing,
+                now=now,
             )
-            if len(self._outbox.consumer_acks) != known_consumers:
+            if self._outbox.dirty:
                 self._persist_locked()
             snapshot["commands"] = commands
             snapshot["conversationEvents"] = conversation_events

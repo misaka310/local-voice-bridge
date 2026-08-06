@@ -3,7 +3,7 @@
   "name": "Local Voice Bridge",
   "version": "0.4.2",
   "description": "Unofficial local voice assistance for chatgpt.com, with optional push-to-talk input and local reply playback.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": [
     "http://127.0.0.1:8717/*",
     "http://localhost:8717/*",
@@ -20,7 +20,7 @@
   "content_scripts": [
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["live-browser-core.js", "live-content-controller.js", "prompt-input-core.js", "delivery-id-core.js", "content-text-core.js", "assistant-source-filter.js", "assistant-text-extractor.js", "auto-speech-controller.js", "content-settings.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"],
+      "js": ["live-browser-core.js", "live-content-controller.js", "prompt-input-core.js", "delivery-id-core.js", "content-text-core.js", "assistant-source-filter.js", "assistant-text-extractor.js", "auto-speech-controller.js", "content-settings.js", "content-mutation-filter.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

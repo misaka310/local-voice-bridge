@@ -16,7 +16,8 @@ test('extension exposes a standard right-click options page', () => {
   });
   assert.ok(fs.existsSync(path.join(ROOT, 'extension', manifest.options_ui.page)));
   assert.ok(fs.existsSync(path.join(ROOT, 'extension', 'options.css')));
-  assert.ok(fs.existsSync(path.join(ROOT, 'extension', 'options.js')));
+  const optionsSource = fs.readFileSync(path.join(ROOT, 'extension', 'options.js'), 'utf8');
+  assert.match(optionsSource, /load\(\)\.then\(syncRuntimeSettings\)/);
 });
 
 test('options settings preserve valid values and clamp unsafe input', () => {

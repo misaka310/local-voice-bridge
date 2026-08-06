@@ -2,28 +2,54 @@
 
 (function initContentDomObserver(global) {
   const AUTO_SENT_FLAG = 'localVoiceSent';
-  const RESPONSE_GENERATING_SELECTOR = [
-    '[data-testid="stop-button"]',
-    'button[aria-label="Stop generating"]',
-    'button[aria-label="Stop streaming"]',
-    'button[aria-label="生成を停止"]',
-    'button[aria-label="応答を停止"]',
-    'button[aria-label="ストリーミングを停止"]',
-  ].join(',');
-  const RESPONSE_COMPLETE_SELECTOR = [
-    'button[data-testid="copy-turn-action-button"]',
-    'button[aria-label="Copy"]',
-    'button[aria-label="コピー"]',
-  ].join(',');
+  const MESSAGE_SELECTOR = '[data-message-author-role="user"], [data-message-author-role="assistant"]';
+  const mutationFilter = global.LocalVoiceContentMutationFilter;
+  if (!mutationFilter) throw new Error('content-mutation-filter.js must load before content-dom-observer.js');
+  const { RESPONSE_GENERATING_SELECTOR, RESPONSE_COMPLETE_SELECTOR } = mutationFilter;
 
   function create(ctx) {
     const textCore = global.ContentTextCore;
     const assistantText = global.LocalVoiceAssistantText;
     const autoSpeech = global.LocalVoiceAutoSpeech;
     let autoSpeechController = null;
+    let newConversation = false;
+    const location = ctx.location;
 
     function settings() {
       return ctx.getSettings();
+    }
+
+    function isBlankNewConversation() {
+      if (location.pathname !== '/') return false;
+      return !ctx.document.querySelector(MESSAGE_SELECTOR);
+    }
+
+    function nodeContainsConversationMessage(node) {
+      if (!node) return false;
+      const element = node.nodeType === 1 ? node : node.parentElement || node.parentNode;
+      if (!element || element.nodeType !== 1) return false;
+      if (element.matches?.('[data-message-author-role]')) return true;
+      if (element.closest?.('[data-message-author-role]')) return true;
+      return Boolean(element.querySelector?.('[data-message-author-role]'));
+    }
+
+    function newConversationMutationNeedsRefresh(mutations = []) {
+      if (location.pathname !== '/') return newConversation;
+      if (!newConversation || !mutations.length) return true;
+      return Array.from(mutations).some((mutation) => (
+        nodeContainsConversationMessage(mutation.target)
+        || [...Array.from(mutation.addedNodes || []), ...Array.from(mutation.removedNodes || [])]
+          .some(nodeContainsConversationMessage)
+      ));
+    }
+
+    function updateNewConversationStatus(mutations = []) {
+      if (!newConversationMutationNeedsRefresh(mutations)) return false;
+      const next = isBlankNewConversation();
+      if (next === newConversation) return false;
+      newConversation = next;
+      ctx.setNewConversation(next);
+      return true;
     }
 
     function normalizeText(text) {
@@ -32,6 +58,10 @@
 
     function isResponseGenerating() {
       return Boolean(ctx.document.querySelector(RESPONSE_GENERATING_SELECTOR));
+    }
+
+    function isResponseError() {
+      return mutationFilter.isResponseError(ctx.document, getAssistantNodes());
     }
 
     function responseTurnForNode(node) {
@@ -197,8 +227,25 @@
       markExistingMessagesAsSeen: () => ensureController().markExistingMessagesAsSeen(),
       rebaseline: () => ensureController().rebaseline(),
       reportLatestSnapshot: () => ensureController().reportLatestSnapshot(),
-      inspectLatestAssistant: () => ensureController().inspectLatestAssistant(),
-      scheduleInspect: (mutations = []) => ensureController().scheduleInspect(mutations),
+      inspectLatestAssistant: () => {
+        updateNewConversationStatus();
+        if (isResponseGenerating()) ctx.markResponseGenerating();
+        else if (isResponseError()) {
+          ctx.markResponseError();
+          return false;
+        }
+        return ensureController().inspectLatestAssistant();
+      },
+      scheduleInspect: (mutations = []) => {
+        updateNewConversationStatus(mutations);
+        if (!mutationFilter.isRelevantMutationBatch(mutations)) return false;
+        if (isResponseGenerating()) ctx.markResponseGenerating();
+        else if (isResponseError()) {
+          ctx.markResponseError();
+          return false;
+        }
+        return ensureController().scheduleInspect(mutations);
+      },
     };
   }
 

@@ -22,14 +22,14 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 ## 主な機能
 
 - Autoをオンにした後の新しいChatGPT返答だけを、完了確認後にローカル音声で読み上げ
+- 空の新規会話、回答生成中、完了未確認、読み上げ処理中、ChatGPTのテキスト回答生成エラーを静的faviconで区別
 - 開いている複数タブの返答を1つの共通キューで管理し、`Next`・`Replay`・`Regen`で操作
-- 返答完了をタブアイコンとタイトルで通知し、Chrome外のWindows小窓へ日常操作を集約
 - API、生成音声、任意の参照音声を同じPC内で管理し、通常利用ではターミナルを表示しない
 - 任意のマイク会話モードでは、キーを押している間だけ録音し、ローカルfaster-whisperでChatGPT入力欄へ送信
 - 対応するYouTube Dictation Pause Controlと連携し、録音中だけYouTubeを停止・再開
 - 実モデルやChatGPTログイン不要のデモとCIで、拡張機能・キュー・再生境界を確認可能
 
-細かなキュー制御、入力先固定、キャンセル猶予、割り込み条件、デスクトップペットの操作は[操作と検証](docs/operation.md)にまとめています。
+細かなキュー制御、入力先固定、キャンセル猶予、割り込み条件、デスクトップペットの操作は[操作と検証](docs/operation.md)にまとめています。faviconの優先順位と30タブ向けの低負荷設計は[タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)を参照してください。
 
 ## GPU不要の2分デモ
 
@@ -111,6 +111,7 @@ npm run check:public
 - [初回セットアップ](docs/setup.md)
 - [起動とヘルス確認](docs/startup.md)
 - [操作とテスト](docs/operation.md)
+- [タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)
 - [動作環境](docs/hardware.md)
 - [困ったとき](docs/troubleshooting.md)
 - [参照音声](docs/reference-audio.md)

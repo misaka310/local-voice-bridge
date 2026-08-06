@@ -19,9 +19,11 @@ Generated audio is stored under `local-api/runtime/audio/` and may remain there 
 
 `extension/manifest.json` requests:
 
-- `storage`: save extension settings in the browser profile.
-- Page access to `https://chatgpt.com/*` and `https://chat.openai.com/*`: detect the response selected for reading and show the Local Voice panel.
-- Host access to `http://127.0.0.1:8717/*` and `http://localhost:8717/*`: call the local health, speech, reference-voice, and generated-audio endpoints.
+- `storage`: save extension settings and recover browser-side playback state after a Manifest V3 service-worker restart.
+- `scripting`: restore the content scripts in already-open ChatGPT tabs when the service worker or local API reconnects.
+- `alarms`: wake the Manifest V3 service worker at a low-frequency recovery interval.
+- Page access to `https://chatgpt.com/*` and `https://chat.openai.com/*`: detect assistant responses selected for reading, update tab status, and deliver an approved local transcript to the ChatGPT composer.
+- Host access to `http://127.0.0.1:8717/*` and `http://localhost:8717/*`: call the local health, speech, control-panel, reference-voice, and generated-audio endpoints.
 
 No cloud TTS endpoint is configured by this project.
 

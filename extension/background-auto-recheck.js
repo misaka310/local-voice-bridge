@@ -12,8 +12,8 @@
     const setTimer = dependencies.setTimeout || globalThis.setTimeout.bind(globalThis);
     const clearTimer = dependencies.clearTimeout || globalThis.clearTimeout.bind(globalThis);
     const recoverySweepIntervalMs = Math.max(
-      10000,
-      Number(dependencies.recoverySweepIntervalMs || 20000),
+      20000,
+      Number(dependencies.recoverySweepIntervalMs || 60000),
     );
     const timers = new Map();
     let lastHeartbeatAt = Number.NEGATIVE_INFINITY;

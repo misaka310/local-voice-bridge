@@ -13,8 +13,10 @@ const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-s
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
+const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
+const BACKGROUND_TAB_RECONNECT_PATH = path.join(ROOT, 'extension', 'background-tab-reconnect.js');
 const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
 const BACKGROUND_LOCAL_API_CLIENT_PATH = path.join(ROOT, 'extension', 'background-local-api-client.js');
 const BACKGROUND_RUNTIME_STORE_PATH = path.join(ROOT, 'extension', 'background-runtime-store.js');
@@ -287,8 +289,10 @@ function createHarness({
       BACKGROUND_RUNTIME_CORE_PATH,
       BACKGROUND_QUEUE_CORE_PATH,
       BACKGROUND_AUTO_RECHECK_PATH,
+      BACKGROUND_STATE_PUBLISHER_PATH,
       BACKGROUND_CONTROL_SYNC_PATH,
       BACKGROUND_TAB_REGISTRY_PATH,
+      BACKGROUND_TAB_RECONNECT_PATH,
       BACKGROUND_CONVERSATION_TARGET_PATH,
       BACKGROUND_LOCAL_API_CLIENT_PATH,
       BACKGROUND_RUNTIME_STORE_PATH,
@@ -422,7 +426,7 @@ test('missing receivers are injected into already-open ChatGPT tabs before recon
   await waitFor(() => harness.injectedScripts.length === 1);
   assert.deepEqual(JSON.parse(JSON.stringify(harness.injectedScripts[0])), {
     target: { tabId: 303 },
-    files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content-settings.js', 'content-dom-observer.js', 'content-completion-marker.js', 'content-conversation-bridge.js', 'content-audio-player.js', 'content-message-router.js', 'content.js'],
+    files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content-settings.js', 'content-mutation-filter.js', 'content-dom-observer.js', 'content-completion-marker.js', 'content-conversation-bridge.js', 'content-audio-player.js', 'content-message-router.js', 'content.js'],
   });
   await waitFor(() => harness.sentMessages.filter((entry) => entry.tabId === 303 && entry.message.type === 'bridge-reconnect').length >= 2);
 });
@@ -641,6 +645,25 @@ test('control polling uses one recovery sweep instead of repeated all-tab rechec
       .sort((a, b) => a - b),
     [101, 202],
   );
+});
+
+test('rapid control polls do not repost an unchanged browser state', async () => {
+  const harness = createHarness();
+  await harness.ready();
+  harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+
+  const first = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  const afterFirst = harness.statePosts.length;
+  const second = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.ok(afterFirst >= 1);
+  assert.equal(harness.statePosts.length, afterFirst);
+
+  harness.send({ type: 'register-tab', title: 'Tab B' }, 202, 'Tab B');
+  await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(harness.statePosts.length, afterFirst + 1);
 });
 
 test('external panel poll applies settings, executes each command once, and posts global state', async () => {

@@ -38,15 +38,7 @@ if ($null -eq $extension -or $extension.connected -ne $true) {
 if ($extension.supportsExtensionReload -ne $true) {
   throw 'The loaded extension does not support agent-operated reload.'
 }
-if ($extension.updateRequired -ne $true) {
-  [ordered]@{
-    ok = $true
-    result = 'already_current'
-    loadedVersion = [string]$extension.loadedVersion
-    expectedVersion = [string]$extension.expectedVersion
-  } | ConvertTo-Json -Depth 3
-  exit 0
-}
+$sameVersionRefresh = $extension.updateRequired -ne $true
 
 $baselineUpdatedAt = [double]($extension.updatedAt -as [double])
 $expectedVersion = [string]$extension.expectedVersion
@@ -71,6 +63,7 @@ do {
     [ordered]@{
       ok = $true
       result = 'reloaded'
+      sameVersionRefresh = [bool]$sameVersionRefresh
       commandId = $command.commandId
       loadedVersion = [string]$current.loadedVersion
       expectedVersion = $expectedVersion

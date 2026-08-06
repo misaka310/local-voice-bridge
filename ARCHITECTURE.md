@@ -10,14 +10,14 @@
 - `local-api/control_state.py`: 設定、ブラウザ状態、配信outboxを組み合わせて保存する薄い調整層
 - `local-api/state_normalization.py`: 設定・拡張状態・マイク状態の入力境界と既定値
 - `local-api/browser_runtime_state.py`: タブ・最新返答・キュー・録音開始時送信先の永続スキーマ
-- `local-api/durable_outbox.py`: コマンドと文字起こしイベントの非破壊poll、consumer別ACK、再配信、容量制限
+- `local-api/durable_outbox.py`: コマンドと文字起こしイベントの非破壊poll、consumer別ACK、再配信、容量制限、consumerの7日失効・32件上限・旧形式移行
 - `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
 - `local-api/runtime_readiness.py`: process、依存関係、拡張機能、タブ、モデル状態を分けたReady判定
 - `local-api/desktop_pet.py`: Windowsデスクトップ上のペット1体の表示、左ドラッグ移動、ダブルクリック通知を担当
 - `extension/content.js`: 各ChatGPTタブの専用Controllerを生成し、起動・停止とページイベントだけを接続する調整層
 - `extension/content-settings.js`: content側設定の既定値、移行、正規化
 - `extension/content-dom-observer.js`: assistant DOM監視、生成中・完了判定、Auto controllerへの通知
-- `extension/content-completion-marker.js`: タイトル・faviconの完了マーカー
+- `extension/content-completion-marker.js`: 生成中・完了未確認・再生中・エラー停止を示す静的favicon状態機械
 - `extension/content-conversation-bridge.js`: Composer状態、文字起こし配送、送信・取消、Live所有権の接続
 - `extension/content-audio-player.js`: ブラウザ側音声再生、Object URL、再生開始・完了通知
 - `extension/content-message-router.js`: content scriptのChrome message振り分け
@@ -30,7 +30,7 @@
 - `extension/background-runtime-store.js`: Service Worker起動時の復元、永続化予約、API復旧時の再水和
 - `extension/background-tab-registry.js`: ChatGPTタブ登録、所有タブ、選択タブ、reload・close処理
 - `extension/background-conversation-target.js`: 録音開始時送信先の選択・固定・文字起こし配送
-- `extension/background-playback-queue.js`: キュー実行、生成・再生、watchdog、Stop / Next / Regen / Replay
+- `extension/background-playback-queue.js`: 共通ローカル再生、回答元タブへの状態通知、watchdog、Stop / Next / Regen / Replay
 - `extension/background-message-router.js`: runtime messageの検証と専用Controllerへの振り分け
 - `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
 - `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
@@ -89,7 +89,7 @@ POST /v1/control-panel/state
 3. 外部小窓で`Auto`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
 4. その後で各タブへ新しく表示されたassistant返答をAuto状態機械が検知・安定判定します。
 5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、`background-playback-queue.js`が共通キューへ追加します。
-6. `background-playback-queue.js`が`background-local-api-client.js`を使って音声生成・再生を実行し、共通キューの順番で1件ずつ読み上げます。
+6. `background-playback-queue.js`が`background-local-api-client.js`で音声を生成・ローカル再生し、回答元`tabId`には開始・完了・停止・エラーの状態だけを通知します。
 
 Autoの対象は、最後に触った1タブだけではありません。開いている全ChatGPTタブです。`思考中`、`考え中`、`Thinking`、`画像を分析しています`だけの途中状態と、Autoをオンにする前から表示されていた返答は読みません。
 
@@ -103,10 +103,15 @@ Autoの対象は、最後に触った1タブだけではありません。開い
   -> POST http://127.0.0.1:8717/v1/speak { playLocal: true }
   -> voice_runtime.py の生成ワーカーで生成
   -> 独立した再生ワーカーがPCの音声デバイスで再生
+  -> backgroundがitem.tabIdへ状態だけを通知
   -> 次のキュー項目へ進む
 ```
 
-`uiOwnerTabId`と`selectedTabId`は手動操作の対象返答を決める内部値です。音声再生先ではありません。Autoの検出対象も制限しません。タブを閉じても生成・再生はローカルワーカー上で継続し、APIまたはService Workerの再起動後は永続状態からタブ・最新返答・待機キューを復元します。
+音声はWindows側の共通再生ワーカーから出力し、回答元`tabId`にはfavicon更新用の状態通知だけを送ります。回答元タブが閉じられてもローカル再生は継続します。`uiOwnerTabId`と`selectedTabId`は手動操作の対象返答を決め、Autoの検出対象は制限しません。APIまたはService Workerの再起動後は永続状態からタブ・最新返答・待機キューを復元します。
+
+### 30タブ向け負荷境界
+
+通常検知はDOM・タブイベント駆動です。各タブ5秒heartbeatは使わず、MV3休止対策は全体で60秒に1回のChrome Alarm、サーバー側の接続有効期間は90秒とします。Service Worker起動時の制御同期は全タブ再接続の完了を待たずに開始し、各タブの再接続は2.5秒で打ち切るため、無応答タブ1件で全体接続を止めません。生成中タブだけ30秒の保険確認、全タブ回復sweepは既定60秒・下限20秒、完了候補の短い再確認は対象タブ1個だけに限定します。faviconは静的SVGで、定期描画しません。数値と回帰条件は[タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)に固定します。
 
 ## マイクLive経路
 

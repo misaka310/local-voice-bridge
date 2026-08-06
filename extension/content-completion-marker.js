@@ -2,15 +2,65 @@
 
 (function initContentCompletionMarker(global) {
   const LEGACY_TITLE_PREFIX = '● ';
-  const SESSION_KEY = 'localVoiceCompletionPending';
+  const LEGACY_SESSION_KEY = 'localVoiceCompletionPending';
+  const SESSION_KEY = 'localVoiceTerminalStatus';
   const FAVICON_ID = 'local-voice-completion-favicon';
   const ORIGINAL_REL_ATTRIBUTE = 'data-local-voice-original-rel';
-  const FAVICON_DATA_URL = `data:image/svg+xml,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  )}`;
+  const STATUS_SVG = Object.freeze({
+    new: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0891b2"/><path d="M16 7v18M7 16h18" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>',
+    generating: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#2563eb"/><circle cx="9" cy="16" r="2.2" fill="#fff"/><circle cx="16" cy="16" r="2.2" fill="#fff"/><circle cx="23" cy="16" r="2.2" fill="#fff"/></svg>',
+    complete: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    playing: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#7c3aed"/><path d="M7 13h5l6-5v16l-6-5H7z" fill="#fff"/><path d="M21 12c2 2 2 6 0 8M24 9c4 4 4 10 0 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    error: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#dc2626"/><path d="M16 8v11" stroke="#fff" stroke-width="4" stroke-linecap="round"/><circle cx="16" cy="24" r="2.2" fill="#fff"/></svg>',
+  });
+  const FAVICON_DATA_URLS = Object.freeze(Object.fromEntries(
+    Object.entries(STATUS_SVG).map(([status, svg]) => [status, `data:image/svg+xml,${encodeURIComponent(svg)}`]),
+  ));
+
+  function elementForNode(node) {
+    if (!node) return null;
+    if (node.nodeType === 1) return node;
+    const parent = node.parentElement || node.parentNode;
+    return parent && parent.nodeType === 1 ? parent : null;
+  }
+
+  function isRelevantFaviconNode(node) {
+    const element = elementForNode(node);
+    if (!element) return false;
+    const links = [];
+    if (String(element.tagName || '').toLowerCase() === 'link') links.push(element);
+    if (typeof element.querySelectorAll === 'function') {
+      try {
+        links.push(...element.querySelectorAll('link'));
+      } catch (_error) {}
+    }
+    return links.some((link) => (
+      link.id === FAVICON_ID
+      || link.hasAttribute?.(ORIGINAL_REL_ATTRIBUTE)
+      || String(link.getAttribute?.('rel') || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon')
+    ));
+  }
+
+  function headMutationNeedsSync(mutations = []) {
+    const batch = Array.from(mutations || []);
+    if (!batch.length) return true;
+    return batch.some((mutation) => {
+      if (mutation.type === 'attributes') return isRelevantFaviconNode(mutation.target);
+      if (mutation.type !== 'childList') return false;
+      return [
+        ...Array.from(mutation.addedNodes || []),
+        ...Array.from(mutation.removedNodes || []),
+      ].some(isRelevantFaviconNode);
+    });
+  }
 
   function create(ctx) {
-    let pending = false;
+    let terminalStatus = null;
+    let newConversation = false;
+    let generating = false;
+    let playing = false;
     let baseTitle = '';
     let titleObserver = null;
 
@@ -21,6 +71,15 @@
 
     function getPlainDocumentTitle() {
       return stripPrefix(ctx.document.title) || baseTitle || '';
+    }
+
+    function displayedStatus() {
+      if (playing) return 'playing';
+      if (terminalStatus === 'error') return 'error';
+      if (generating) return 'generating';
+      if (terminalStatus) return terminalStatus;
+      if (newConversation) return 'new';
+      return 'idle';
     }
 
     async function isTabActivelyViewed() {
@@ -35,9 +94,10 @@
       }
     }
 
-    function persist() {
+    function persistTerminalStatus() {
       try {
-        if (pending) ctx.sessionStorage.setItem(SESSION_KEY, '1');
+        ctx.sessionStorage.removeItem(LEGACY_SESSION_KEY);
+        if (terminalStatus) ctx.sessionStorage.setItem(SESSION_KEY, terminalStatus);
         else ctx.sessionStorage.removeItem(SESSION_KEY);
       } catch (_error) {}
     }
@@ -72,16 +132,19 @@
       }
     }
 
-    function ensureFavicon() {
-      if (!ctx.document.head) return;
+    function ensureFavicon(status) {
+      if (!ctx.document.head || !FAVICON_DATA_URLS[status]) return;
       let favicon = ctx.document.getElementById(FAVICON_ID);
       if (!favicon) {
         favicon = ctx.document.createElement('link');
         favicon.id = FAVICON_ID;
         favicon.rel = 'icon';
         favicon.type = 'image/svg+xml';
-        favicon.href = FAVICON_DATA_URL;
       }
+      if (favicon.getAttribute('data-local-voice-status') !== status) {
+        favicon.setAttribute('data-local-voice-status', status);
+      }
+      if (favicon.href !== FAVICON_DATA_URLS[status]) favicon.href = FAVICON_DATA_URLS[status];
       if (ctx.document.head.lastElementChild !== favicon) ctx.document.head.appendChild(favicon);
     }
 
@@ -91,47 +154,92 @@
         baseTitle = currentTitle;
         if (ctx.document.title !== currentTitle) ctx.document.title = currentTitle;
       }
-      if (!pending) {
+      const status = displayedStatus();
+      if (status === 'idle') {
         ctx.document.getElementById(FAVICON_ID)?.remove();
         restoreOriginalFavicons();
         return;
       }
       suppressOriginalFavicons();
-      ensureFavicon();
+      ensureFavicon(status);
     }
 
-    function setPending(nextPending) {
-      pending = Boolean(nextPending);
-      persist();
+    function setTerminalStatus(status) {
+      terminalStatus = status === 'complete' || status === 'error' ? status : null;
+      persistTerminalStatus();
       sync();
     }
 
-    function clear() {
-      if (!pending && !ctx.document.getElementById(FAVICON_ID)) return;
-      setPending(false);
+    function setNewConversation(value) {
+      const next = Boolean(value);
+      if (newConversation === next) return;
+      newConversation = next;
+      sync();
+    }
+
+    function acknowledge() {
+      if (!terminalStatus && !ctx.document.getElementById(FAVICON_ID)) return;
+      setTerminalStatus(null);
+    }
+
+    function markResponseGenerating() {
+      if (generating) return;
+      generating = true;
+      setTerminalStatus(null);
     }
 
     function markResponseCompleted() {
-      setPending(true);
+      generating = false;
+      setTerminalStatus('complete');
       void isTabActivelyViewed().then((active) => {
-        if (active) clear();
+        if (active) acknowledge();
       });
+    }
+
+    function markResponseError() {
+      generating = false;
+      setTerminalStatus('error');
+    }
+
+    function markPlaybackStarted() {
+      playing = true;
+      sync();
+    }
+
+    function markPlaybackCompleted() {
+      playing = false;
+      sync();
+    }
+
+    function markPlaybackError() {
+      playing = false;
+      sync();
+    }
+
+    function markPlaybackStopped() {
+      playing = false;
+      sync();
     }
 
     async function initialize() {
       baseTitle = stripPrefix(ctx.document.title);
       try {
-        pending = ctx.sessionStorage.getItem(SESSION_KEY) === '1';
+        const stored = String(ctx.sessionStorage.getItem(SESSION_KEY) || '');
+        terminalStatus = stored === 'complete' || stored === 'error'
+          ? stored
+          : ctx.sessionStorage.getItem(LEGACY_SESSION_KEY) === '1' ? 'complete' : null;
       } catch (_error) {
-        pending = false;
+        terminalStatus = null;
       }
-      if (await isTabActivelyViewed()) setPending(false);
+      persistTerminalStatus();
+      if (await isTabActivelyViewed()) setTerminalStatus(null);
       else sync();
-      titleObserver = new ctx.MutationObserver(sync);
+      titleObserver = new ctx.MutationObserver((mutations) => {
+        if (headMutationNeedsSync(mutations)) sync();
+      });
       titleObserver.observe(ctx.document.head, {
         childList: true,
         subtree: true,
-        characterData: true,
         attributes: true,
         attributeFilter: ['rel', 'href'],
       });
@@ -145,13 +253,22 @@
     return {
       getPlainDocumentTitle,
       isTabActivelyViewed,
+      displayedStatus,
       sync,
-      clear,
+      setNewConversation,
+      clear: acknowledge,
+      acknowledge,
+      markResponseGenerating,
       markResponseCompleted,
+      markResponseError,
+      markPlaybackStarted,
+      markPlaybackCompleted,
+      markPlaybackError,
+      markPlaybackStopped,
       initialize,
       dispose,
     };
   }
 
-  global.LocalVoiceCompletionMarker = Object.freeze({ create });
+  global.LocalVoiceCompletionMarker = Object.freeze({ create, headMutationNeedsSync });
 })(globalThis);

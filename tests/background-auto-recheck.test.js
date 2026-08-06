@@ -17,7 +17,7 @@ function loadModule() {
   return context.BackgroundAutoRecheck;
 }
 
-test('recovery heartbeat avoids sub-second all-tab polling', async () => {
+test('recovery heartbeat scans 30 tabs at most once per minute', async () => {
   let now = 1000;
   const sent = [];
   const tabs = new Map(Array.from({ length: 30 }, (_item, index) => [100 + index, {}]));
@@ -35,11 +35,9 @@ test('recovery heartbeat avoids sub-second all-tab polling', async () => {
   });
 
   assert.equal(api.heartbeat(true), true);
-  for (let index = 0; index < 26; index += 1) {
-    now += 750;
-    assert.equal(api.heartbeat(true), false);
-  }
-  now += 500;
+  now += 59_999;
+  assert.equal(api.heartbeat(true), false);
+  now += 1;
   assert.equal(api.heartbeat(true), true);
   await Promise.resolve();
 
@@ -48,7 +46,7 @@ test('recovery heartbeat avoids sub-second all-tab polling', async () => {
   assert.deepEqual(sent.slice(30).map((entry) => entry.tabId), Array.from(tabs.keys()));
 });
 
-test('recovery sweep cannot be configured below ten seconds', async () => {
+test('recovery sweep cannot be configured below twenty seconds', async () => {
   let now = 0;
   const sent = [];
   const api = loadModule().create({
@@ -66,9 +64,9 @@ test('recovery sweep cannot be configured below ten seconds', async () => {
   });
 
   assert.equal(api.heartbeat(true), true);
-  now = 9999;
+  now = 19_999;
   assert.equal(api.heartbeat(true), false);
-  now = 10000;
+  now = 20_000;
   assert.equal(api.heartbeat(true), true);
   await Promise.resolve();
   assert.deepEqual(sent, [101, 101]);

@@ -9,6 +9,7 @@ const http = require('http');
 const host = '127.0.0.1';
 const port = Number(process.env.MOCK_VOICE_PORT || 8717);
 const requiredTestToken = String(process.env.MOCK_VOICE_TOKEN || '');
+const localPlaybackDelayMs = Math.max(0, Number(process.env.MOCK_LOCAL_PLAYBACK_DELAY_MS || 0));
 const events = [];
 const referenceVoices = [{ id: '', label: 'none' }, { id: 'sample', label: 'sample' }];
 let control;
@@ -102,6 +103,11 @@ function json(res, status, value) {
     'Cache-Control': 'no-store',
   });
   res.end(body);
+}
+
+function localPlaybackJson(res, value) {
+  if (localPlaybackDelayMs <= 0) return json(res, 200, value);
+  setTimeout(() => json(res, 200, value), localPlaybackDelayMs);
 }
 
 function readJson(req, res, callback) {
@@ -521,7 +527,7 @@ const server = http.createServer((req, res) => {
     return readJson(req, res, (body) => {
       const referenceVoice = String(body.voiceId || body.referenceVoice || '').trim();
       record('POST', url.pathname, body);
-      return json(res, 200, {
+      const response = {
         ok: true,
         engine: 'mock',
         runtime: 'mock',
@@ -534,7 +540,8 @@ const server = http.createServer((req, res) => {
         playedLocally: Boolean(body.playLocal),
         playbackCompleted: Boolean(body.playLocal),
         stopped: false,
-      });
+      };
+      return body.playLocal ? localPlaybackJson(res, response) : json(res, 200, response);
     });
   }
 

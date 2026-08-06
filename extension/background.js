@@ -278,50 +278,15 @@ const {
 } = playbackController;
 const liveClient = globalThis.BackgroundLiveClient.create({ fetch, getSettings, buildUrl: controlPanelUrl });
 
-async function reconnectChatGptTab(tab) {
-  const tabId = Number(tab && tab.id);
-  if (!Number.isInteger(tabId) || tabId <= 0) return false;
-  if (reconnectingTabs.has(tabId)) return reconnectingTabs.get(tabId);
-  const attempt = (async () => {
-    try {
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
-      return Boolean(response && response.ok === true);
-    } catch (_error) {}
-    if (!chrome.scripting || typeof chrome.scripting.executeScript !== 'function') return false;
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['live-browser-core.js', 'live-content-controller.js', 'prompt-input-core.js', 'delivery-id-core.js', 'content-text-core.js', 'assistant-source-filter.js', 'assistant-text-extractor.js', 'auto-speech-controller.js', 'content-settings.js', 'content-dom-observer.js', 'content-completion-marker.js', 'content-conversation-bridge.js', 'content-audio-player.js', 'content-message-router.js', 'content.js'],
-      });
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'bridge-reconnect' });
-      return Boolean(response && response.ok === true);
-    } catch (_error) {
-      return false;
-    }
-  })();
-  reconnectingTabs.set(tabId, attempt);
-  try {
-    return await attempt;
-  } finally {
-    reconnectingTabs.delete(tabId);
-  }
-}
-
-async function reconnectOpenChatGptTabs() {
-  let openTabs = [];
-  try {
-    openTabs = await chrome.tabs.query({ url: CHATGPT_TAB_PATTERNS });
-  } catch (_error) {
-    return;
-  }
-  const openTabIds = new Set(openTabs.map((tab) => Number(tab && tab.id)).filter((id) => Number.isInteger(id) && id > 0));
-  for (const tabId of Array.from(tabs.keys())) {
-    if (!openTabIds.has(tabId)) tabs.delete(tabId);
-  }
-  ensureOwner();
-  await Promise.all(openTabs.map((tab) => reconnectChatGptTab(tab)));
-  broadcastState();
-}
+const tabReconnect = globalThis.BackgroundTabReconnect.create({
+  chrome,
+  tabs,
+  reconnectingTabs,
+  tabPatterns: CHATGPT_TAB_PATTERNS,
+  ensureOwner,
+  broadcastState,
+});
+const reconnectOpenChatGptTabs = tabReconnect.reconnectOpenTabs;
 
 function externalStateSnapshot() {
   const currentText = String(currentItem?.text || lastPlayedItem?.text || '');
@@ -343,6 +308,7 @@ const externalControlSync = globalThis.BackgroundControlSync.create({
   chrome,
   crypto,
   settingsCore,
+  statePublisher: globalThis.BackgroundStatePublisher.create(),
   consumerIdStorageKey: BRIDGE_CONSUMER_ID_KEY,
   tabs,
   conversationSessionTargets,
@@ -383,11 +349,10 @@ function scheduleExternalControlPoll(delayMs = 0) {
   const delay = Math.max(0, Math.min(5000, Number(delayMs) || 0));
   externalControlPollTimer = setTimeout(async () => {
     externalControlPollTimer = null;
-    let nextDelay = 750;
+    let nextDelay = 5000;
     try {
-      await syncExternalControlPanel();
-      const current = await getSettings();
-      nextDelay = current.micConversationEnabled ? 50 : 750;
+      const synchronized = await syncExternalControlPanel();
+      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 50 ? 50 : 5000;
     } catch (_error) {}
     scheduleExternalControlPoll(nextDelay);
   }, delay);
@@ -415,12 +380,10 @@ async function initializeBackgroundRuntime() {
 chrome.runtime.onInstalled.addListener(() => {
   void initializeBackgroundRuntime();
 });
-chrome.runtime.onStartup.addListener(() => {
-  void initializeBackgroundRuntime();
-});
-void initializeBackgroundRuntime().finally(() => {
-  if (chrome.runtime && chrome.runtime.id) scheduleExternalControlPoll(0);
-});
+chrome.runtime.onStartup.addListener(() => { void initializeBackgroundRuntime(); });
+globalThis.BackgroundControlHeartbeat?.install(chrome, () => scheduleExternalControlPoll(0));
+if (chrome.runtime && chrome.runtime.id) scheduleExternalControlPoll(0);
+void initializeBackgroundRuntime().catch(() => {});
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearAutoRecheck(tabId);
   removeTab(tabId, 'Playback tab closed; skipped');

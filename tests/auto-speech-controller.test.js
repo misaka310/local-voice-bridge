@@ -30,13 +30,17 @@ function fakeClock() {
     }
     current = target;
   }
-  return { now: () => current, setTimeout, clearTimeout, advance };
+  function pendingDelays() {
+    return Array.from(timers.values()).map((timer) => timer.at - current).sort((a, b) => a - b);
+  }
+  return { now: () => current, setTimeout, clearTimeout, advance, pendingDelays };
 }
 
 function createHarness() {
   const clock = fakeClock();
   const nodes = [];
   const reports = [];
+  const requestRechecks = [];
   let autoEnabled = true;
   let generating = false;
   let completionMarks = 0;
@@ -53,6 +57,7 @@ function createHarness() {
     stableDelayForPreview: () => 100,
     reportChunks: (entry, isAuto) => { reports.push({ entry, isAuto }); },
     markResponseCompleted: () => { completionMarks += 1; },
+    requestRecheck: (delayMs) => { requestRechecks.push(delayMs); },
     isAutoEnabled: () => autoEnabled,
     isGenerationControlNode: (node) => Boolean(node && node.generationControl),
     now: clock.now,
@@ -60,12 +65,14 @@ function createHarness() {
     clearTimeout: clock.clearTimeout,
     inspectDelayMs: 20,
     completionEvidenceStableMs: 100,
+    generationRecheckMs: 30000,
   });
   return {
     clock,
     controller,
     nodes,
     reports,
+    requestRechecks,
     setAutoEnabled: (value) => { autoEnabled = value; },
     setGenerating: (value) => { generating = value; },
     completionMarks: () => completionMarks,
@@ -213,6 +220,20 @@ test('transient completion evidence for a short prefix is revoked when generatio
   harness.clock.advance(200);
   assert.equal(harness.reports.length, 1);
   assert.equal(harness.reports[0].entry.autoPreview, node.text);
+});
+
+test('long generation uses one 30-second tab-local fallback without background polling', () => {
+  const harness = createHarness();
+  const node = { key: 'long-running', text: '長時間の回答を生成しています。', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+
+  harness.controller.processNode(node);
+
+  assert.deepEqual(harness.clock.pendingDelays(), [30000]);
+  assert.deepEqual(harness.requestRechecks, []);
+  harness.clock.advance(29999);
+  assert.equal(harness.reports.length, 0);
 });
 
 test('mutation scheduling collapses bursts and inspects immediately when generation ends', () => {

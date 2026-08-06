@@ -32,7 +32,8 @@
     const setTimer = environment.setTimeout || globalThis.setTimeout.bind(globalThis);
     const clearTimer = environment.clearTimeout || globalThis.clearTimeout.bind(globalThis);
     const sentFlag = String(environment.sentFlag || 'localVoiceSent');
-    const inspectDelayMs = Math.max(0, Number(environment.inspectDelayMs || 200));
+    const inspectDelayMs = Math.max(0, Number(environment.inspectDelayMs || 1000));
+    const generationRecheckMs = Math.max(5000, Number(environment.generationRecheckMs || 30000));
     const completionEvidenceStableMs = Math.max(
       100,
       Number(environment.completionEvidenceStableMs || 1200),
@@ -161,6 +162,7 @@
     }
 
     function pendingDelay(preview, item) {
+      if (isResponseGenerating()) return generationRecheckMs;
       const timestamp = now();
       const stableRemaining = stableDelayForPreview(preview) - (timestamp - item.lastChangedAt);
       const completionRemaining = item.completionCandidateText
@@ -192,7 +194,7 @@
         void reportEntry(node, item, latest, chunks, pendingPreview, isAutoEnabled());
         notifyCompleted(item);
       }, delay);
-      void Promise.resolve(requestRecheck(delay)).catch(() => {});
+      if (delay <= 5000) void Promise.resolve(requestRecheck(delay)).catch(() => {});
     }
 
     function processNode(node) {

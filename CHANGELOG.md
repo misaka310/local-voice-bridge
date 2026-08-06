@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed automatic recovery of already-open ChatGPT tabs by loading the DOM mutation filter before the DOM observer during content-script reinjection.
+- Bounded durable browser consumer ACK state to 32 active consumers, expired inactive consumers after seven days, migrated legacy zero-cursor entries, and throttled last-seen persistence so stale profiles cannot block outbox compaction.
+- Added safe cleanup of abandoned E2E Chrome profiles before and after the mock browser suite while preserving profiles owned by running processes.
 - Changed normal Auto from stable streaming-preview playback to completion-gated playback, requiring stable final Copy controls for the same response turn, revoking transient completion candidates when generation resumes, and persisting the completion reason for diagnosis.
 
 - Added GPT Live-style microphone conversation with persisted pre-send submission ownership, fail-closed assistant binding, stable-sentence streaming, local playback, input/Enter/Regen/navigation interruption, and restart invalidation without changing normal Auto, Next, Regen, or Replay recovery.
