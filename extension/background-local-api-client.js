@@ -7,7 +7,7 @@
     const defaultSettings = options.defaultSettings || {};
     const normalizeStoredReference = options.normalizeStoredReference || ((value) => String(value || '').trim());
 
-    async function speak(text, requestId, _voiceProfile, referenceVoice, _voicePrompt) {
+    async function speak(text, requestId, _voiceProfile, referenceVoice, _voicePrompt, playLocal = false) {
       const settings = await getSettings();
       const pickedProfile = defaultSettings.voiceProfile;
       const pickedReferenceVoice = normalizeStoredReference(referenceVoice !== undefined ? referenceVoice : settings.referenceVoice);
@@ -26,7 +26,7 @@
           voicePrompt: pickedVoicePrompt,
           instruct: pickedVoicePrompt,
           voiceVolume: Number(settings.voiceVolume),
-          playLocal: true,
+          playLocal: playLocal === true,
         }),
       });
       const body = await response.json().catch(() => ({}));

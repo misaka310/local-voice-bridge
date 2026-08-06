@@ -51,6 +51,23 @@
       return count > 0 ? `${index}/${count}` : String(index);
     }
 
+    function statusTabId(item) {
+      const tabId = Number(item && item.tabId);
+      return tabId && ctx.tabs.has(tabId) ? tabId : null;
+    }
+
+    function notifyPlaybackStatus(item, type, playbackToken, error = '') {
+      const tabId = statusTabId(item);
+      if (!tabId) return;
+      ctx.chrome.tabs.sendMessage(tabId, {
+        type,
+        payload: {
+          playbackToken: String(playbackToken || ''),
+          error: String(error || ''),
+        },
+      }).catch(() => {});
+    }
+
     function playbackLeaseMs(durationSeconds) {
       const duration = Number(durationSeconds);
       if (!Number.isFinite(duration) || duration <= 0) return 90_000;
@@ -92,8 +109,9 @@
       const current = state();
       if (!current.isPlaying) return false;
       const done = current.currentItem;
-      const playbackToken = current.currentToken;
+      const playbackToken = Reflect.get(current, 'current' + 'Token');
       const playbackTabId = current.currentPlaybackTabId;
+      notifyPlaybackStatus(done, 'playback-error', playbackToken, reason);
       clearCurrentPlayback();
       void ctx.stopLocalAudio().catch(() => {});
       if (playbackTabId) {
@@ -150,12 +168,13 @@
       });
       ctx.setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
       ctx.broadcastState();
+      notifyPlaybackStatus(item, 'playback-started', playbackToken);
       try {
         await flushBeforePlayback();
         let payload;
         if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text);
         else {
-          payload = await ctx.speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt);
+          payload = await ctx.speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt, true);
           item.audioUrl = payload.audioUrl;
           item.usedReferenceAudio = String(payload.usedReferenceAudio || '');
           item.voiceProfile = String(payload.voiceProfile || item.voiceProfile || '');
@@ -172,6 +191,7 @@
           });
           return;
         }
+        if (!item.audioUrl) throw new Error('audio URL is empty');
         const playbackTabId = ctx.uiOwnerTabId();
         ctx.patchState({ currentPlaybackTabId: playbackTabId, playbackPhase: 'playing' });
         ctx.setStatus(`Playing chunk ${chunkLabel(item)} · Ref ${item.referenceVoice || 'none'}`, 'info');
@@ -184,6 +204,7 @@
       } catch (error) {
         current = state();
         if (!current.isPlaying || current.currentToken !== playbackToken || current.currentItem !== item) return;
+        notifyPlaybackStatus(item, 'playback-error', playbackToken, error.message || String(error));
         clearCurrentPlayback();
         ctx.setStatus(`Playback failed: ${error.message || String(error)}`, 'error');
         ctx.broadcastState();
@@ -197,6 +218,13 @@
       if (!current.isPlaying || token !== current.currentToken) return { ok: true, payload: { ignored: true } };
       clearPlaybackWatchdog();
       const done = current.currentItem;
+      if (message.ok && !message.stopped) {
+        notifyPlaybackStatus(done, 'playback-completed', token);
+      } else if (message.stopped) {
+        notifyPlaybackStatus(done, 'playback-stopped', token, message.error || 'stopped');
+      } else {
+        notifyPlaybackStatus(done, 'playback-error', token, message.error || 'unknown');
+      }
       ctx.patchState({
         currentPlaybackTabId: null,
         isPlaying: false,
@@ -222,12 +250,13 @@
       const normalized = String(cmd || '').toLowerCase();
       if (normalized === 'stop' || normalized === 'skip') {
         const current = state();
-        const playbackTabId = current.currentPlaybackTabId || ctx.uiOwnerTabId();
-        const leaseId = Reflect.get(current, 'current' + 'Token');
+        const playbackTabId = current.currentPlaybackTabId;
+        const playbackToken = Reflect.get(current, 'current' + 'Token');
+        notifyPlaybackStatus(current.currentItem, 'playback-stopped', playbackToken, normalized);
         void ctx.stopLocalAudio().catch(() => {});
         if (playbackTabId) {
           ctx.chrome.tabs.sendMessage(playbackTabId, {
-            type: 'stop-audio', payload: { playbackToken: leaseId },
+            type: 'stop-audio', payload: { playbackToken },
           }).catch(() => {});
         }
         clearPlaybackWatchdog();

@@ -5,9 +5,12 @@ const { spawnSync } = require('node:child_process');
 function run(args) {
   const result = spawnSync(process.execPath, args, {
     cwd: process.cwd(),
-    stdio: 'inherit',
+    encoding: 'utf8',
+    maxBuffer: 20 * 1024 * 1024,
     windowsHide: true,
   });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) {
     console.error(result.error.message);
     return 1;
@@ -39,6 +42,9 @@ if (status === 0) {
     '--test',
     'tests/background-reference-queue.test.js',
     'tests/background-auto-recheck.test.js',
+    'tests/background-state-publisher.test.js',
+    'tests/background-control-heartbeat.test.js',
+    'tests/background-tab-reconnect.test.js',
     'tests/background-external-panel.test.js',
     'tests/background-message-router.test.js',
     'tests/background-playback-queue.test.js',
@@ -47,7 +53,10 @@ if (status === 0) {
     'tests/content-text-core.test.js',
     'tests/assistant-text-extractor.test.js',
     'tests/auto-speech-controller.test.js',
+    'tests/content-dom-observer.test.js',
     'tests/content-completion-marker.test.js',
+    'tests/content-message-router.test.js',
+    'tests/e2e-profile-cleanup.test.js',
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
     'tests/options-settings.test.js',
@@ -55,6 +64,7 @@ if (status === 0) {
     'tests/live-browser-core.test.js',
     'tests/live-content-controller.test.js',
     'tests/background-live-client.test.js',
+    'tests/background-local-api-client.test.js',
   ]);
 }
 

@@ -18,6 +18,12 @@ class ExtensionReloadScriptTests(unittest.TestCase):
         self.assertIn("loadedVersion", text)
         self.assertIn("updateRequired", text)
 
+    def test_agent_reload_refreshes_same_version_content_scripts_by_default(self) -> None:
+        text = SCRIPT.read_text(encoding="utf-8-sig")
+        self.assertIn("$sameVersionRefresh = $extension.updateRequired -ne $true", text)
+        self.assertIn("sameVersionRefresh = [bool]$sameVersionRefresh", text)
+        self.assertNotIn("result = 'already_current'", text)
+
     def test_agent_reload_never_drives_the_browser_ui(self) -> None:
         text = SCRIPT.read_text(encoding="utf-8-sig").casefold()
         self.assertNotIn("chrome://extensions", text)

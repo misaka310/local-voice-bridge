@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,12 @@ if str(LOCAL_API) not in sys.path:
     sys.path.insert(0, str(LOCAL_API))
 
 from control_state import ControlStateStore  # noqa: E402
+from durable_outbox import (  # noqa: E402
+    CONSUMER_ACK_LIMIT,
+    CONSUMER_ACK_TTL_SECONDS,
+    CONSUMER_SEEN_WRITE_INTERVAL_SECONDS,
+    safe_seen_at,
+)
 
 
 class ControlStateStoreTests(unittest.TestCase):
@@ -118,6 +125,14 @@ class ControlStateStoreTests(unittest.TestCase):
             stale = store.snapshot(now=14.1)["extension"]
             self.assertFalse(stale["connected"])
             self.assertEqual(stale["statusText"], "Waiting for ChatGPT")
+
+    def test_default_extension_staleness_allows_one_minute_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ControlStateStore(Path(temp_dir) / "state.json")
+            store.update_extension_state({"tabsCount": 30}, now=10.0)
+
+            self.assertTrue(store.snapshot(now=99.0)["extension"]["connected"])
+            self.assertFalse(store.snapshot(now=101.0)["extension"]["connected"])
 
     def test_invalid_commands_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -234,6 +249,93 @@ class ControlStateStoreTests(unittest.TestCase):
                 [item["id"] for item in store.poll(0, consumer_id="replay-client", replay_existing=True)["commands"]],
                 [command["id"]],
             )
+
+    def test_legacy_zero_cursor_consumers_are_migrated_without_blocking_compaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "state.json"
+            store = ControlStateStore(path)
+            command = store.enqueue_command("next")
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["consumerAcks"] = {
+                **{
+                    f"stale-{index}": {"command": 0, "conversationEvent": 0}
+                    for index in range(100)
+                },
+                "active": {"command": command["id"], "conversationEvent": 0},
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            reloaded = ControlStateStore(path)
+
+            self.assertEqual(set(reloaded._consumer_acks), {"active"})
+            self.assertEqual(reloaded._commands, [])
+            reloaded.poll(0, consumer_id="active")
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["version"], 6)
+            self.assertEqual(set(persisted["consumerAcks"]), {"active"})
+            self.assertGreater(persisted["consumerAcks"]["active"]["lastSeenAt"], 0)
+            self.assertEqual(persisted["commands"], [])
+
+    def test_expired_consumer_no_longer_blocks_acknowledged_command_compaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ControlStateStore(Path(temp_dir) / "state.json")
+            command = store.enqueue_command("next")
+            base = 1_000_000.0
+            store._outbox.register_consumer("stale", replay_existing=True, now=base)
+            store._outbox.register_consumer("active", replay_existing=True, now=base)
+            store._outbox.acknowledge("active", command["id"], stream="command", now=base)
+            self.assertEqual([item["id"] for item in store._commands], [command["id"]])
+
+            store._outbox.acknowledge(
+                "active",
+                command["id"],
+                stream="command",
+                now=base + CONSUMER_ACK_TTL_SECONDS + 1,
+            )
+
+            self.assertNotIn("stale", store._consumer_acks)
+            self.assertEqual(store._commands, [])
+
+    def test_consumer_registry_is_bounded_and_keeps_recent_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ControlStateStore(Path(temp_dir) / "state.json")
+            for index in range(CONSUMER_ACK_LIMIT + 10):
+                store._outbox.register_consumer(
+                    f"consumer-{index}",
+                    replay_existing=False,
+                    now=10_000.0 + index,
+                )
+
+            self.assertEqual(len(store._consumer_acks), CONSUMER_ACK_LIMIT)
+            self.assertNotIn("consumer-0", store._consumer_acks)
+            self.assertIn(f"consumer-{CONSUMER_ACK_LIMIT + 9}", store._consumer_acks)
+
+    def test_consumer_seen_timestamp_rejects_non_finite_values(self) -> None:
+        self.assertEqual(safe_seen_at(float("nan")), 0.0)
+        self.assertEqual(safe_seen_at(float("inf")), 0.0)
+        self.assertEqual(safe_seen_at(-1), 0.0)
+        self.assertEqual(safe_seen_at(123.5), 123.5)
+
+    def test_consumer_seen_timestamp_is_persisted_at_most_once_per_minute(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ControlStateStore(Path(temp_dir) / "state.json")
+            base = 10_000.0
+            store._outbox.register_consumer("active", replay_existing=False, now=base)
+            store._outbox.mark_persisted()
+
+            store._outbox.register_consumer(
+                "active",
+                replay_existing=False,
+                now=base + CONSUMER_SEEN_WRITE_INTERVAL_SECONDS - 1,
+            )
+            self.assertFalse(store._outbox.dirty)
+
+            store._outbox.register_consumer(
+                "active",
+                replay_existing=False,
+                now=base + CONSUMER_SEEN_WRITE_INTERVAL_SECONDS,
+            )
+            self.assertTrue(store._outbox.dirty)
 
     def test_transcript_delivery_id_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -42,6 +42,24 @@ class WindowsGuiSmokeScriptTests(unittest.TestCase):
         environment.pop("GITHUB_ACTIONS", None)
         environment.pop("RUNNER_OS", None)
         environment.pop("LOCAL_VOICE_GUI_RUNNER", None)
+        try:
+            subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "exit 0",
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self.skipTest("powershell.exe itself did not start within five seconds")
         completed = subprocess.run(
             [
                 "powershell.exe",

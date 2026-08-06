@@ -13,8 +13,10 @@ const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-s
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
+const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
+const BACKGROUND_TAB_RECONNECT_PATH = path.join(ROOT, 'extension', 'background-tab-reconnect.js');
 const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
 const BACKGROUND_LOCAL_API_CLIENT_PATH = path.join(ROOT, 'extension', 'background-local-api-client.js');
 const BACKGROUND_RUNTIME_STORE_PATH = path.join(ROOT, 'extension', 'background-runtime-store.js');
@@ -173,8 +175,10 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_RUNTIME_CORE_PATH,
     BACKGROUND_QUEUE_CORE_PATH,
     BACKGROUND_AUTO_RECHECK_PATH,
+    BACKGROUND_STATE_PUBLISHER_PATH,
     BACKGROUND_CONTROL_SYNC_PATH,
     BACKGROUND_TAB_REGISTRY_PATH,
+    BACKGROUND_TAB_RECONNECT_PATH,
     BACKGROUND_CONVERSATION_TARGET_PATH,
     BACKGROUND_LOCAL_API_CLIENT_PATH,
     BACKGROUND_RUNTIME_STORE_PATH,
@@ -389,21 +393,28 @@ test('desktop pet selection is forwarded to the local desktop pet API', async ()
   assert.equal(response.payload.selectedPetId, 'misaka');
 });
 
-test('local playback does not use a ChatGPT tab and survives its closure', async () => {
+test('local playback survives answer-tab closure while status stays on that tab', async () => {
   const harness = createHarness({ speakSucceeds: true, localPlayback: true });
   harness.send({ type: 'register-tab', title: 'Tab A' }, 101, 'Tab A');
+  harness.send({ type: 'register-tab', title: 'Tab B' }, 202, 'Tab B');
   harness.send({
     type: 'report-chunks', messageKey: 'reply-local', chunks: ['ローカル再生です。'], autoPreview: 'ローカル再生です。', isAuto: true,
-  }, 101, 'Tab A');
+  }, 202, 'Tab B');
 
   await waitFor(() => harness.posts.length === 1);
   await waitFor(() => harness.tabMessages.some((entry) => (
-    entry.message.type === 'state-update' && entry.message.payload.replayAvailable === true
+    entry.tabId === 202 && entry.message.type === 'playback-completed'
   )));
-  harness.removeTab(101);
+  harness.removeTab(202);
 
   assert.equal(harness.posts[0].playLocal, true);
   assert.equal(harness.posts[0].voiceVolume, 0.6);
+  assert.deepEqual(
+    harness.tabMessages
+      .filter((entry) => entry.tabId === 202 && entry.message.type.startsWith('playback-'))
+      .map((entry) => entry.message.type),
+    ['playback-started', 'playback-completed'],
+  );
   assert.equal(harness.tabMessages.some((entry) => entry.message.type === 'play-audio'), false);
   assert.equal(harness.playbackPosts.some((entry) => entry.type === 'stop'), false);
 });

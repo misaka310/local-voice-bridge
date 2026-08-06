@@ -95,6 +95,7 @@ for (const file of [
 }
 
 capLines('local-api/control_state.py', 350);
+capLines('local-api/durable_outbox.py', 420);
 capLines('local-api/server.py', 450);
 capLines('local-api/api_router.py', 500);
 capLines('local-api/conversation_controller.py', 520);
@@ -161,7 +162,7 @@ requireText(
 );
 requireText(
   'extension/manifest.json',
-  '"content-settings.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"',
+  '"content-settings.js", "content-mutation-filter.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"',
   'content scripts must load focused controllers before content.js',
 );
 requireText(
@@ -199,6 +200,16 @@ forbidText(
   'local-api/control_state.py',
   '_SAFE_CONSUMER_ID =',
   'consumer/ACK normalization belongs in durable_outbox.py',
+);
+requireText(
+  'local-api/durable_outbox.py',
+  'CONSUMER_ACK_LIMIT = 32',
+  'durable consumer ACK state must remain bounded',
+);
+requireText(
+  'local-api/durable_outbox.py',
+  'CONSUMER_ACK_TTL_SECONDS = 7 * 24 * 60 * 60',
+  'inactive durable consumers must expire instead of blocking outbox compaction forever',
 );
 forbidText(
   'local-api/control_state.py',
@@ -333,9 +344,14 @@ requireText(
   'assistant source and citation filtering must use assistant-source-filter.js',
 );
 requireText(
-  'extension/background.js',
-  "'assistant-source-filter.js', 'assistant-text-extractor.js'",
+  'extension/background-tab-reconnect.js',
+  "'assistant-source-filter.js',\n    'assistant-text-extractor.js'",
   'reconnect injection must load the source filter before the assistant extractor',
+);
+requireText(
+  'extension/background-tab-reconnect.js',
+  "'content-settings.js',\n    'content-mutation-filter.js',\n    'content-dom-observer.js'",
+  'reconnect injection must load the mutation filter before the DOM observer',
 );
 forbidText(
   'extension/assistant-text-extractor.js',

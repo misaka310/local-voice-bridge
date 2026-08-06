@@ -128,5 +128,5 @@
     control.addEventListener('change', () => setStatus(''));
   }
 
-  void load();
+  void load().then(syncRuntimeSettings).catch(() => {});
 })();

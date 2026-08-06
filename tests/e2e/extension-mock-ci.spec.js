@@ -42,6 +42,11 @@ function prepareTestExtension() {
   const isolatedSettingsSource = settingsSource.replaceAll('http://127.0.0.1:8717', 'http://127.0.0.1:1');
   if (isolatedSettingsSource === settingsSource) throw new Error('test extension defaults were not isolated from the real local API');
   fs.writeFileSync(settingsPath, isolatedSettingsSource, 'utf8');
+  const contentSettingsPath = path.join(EXTENSION_DIR, 'content-settings.js');
+  const contentSettingsSource = fs.readFileSync(contentSettingsPath, 'utf8');
+  const isolatedContentSettingsSource = contentSettingsSource.replaceAll('http://127.0.0.1:8717', 'http://127.0.0.1:1');
+  if (isolatedContentSettingsSource === contentSettingsSource) throw new Error('test content defaults were not isolated from the real local API');
+  fs.writeFileSync(contentSettingsPath, isolatedContentSettingsSource, 'utf8');
   const backgroundPath = path.join(EXTENSION_DIR, 'background.js');
   const backgroundSource = fs.readFileSync(backgroundPath, 'utf8');
   const fetchShim = `
@@ -156,7 +161,7 @@ async function stopMock(proc = null) {
   }
 }
 
-async function startMock() {
+async function startMock(options = {}) {
   MOCK_PORT = FIXED_MOCK_PORT || await allocateMockPort();
   API = `http://127.0.0.1:${MOCK_PORT}`;
   try {
@@ -176,6 +181,7 @@ async function startMock() {
       ...process.env,
       MOCK_VOICE_PORT: String(MOCK_PORT),
       MOCK_VOICE_TOKEN: MOCK_RUN_TOKEN,
+      MOCK_LOCAL_PLAYBACK_DELAY_MS: String(Number(options.localPlaybackDelayMs || 0)),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -958,9 +964,40 @@ test('all ChatGPT tabs continue to enqueue into one Auto queue without an in-pag
   }
 });
 
-test('a completed reply marks its background tab until the user focuses it', async () => {
-  test.setTimeout(90000);
+test('blank new conversation shows a plus favicon until the first message appears', async () => {
+  test.setTimeout(30000);
   const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><html><head><title>Blank ChatGPT Fixture</title></head><body><main id="chat"></main></body></html>',
+    }));
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#chat')).toHaveCount(1);
+    await expect(page.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-local-voice-status', 'new');
+
+    await page.evaluate(() => {
+      const message = document.createElement('div');
+      message.dataset.messageAuthorRole = 'user';
+      message.textContent = '最初のメッセージ';
+      document.querySelector('#chat').append(message);
+    });
+    await expect(page.locator('#local-voice-completion-favicon')).toHaveCount(0);
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('a reply shows generating, playing, completion, and clears when acknowledged', async () => {
+  test.setTimeout(90000);
+  const api = await startMock({ localPlaybackDelayMs: 750 });
   const context = await launchContext();
 
   try {
@@ -1003,9 +1040,7 @@ test('a completed reply marks its background tab until the user focuses it', asy
     });
     expect(backgroundTabId).toBeTruthy();
     expect(foregroundTabId).toBeTruthy();
-    await controllerPage.evaluate(async (tabId) => {
-      await chrome.tabs.update(tabId, { active: true });
-    }, foregroundTabId);
+    await controllerPage.evaluate((tabId) => chrome.tabs.update(tabId, { active: true }), foregroundTabId);
     await expect.poll(async () => controllerPage.evaluate(async () => {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
       return activeTab && activeTab.url;
@@ -1034,8 +1069,8 @@ test('a completed reply marks its background tab until the user focuses it', asy
     await wait(1800);
     expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
     expect(await backgroundPage.title()).toBe('Local Voice Demo Fixture');
-    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
-
+    await expect(backgroundPage.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-local-voice-status', 'generating');
     await controllerPage.evaluate(async (tabId) => {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -1052,15 +1087,61 @@ test('a completed reply marks its background tab until the user focuses it', asy
     await waitForCounts(1, 1);
     await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'playing');
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'complete');
     await expect(backgroundPage.locator('#fixture-original-favicon')).not.toHaveAttribute('rel', /(^|\s)icon(\s|$)/i);
     expect(await backgroundPage.locator('link[rel~="icon"]').count()).toBe(1);
     expect(await foregroundPage.title()).toBe('Local Voice Demo Fixture');
     await expect(foregroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
 
-    await backgroundPage.bringToFront();
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+      });
+    }, backgroundTabId);
     await expect.poll(() => backgroundPage.title(), { timeout: 5000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
     await expect(backgroundPage.locator('#fixture-original-favicon')).toHaveAttribute('rel', 'icon');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('a ChatGPT text generation error shows a red favicon and clears when acknowledged', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/text-generation-error', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#chat')).toBeVisible();
+
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    await waitForControlReady(1);
+
+    await page.evaluate(() => {
+      const error = document.createElement('div');
+      error.dataset.testid = 'response-error';
+      error.textContent = 'Something went wrong while generating the response.';
+      document.querySelector('#chat').append(error);
+    });
+
+    const favicon = page.locator('#local-voice-completion-favicon');
+    await expect(favicon).toHaveAttribute('data-local-voice-status', 'error');
+    await expect(favicon).toHaveAttribute('href', /%23dc2626/i);
+
+    await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    await expect(favicon).toHaveCount(0);
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);

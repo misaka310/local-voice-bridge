@@ -1,0 +1,50 @@
+version: 2.1
+
+jobs:
+  windows-ci:
+    resource_class: windows.medium
+    machine:
+      image: windows-server-2022-gui:current
+      shell: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass
+    steps:
+      - checkout
+      - run:
+          name: Run Local Voice Bridge CI
+          no_output_timeout: 20m
+          command: |
+            $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version Latest
+
+            function Refresh-ProcessPath {
+              $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+              $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+              $env:Path = @($machinePath, $userPath) -join ';'
+            }
+
+            if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
+              choco install nodejs-lts -y --no-progress
+              Refresh-ProcessPath
+            }
+            if (-not (Get-Command python.exe -ErrorAction SilentlyContinue)) {
+              choco install python311 -y --no-progress
+              Refresh-ProcessPath
+            }
+
+            node --version
+            python --version
+            npm ci
+            python -m pip install --disable-pip-version-check packaging numpy PySide6==6.11.1
+            npx playwright install chromium
+
+            $env:PYTHON = (Get-Command python.exe -ErrorAction Stop).Source
+            $env:PYTHONPATH = 'local-api'
+            $env:QT_QPA_PLATFORM = 'offscreen'
+            node scripts/run-ci.js
+      - store_artifacts:
+          path: test-results
+          destination: test-results
+
+workflows:
+  verify:
+    jobs:
+      - windows-ci

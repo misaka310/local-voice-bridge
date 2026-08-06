@@ -58,7 +58,7 @@
         audioSrc = await fetchAudioObjectUrl(url);
         if (activePlaybackId !== id) {
           releaseSpecificObjectUrl(audioSrc);
-          return;
+          return { ok: false, stopped: true, stale: true };
         }
         releaseObjectUrl();
         currentObjectUrl = audioSrc;
@@ -108,7 +108,10 @@
             }).catch(() => {});
           }).catch((error) => settle(reject, error));
         });
-        if (activePlaybackId !== id) return;
+        if (activePlaybackId !== id) {
+          releaseSpecificObjectUrl(audioSrc);
+          return { ok: false, stopped: true, stale: true };
+        }
         releaseSpecificObjectUrl(audioSrc);
         currentAudio = null;
         currentCancel = null;
@@ -128,30 +131,33 @@
             sttModel: currentSettings.sttModel,
           });
         }
+        return { ok: true, stopped: false };
       } catch (error) {
         const stopped = error && error.code === 'PLAYBACK_STOPPED';
         const stale = activePlaybackId !== id;
         releaseSpecificObjectUrl(audioSrc);
         if (currentAudio === playbackAudio) currentAudio = null;
         if (!stale) currentCancel = null;
-        if (stale || stopped) return;
+        if (stale || stopped) return { ok: false, stopped: true, stale };
         activePlaybackId = null;
+        const message = error.message || String(error);
         ctx.chrome.runtime.sendMessage({
           type: 'playback-done',
           playbackToken: id,
           ok: false,
           stopped: false,
-          error: error.message || String(error),
+          error: message,
         }).catch(() => {});
         const currentSettings = ctx.getSettings();
         if (currentSettings.micConversationEnabled && ctx.getConversationPhase() === 'speaking') {
           ctx.reportConversationState({
             phase: 'error',
             statusText: '読み上げに失敗しました',
-            error: error.message || String(error),
+            error: message,
             sttModel: currentSettings.sttModel,
           });
         }
+        return { ok: false, stopped: false, error: message };
       }
     }
 

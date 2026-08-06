@@ -7,6 +7,13 @@
 
 このファイルはエージェント向けの入口であり、仕様の正本を重複させません。README、CONTRIBUTING、既存テスト、UI文言にある利用者導線を、内部都合で削除・置換しないでください。
 
+## タブ状態とfaviconの所有権
+
+- このリポジトリは、ChatGPTタブの回答生成中、回答完了未確認、確認済み、読み上げ中、ChatGPTテキスト回答の生成エラーと、それらを示すfaviconの唯一の所有者です。
+- 状態検出、確認解除、再生状態通知、静的favicon資産、`<link rel="icon">`の競合制御は17で実装・検証します。
+- `73_chatgpt-tab-memo`はページ内の作業メモだけを担当します。17のタブ状態やfavicon責務を73へ移植・複製しません。
+- タブ状態またはfaviconに関する変更は、`docs/tab-status-and-resource-design.md`と`tests/content-completion-marker.test.js`を同じ変更で更新します。
+
 ## Local Voice Bridgeの更新導線
 
 拡張機能ソース`extension/`の更新時は共有`browser-extension-update-delivery`を適用します。エージェントの正式導線は`scripts/reload-extension.ps1`です。ローカル制御経路へ`reload_extension`を送信し、ACK後に拡張機能側の`chrome.runtime.reload()`を実行させ、再接続後の`loadedVersion == expectedVersion`まで確認します。

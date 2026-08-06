@@ -1,17 +1,28 @@
-'use strict';
-
-(function initContentMessageRouter(global) {
+'use strict'; (function initContentMessageRouter(global) {
   function create(ctx) {
+    let activePlaybackToken = '';
+    const terminalMarks = {
+      'playback-completed': ctx.markPlaybackCompleted,
+      'playback-stopped': ctx.markPlaybackStopped,
+      'playback-error': ctx.markPlaybackError,
+    };
+    const tokenOf = (message) => String((message.payload && message.payload.playbackToken) || '');
+    function handleTerminal(message) {
+      const mark = terminalMarks[message.type];
+      if (!mark) return false;
+      const token = tokenOf(message);
+      if (!token || !activePlaybackToken || token === activePlaybackToken) {
+        activePlaybackToken = '';
+        mark();
+      }
+      return true;
+    }
     return (message, _sender, sendResponse) => {
       if (!message || typeof message.type !== 'string') return false;
       if (message.type === 'conversation-target-status') {
-        sendResponse(ctx.conversationTargetStatus());
-        return false;
+        sendResponse(ctx.conversationTargetStatus()); return false;
       }
-      if (message.type === 'tab-activated') {
-        ctx.clearCompletionMarker();
-        return false;
-      }
+      if (message.type === 'tab-activated') { ctx.clearCompletionMarker(); return false; }
       if (message.type === 'bridge-reconnect') {
         ctx.registerCurrentTab({ includeLatest: true })
           .then((payload) => sendResponse({ ok: true, payload }))
@@ -19,40 +30,50 @@
         return true;
       }
       if (message.type === 'auto-recheck') {
-        ctx.inspectLatestAssistant();
-        sendResponse({ ok: true });
-        return false;
+        ctx.inspectLatestAssistant(); sendResponse({ ok: true }); return false;
       }
       if (message.type === 'settings-update') {
-        ctx.applySettingsSnapshot(message.payload || {});
-        sendResponse({ ok: true });
-        return false;
+        ctx.applySettingsSnapshot(message.payload || {}); sendResponse({ ok: true }); return false;
       }
       if (message.type === 'state-update') {
-        ctx.applyOwnerState(message.payload.isUiOwner, message.payload);
-        return false;
+        ctx.applyOwnerState(message.payload.isUiOwner, message.payload); return false;
       }
+      if (message.type === 'playback-started') {
+        activePlaybackToken = tokenOf(message); ctx.markPlaybackStarted(); return false;
+      }
+      if (handleTerminal(message)) return false;
       if (message.type === 'play-audio') {
         const payload = message.payload || {};
-        void ctx.playItem(payload.url, payload.text, payload.item, String(payload.playbackToken || ''));
+        const token = String(payload.playbackToken || '');
+        activePlaybackToken = token;
+        ctx.markPlaybackStarted();
+        void Promise.resolve(ctx.playItem(payload.url, payload.text, payload.item, token))
+          .then((result = {}) => {
+            if (activePlaybackToken !== token) return;
+            activePlaybackToken = '';
+            if (result.ok) ctx.markPlaybackCompleted();
+            else if (result.stopped) ctx.markPlaybackStopped();
+            else ctx.markPlaybackError();
+          })
+          .catch(() => {
+            if (activePlaybackToken !== token) return;
+            activePlaybackToken = ''; ctx.markPlaybackError();
+          });
         return false;
       }
-      if (message.type === 'voice-transcript') {
-        return ctx.handleVoiceTranscript(message, sendResponse);
-      }
+      if (message.type === 'voice-transcript') return ctx.handleVoiceTranscript(message, sendResponse);
       if (message.type === 'cancel-voice-send') {
-        sendResponse(ctx.cancelPendingVoiceSend('new-recording'));
-        return false;
+        sendResponse(ctx.cancelPendingVoiceSend('new-recording')); return false;
       }
       if (message.type === 'stop-audio') {
-        const incomingToken = String((message.payload && message.payload.playbackToken) || '');
-        if (ctx.audioPlayer.matches(incomingToken)) ctx.stopCurrentPlayback('stop');
+        const token = tokenOf(message);
+        if (ctx.audioPlayer.matches(token)) {
+          activePlaybackToken = ''; ctx.stopCurrentPlayback('stop'); ctx.markPlaybackStopped();
+        }
         sendResponse({ ok: true });
-        return false;
       }
       return false;
     };
   }
-
   global.LocalVoiceContentMessageRouter = Object.freeze({ create });
 })(globalThis);

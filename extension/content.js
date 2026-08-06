@@ -61,20 +61,21 @@
     runtimeMessage,
   });
   const {
-    getPlainDocumentTitle,
-    isTabActivelyViewed,
+    getPlainDocumentTitle, isTabActivelyViewed,
     clear: clearCompletionMarker,
-    markResponseCompleted,
+    markResponseGenerating, markResponseCompleted, markResponseError,
+    markPlaybackStarted, markPlaybackCompleted, markPlaybackError, markPlaybackStopped,
     initialize: initializeCompletionMarker,
   } = completionMarker;
 
   const domObserverController = globalThis.LocalVoiceContentDomObserver.create({
-    document,
+    document, location,
     defaultSettings: DEFAULT_SETTINGS,
     getSettings: () => settings,
     isEnabled: () => enabled,
     reportChunks: (entry, isAuto) => reportChunks(entry, isAuto),
-    markResponseCompleted,
+    markResponseGenerating,
+    markResponseCompleted, markResponseError, setNewConversation: completionMarker.setNewConversation,
     requestAutoRecheck: (delayMs) => runtimeMessage('schedule-auto-recheck', {
       delayMs: Math.max(50, Math.min(5000, Number(delayMs) || 500)),
     }),
@@ -120,7 +121,7 @@
     chrome,
     Audio,
     URL,
-    atob,
+    atob: globalThis.atob.bind(globalThis),
     runtimeMessage,
     clampVolume,
     getSettings: () => settings,
@@ -161,6 +162,7 @@
     registerCurrentTab: (options) => registerCurrentTab(options),
     applyOwnerState,
     applySettingsSnapshot,
+    markPlaybackStarted, markPlaybackCompleted, markPlaybackError, markPlaybackStopped,
     inspectLatestAssistant,
     playItem,
     handleVoiceTranscript,
@@ -270,7 +272,7 @@
     await initializeCompletionMarker();
     markExistingMessagesAsSeen();
     observer = new MutationObserver(scheduleInspect);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true });
     try {
       await registerCurrentTab({ includeLatest: true });
     } catch (_error) {
@@ -306,9 +308,6 @@
     }, { capture: true });
     reportComposerFocus();
     window.addEventListener('pagehide', handlePageHide);
-    setInterval(() => {
-      chrome.runtime.sendMessage({ type: 'register-tab', title: getPlainDocumentTitle() }).catch(() => {});
-    }, 5000);
   }
 
   if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {
