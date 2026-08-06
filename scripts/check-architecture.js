@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const failures = [];
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
+  return fs.readFileSync(path.join(ROOT, relativePath), 'utf8').replace(/\r\n/g, '\n');
 }
 
 function requireFile(relativePath) {
