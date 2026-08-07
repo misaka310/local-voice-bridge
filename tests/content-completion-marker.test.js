@@ -135,7 +135,7 @@ test('generating, complete, playing, and text-response error use distinct static
   icon = statusIcon(document);
   assert.equal(marker.displayedStatus(), 'playing');
   assert.equal(icon.getAttribute('data-local-voice-status'), 'playing');
-  assert.match(decodedSvg(icon), /#7c3aed/);
+  assert.match(decodedSvg(icon), /#16a34a/);
 
   marker.markPlaybackCompleted();
   marker.markResponseError();
@@ -240,6 +240,29 @@ test('ChatGPT cannot restore its own favicon while a status remains active', asy
   marker.markResponseCompleted();
   marker.clear();
   assert.equal(rewritten.rel, 'icon');
+});
+
+test('repeated ChatGPT favicon rewrites do not reinsert the active status favicon', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseGenerating();
+
+  const icon = statusIcon(document);
+  const initialIndex = document.head.children.indexOf(icon);
+
+  for (let index = 0; index < 3; index += 1) {
+    const rewritten = document.createElement('link');
+    rewritten.rel = 'icon';
+    rewritten.href = `https://chatgpt.com/favicon-${index}.ico`;
+    document.head.appendChild(rewritten);
+
+    marker.sync();
+
+    assert.equal(document.head.children.indexOf(icon), initialIndex);
+    assert.equal(rewritten.hasAttribute('rel'), false);
+  }
+
+  assert.deepEqual(activeIcons(document), [icon]);
 });
 
 test('head mutation filter ignores unrelated churn and reacts to favicon changes', () => {

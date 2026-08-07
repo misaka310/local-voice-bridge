@@ -1071,6 +1071,26 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
     expect(await backgroundPage.title()).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon'))
       .toHaveAttribute('data-local-voice-status', 'generating');
+    const generatingFaviconIndex = await backgroundPage.evaluate(() => {
+      const favicon = document.querySelector('#local-voice-completion-favicon');
+      favicon.dataset.testStableFavicon = '1';
+      return [...document.head.children].indexOf(favicon);
+    });
+    await backgroundPage.evaluate(() => {
+      for (let index = 0; index < 3; index += 1) {
+        const rewritten = document.createElement('link');
+        rewritten.rel = 'icon';
+        rewritten.href = `data:image/svg+xml,chatgpt-${index}`;
+        rewritten.dataset.testid = 'chatgpt-favicon-rewrite';
+        document.head.append(rewritten);
+      }
+    });
+    await expect.poll(() => backgroundPage.locator('[data-testid="chatgpt-favicon-rewrite"][rel~="icon"]').count())
+      .toBe(0);
+    await expect(backgroundPage.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-test-stable-favicon', '1');
+    expect(await backgroundPage.evaluate(() => [...document.head.children]
+      .indexOf(document.querySelector('#local-voice-completion-favicon')))).toBe(generatingFaviconIndex);
     await controllerPage.evaluate(async (tabId) => {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -1088,6 +1108,7 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
     await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'playing');
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /%2316a34a/i);
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'complete');
     await expect(backgroundPage.locator('#fixture-original-favicon')).not.toHaveAttribute('rel', /(^|\s)icon(\s|$)/i);
     expect(await backgroundPage.locator('link[rel~="icon"]').count()).toBe(1);
