@@ -10,7 +10,7 @@
     new: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0891b2"/><path d="M16 7v18M7 16h18" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>',
     generating: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#2563eb"/><circle cx="9" cy="16" r="2.2" fill="#fff"/><circle cx="16" cy="16" r="2.2" fill="#fff"/><circle cx="23" cy="16" r="2.2" fill="#fff"/></svg>',
     complete: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    playing: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#7c3aed"/><path d="M7 13h5l6-5v16l-6-5H7z" fill="#fff"/><path d="M21 12c2 2 2 6 0 8M24 9c4 4 4 10 0 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    playing: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#16a34a"/><path d="M7 13h5l6-5v16l-6-5H7z" fill="#fff"/><path d="M21 12c2 2 2 6 0 8M24 9c4 4 4 10 0 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
     error: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#dc2626"/><path d="M16 8v11" stroke="#fff" stroke-width="4" stroke-linecap="round"/><circle cx="16" cy="24" r="2.2" fill="#fff"/></svg>',
   });
   const FAVICON_DATA_URLS = Object.freeze(Object.fromEntries(
@@ -145,7 +145,7 @@
         favicon.setAttribute('data-local-voice-status', status);
       }
       if (favicon.href !== FAVICON_DATA_URLS[status]) favicon.href = FAVICON_DATA_URLS[status];
-      if (ctx.document.head.lastElementChild !== favicon) ctx.document.head.appendChild(favicon);
+      if (favicon.parentNode !== ctx.document.head) ctx.document.head.appendChild(favicon);
     }
 
     function sync() {
