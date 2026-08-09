@@ -229,8 +229,10 @@
       reportLatestSnapshot: () => ensureController().reportLatestSnapshot(),
       inspectLatestAssistant: () => {
         updateNewConversationStatus();
-        if (isResponseGenerating()) ctx.markResponseGenerating();
-        else if (isResponseError()) {
+        const generating = isResponseGenerating();
+        if (generating) ctx.markResponseGenerating();
+        else ctx.markResponseGenerationEnded();
+        if (!generating && isResponseError()) {
           ctx.markResponseError();
           return false;
         }
@@ -239,8 +241,10 @@
       scheduleInspect: (mutations = []) => {
         updateNewConversationStatus(mutations);
         if (!mutationFilter.isRelevantMutationBatch(mutations)) return false;
-        if (isResponseGenerating()) ctx.markResponseGenerating();
-        else if (isResponseError()) {
+        const generating = isResponseGenerating();
+        if (generating) ctx.markResponseGenerating();
+        else ctx.markResponseGenerationEnded();
+        if (!generating && isResponseError()) {
           ctx.markResponseError();
           return false;
         }

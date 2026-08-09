@@ -55,7 +55,15 @@ function loadDomObserverApi() {
       LocalVoiceContentMutationFilter: require('../extension/content-mutation-filter.js'),
       ContentTextCore: {},
       LocalVoiceAssistantText: { getAssistantNodes: () => [] },
-      LocalVoiceAutoSpeech: {},
+      LocalVoiceAutoSpeech: {
+        createAutoSpeechController: () => ({
+          markExistingMessagesAsSeen() {},
+          rebaseline() {},
+          reportLatestSnapshot() { return false; },
+          inspectLatestAssistant() { return false; },
+          scheduleInspect() { return false; },
+        }),
+      },
     },
   };
   vm.runInNewContext(source, sandbox, { filename: 'content-dom-observer.js' });
@@ -155,9 +163,40 @@ test('ChatGPT text generation error marks the tab without invoking Auto speech',
     isEnabled: () => true,
     setNewConversation() {},
     markResponseGenerating: () => marks.push('generating'),
+    markResponseGenerationEnded() {},
     markResponseError: () => marks.push('error'),
   });
 
   assert.equal(controller.scheduleInspect([mutation(errorNode)]), false);
   assert.deepEqual(marks, ['error']);
+});
+
+test('generating favicon is cleared when the generation control disappears', () => {
+  const marks = [];
+  const generationNode = element({ generationControl: true });
+  let generating = true;
+  const document = {
+    querySelector(selector) {
+      if (selector.includes('stop-button')) return generating ? generationNode : null;
+      if (selector.includes('data-message-author-role')) return {};
+      return null;
+    },
+    querySelectorAll() { return []; },
+  };
+  const controller = loadDomObserverApi().create({
+    document,
+    location: { pathname: '/c/example' },
+    getSettings: () => ({}),
+    isEnabled: () => true,
+    setNewConversation() {},
+    markResponseGenerating: () => marks.push('generating'),
+    markResponseGenerationEnded: () => marks.push('generation-ended'),
+    markResponseError: () => marks.push('error'),
+  });
+
+  controller.scheduleInspect([mutation(element(), { addedNodes: [generationNode] })]);
+  generating = false;
+  controller.scheduleInspect([mutation(element(), { removedNodes: [generationNode] })]);
+
+  assert.deepEqual(marks, ['generating', 'generation-ended']);
 });

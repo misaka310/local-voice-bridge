@@ -147,6 +147,24 @@ test('generating, complete, playing, and text-response error use distinct static
   assert.equal(original.hasAttribute('rel'), false);
 });
 
+test('generation end immediately removes a stale generating favicon', async () => {
+  const { document, marker } = createMarker();
+  const original = document.createElement('link');
+  original.rel = 'icon';
+  original.href = 'https://chatgpt.com/favicon.ico';
+  document.head.appendChild(original);
+  await marker.initialize();
+
+  marker.markResponseGenerating();
+  assert.equal(marker.displayedStatus(), 'generating');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'generating');
+
+  marker.markResponseGenerationEnded();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+  assert.equal(original.rel, 'icon');
+});
+
 test('playback temporarily overrides completion and returns to yellow until viewed', async () => {
   const { document, marker } = createMarker();
   await marker.initialize();
