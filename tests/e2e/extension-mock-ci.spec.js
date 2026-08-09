@@ -1396,9 +1396,9 @@ test('microphone transcript survives a transient ProseMirror DOM sync while arm 
   }
 });
 
-test('microphone transcript still fails closed when the composer is truly edited while arm acknowledgement is pending', async () => {
+test('microphone transcript still fails closed when a replaced composer is truly edited while arm acknowledgement is pending', async () => {
   test.setTimeout(90000);
-  const api = await startMock({ submissionArmDelayMs: 300 });
+  const api = await startMock({ submissionArmDelayMs: 1200 });
   const context = await launchContext();
 
   try {
@@ -1420,6 +1420,10 @@ test('microphone transcript still fails closed when the composer is truly edited
       referenceVoice: '',
       cancelGraceMs: 0,
     });
+    await page.evaluate(() => {
+      window.__dispatchDelayedNativeInput = true;
+      window.__replaceComposerBeforeDelayedInput = true;
+    });
 
     await sendConversationEvent('transcript', {
       sessionId: 43,
@@ -1429,6 +1433,7 @@ test('microphone transcript still fails closed when the composer is truly edited
     await expect.poll(async () => (await apiEvents()).filter((event) => (
       event.path === '/v1/conversation/submission' && event.body && event.body.action === 'arm'
     )).length).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.__composerReplacementBeforeSendCount)).toBe(1);
 
     await page.evaluate(() => {
       const composer = document.querySelector('#prompt-textarea');

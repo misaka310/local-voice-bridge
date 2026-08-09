@@ -319,12 +319,14 @@
         emit('error', 'ページが変わったため送信しませんでした', 'page-changed');
         return { ok: false, reason: 'page-changed' };
       }
-      if (normalizeText(composerText(item.composer)) !== item.insertedText) {
+      const currentComposer = findComposer(documentObject, documentObject && documentObject.activeElement) || item.composer;
+      if (normalizeText(composerText(currentComposer)) !== item.insertedText) {
         finishPending(item);
         emit('error', '入力欄が変更されたため自動送信しませんでした', 'composer-changed');
         return { ok: false, reason: 'composer-changed' };
       }
-      const button = findSendButton(documentObject, item.composer);
+      item.composer = currentComposer;
+      const button = findSendButton(documentObject, currentComposer);
       if (!button) {
         finishPending(item);
         emit('error', 'ChatGPTの送信ボタンを確認できませんでした', 'send-button-not-ready');
