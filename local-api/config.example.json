@@ -9,7 +9,7 @@
     "maxBytes": 1073741824,
     "maxAgeDays": 14
   },
-  "allowedOrigins": ["https://chatgpt.com", "https://chat.openai.com"],
+
   "defaultModel": "irodori-v3",
   "models": {
     "irodori-v3": {

@@ -61,6 +61,8 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 拡張機能更新は`browser-extension-update-delivery`の契約を守る。
 - 設定、キュー、再生状態、Ref、Autoなど既存UXを内部都合で削除・置換しない。
 - 通常利用者へ内部APIや複数の起動経路を選ばせない。
+- ローカルAPIはloopback専用を維持し、POSTはJSONだけを受け付ける。通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。
+- マイク録音の生音声と文字起こし履歴は保存しない。一方、再接続・Service Worker復旧・未配送イベントの再配信に必要なassistant返答チャンク、読み上げキュー、未ACKの文字起こしイベントはローカルruntime状態へ限定的に保存してよい。
 
 ## 5. 非目標
 
@@ -82,6 +84,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - [ ] 通常復旧でユーザーに`chrome://extensions`の手動Reloadを要求しない。
 - [ ] アプリ再起動後も主要経路が復旧する。
 - [ ] 通常利用でターミナルやコンソールが表示されない。
+- [ ] 通常WebページからLocal APIのPOST系変更操作を実行できず、拡張機能とWindows小窓の正常通信は維持される。
 - [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。
 
 ## 7. 検証方法

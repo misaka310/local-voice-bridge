@@ -293,6 +293,10 @@ async function launchContext() {
   return chromium.launchPersistentContext(PROFILE, options);
 }
 
+async function triggerFixtureReply(page) {
+  await page.locator('#add-reply').evaluate((button) => button.click());
+}
+
 async function configureWorker(worker, values = {}) {
   await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('settingsVersion')).settingsVersion)).toBe(11);
   await worker.evaluate(async ({ apiUrl, healthUrl, overrides }) => {
@@ -495,7 +499,7 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
     expect((await apiEvents()).filter((event) => event.path === '/v1/speak')).toHaveLength(0);
     await page.evaluate(() => document.querySelector('[data-message-id="interrupted-image-reply"]')?.remove());
 
-    await page.locator('#add-reply').click();
+    await triggerFixtureReply(page);
     await expect(page.locator('[data-message-id="new-reply"]')).toHaveText(DEMO_REPLY);
     await waitForCounts(1, 1);
 
@@ -950,8 +954,8 @@ test('all ChatGPT tabs continue to enqueue into one Auto queue without an in-pag
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
     await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
 
-    await pages[0].locator('#add-reply').click();
-    await pages[1].locator('#add-reply').click();
+    await triggerFixtureReply(pages[0]);
+    await triggerFixtureReply(pages[1]);
     await waitForCounts(2, 2);
 
     const posts = (await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak');

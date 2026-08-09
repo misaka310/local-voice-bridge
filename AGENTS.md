@@ -24,6 +24,10 @@ Windows Local Voice小窓の`拡張機能を再読み込み`ボタンは通常�
 
 実機ブラウザ検証は共有`playwright`および`avoid-agent-focus-steal`スキルに従い、リポジトリのE2Eまたは隔離プロファイルを使用します。ユーザーが利用中のChrome / Braveの既存タブ、分割表示、入力欄をテストに使わないでください。
 
+## 解析対象の境界
+
+通常のコードレビュー・構造解析は、追跡対象の`extension/`、`local-api/*.py`、`scripts/`、`tests/`、`docs/`とルート文書を優先します。`.ai-bridge/`、`.ai-review/`、`.venv/`、`local-api/.venv/`、`local-api/runtime/`、`local-api/logs/`、`test-results/`、`.e2e-profile*/`、`.demo-profile*/`、`.tmp-verify/`、`node_modules/`、`__pycache__/`、`.npm-cache/`は、runtime証跡そのものを調べる依頼でない限り再帰走査しません。runtime調査が必要な場合も対象ファイル・ログを限定して読みます。
+
 ## 完了条件
 
 変更に近いテストに加え、公開ツリー、アーキテクチャ、background、mock E2Eを含む既存CIを通してください。無関係な未コミット変更を破棄・上書き・commitへ混入させないでください。
