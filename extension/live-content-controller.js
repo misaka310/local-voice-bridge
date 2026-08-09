@@ -335,8 +335,8 @@
       if (!eventFromInputComposer) return false;
       const inputComposerText = liveCore.normalizeText(composerText(currentComposer));
       if (
-        (session.phase === 'arming' || session.phase === 'armed')
-        && inputComposerText === session.expectedInputText
+        session.phase === 'arming'
+        || (session.phase === 'armed' && inputComposerText === session.expectedInputText)
       ) {
         session.inputComposer = currentComposer;
         return false;

@@ -182,6 +182,7 @@ async function startMock(options = {}) {
       MOCK_VOICE_PORT: String(MOCK_PORT),
       MOCK_VOICE_TOKEN: MOCK_RUN_TOKEN,
       MOCK_LOCAL_PLAYBACK_DELAY_MS: String(Number(options.localPlaybackDelayMs || 0)),
+      MOCK_SUBMISSION_ARM_DELAY_MS: String(Number(options.submissionArmDelayMs || 0)),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1334,6 +1335,112 @@ test('microphone transcript commits and sends through a ProseMirror composer tha
     const inputEvents = await page.evaluate(() => window.__inputEvents);
     expect(inputEvents.some((event) => !event.trusted && event.inputType === 'insertText')).toBe(true);
     expect(inputEvents.some((event) => event.trusted && event.text.includes('ProseMirror'))).toBe(true);
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('microphone transcript survives a transient ProseMirror DOM sync while arm acknowledgement is pending', async () => {
+  test.setTimeout(90000);
+  const api = await startMock({ submissionArmDelayMs: 300 });
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: proseMirrorMicrophoneFixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/prosemirror-transient-sync', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#prompt-textarea')).toBeVisible();
+    await waitForControlReady(1);
+    await updateControlSettings({
+      enabled: true,
+      micConversationEnabled: true,
+      voiceVolume: 0,
+      referenceVoice: '',
+      cancelGraceMs: 0,
+    });
+
+    await sendConversationEvent('transcript', {
+      sessionId: 42,
+      text: 'DOM同期後も送信する音声入力',
+      cancelGraceMs: 0,
+    });
+    await expect.poll(async () => (await apiEvents()).filter((event) => (
+      event.path === '/v1/conversation/submission' && event.body && event.body.action === 'arm'
+    )).length).toBe(1);
+
+    await page.evaluate(() => {
+      const composer = document.querySelector('#prompt-textarea');
+      const html = composer.innerHTML;
+      composer.innerHTML = '<p><br></p>';
+      composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      composer.innerHTML = html;
+    });
+
+    await expect.poll(() => page.evaluate(() => window.__sent.length), { timeout: 5000 }).toBe(1);
+    expect(await page.evaluate(() => window.__sent[0])).toBe('DOM同期後も送信する音声入力');
+    await expect.poll(async () => (await apiEvents()).filter((event) => (
+      event.path === '/v1/conversation/submission' && event.body && event.body.action === 'commit'
+    )).length).toBe(1);
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('microphone transcript still fails closed when the composer is truly edited while arm acknowledgement is pending', async () => {
+  test.setTimeout(90000);
+  const api = await startMock({ submissionArmDelayMs: 300 });
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker);
+    const page = await context.newPage();
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: proseMirrorMicrophoneFixtureHtml(),
+    }));
+    await page.goto('https://chatgpt.com/c/prosemirror-real-edit', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#prompt-textarea')).toBeVisible();
+    await waitForControlReady(1);
+    await updateControlSettings({
+      enabled: true,
+      micConversationEnabled: true,
+      voiceVolume: 0,
+      referenceVoice: '',
+      cancelGraceMs: 0,
+    });
+
+    await sendConversationEvent('transcript', {
+      sessionId: 43,
+      text: '書き換え前の音声入力',
+      cancelGraceMs: 0,
+    });
+    await expect.poll(async () => (await apiEvents()).filter((event) => (
+      event.path === '/v1/conversation/submission' && event.body && event.body.action === 'arm'
+    )).length).toBe(1);
+
+    await page.evaluate(() => {
+      const composer = document.querySelector('#prompt-textarea');
+      composer.innerHTML = '<p>ユーザーが書き換えた入力</p>';
+      composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+
+    await page.waitForTimeout(700);
+    expect(await page.evaluate(() => window.__sent)).toEqual([]);
+    await expect.poll(async () => (await apiEvents()).filter((event) => (
+      event.path === '/v1/conversation/submission' && event.body && event.body.action === 'commit'
+    )).length).toBe(0);
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);
