@@ -48,6 +48,21 @@ class AudioQualityTests(unittest.TestCase):
             self.assertGreater(result.metrics["rms"], 0.005)
             self.assertLessEqual(result.metrics["clipFraction"], 0.002)
 
+    def test_sustained_sharp_transient_is_not_misclassified_as_impulse_spikes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "sharp-transient.wav"
+            sample_rate = 48000
+            time_axis = np.arange(sample_rate, dtype=np.float64) / sample_rate
+            samples = 0.08 * np.sin(2.0 * np.pi * 220.0 * time_axis)
+            burst = (time_axis >= 0.40) & (time_axis < 0.46)
+            samples[burst] += 0.16 * np.sin(2.0 * np.pi * 8000.0 * time_axis[burst])
+            samples[burst] += 0.112 * np.sin(2.0 * np.pi * 10000.0 * time_axis[burst])
+            write_pcm16(path, samples, sample_rate)
+
+            result = inspect_wav(path)
+
+            self.assertTrue(result.passed, result.reasons)
+
     def test_silence_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "silence.wav"
@@ -89,6 +104,39 @@ class AudioQualityTests(unittest.TestCase):
             samples = 0.05 * np.sin(2.0 * np.pi * 220.0 * time_axis)
             samples[::200] = 0.8
             write_pcm16(path, samples)
+
+            result = inspect_wav(path)
+
+            self.assertFalse(result.passed)
+            self.assertIn("diff_spikes", result.reasons)
+
+    def test_repeated_step_clicks_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "step-clicks.wav"
+            sample_rate = 48000
+            time_axis = np.arange(sample_rate, dtype=np.float64) / sample_rate
+            samples = 0.05 * np.sin(2.0 * np.pi * 220.0 * time_axis)
+            blocks = (np.arange(sample_rate) // 200) % 2
+            samples += np.where(blocks == 0, 0.30, -0.30)
+            write_pcm16(path, samples, sample_rate)
+
+            result = inspect_wav(path)
+
+            self.assertFalse(result.passed)
+            self.assertIn("diff_spikes", result.reasons)
+
+    def test_short_audio_counts_boundary_clicks_toward_diff_spike_fraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "boundary-clicks.wav"
+            sample_rate = 48000
+            sample_count = int(sample_rate * 0.05)
+            time_axis = np.arange(sample_count, dtype=np.float64) / sample_rate
+            samples = 0.05 * np.sin(2.0 * np.pi * 220.0 * time_axis)
+            samples[0] = 0.8
+            samples[600:1200] += 0.30
+            samples[1200:1800] -= 0.30
+            samples[-1] = 0.8
+            write_pcm16(path, samples, sample_rate)
 
             result = inspect_wav(path)
 
