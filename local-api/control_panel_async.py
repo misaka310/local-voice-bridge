@@ -47,7 +47,11 @@ class AsyncControlPanelDispatcher(QObject):
         try:
             result = future.result()
         except Exception as exc:
+            if self._closed:
+                return
             self.completed.emit(operation, None, exc)
+            return
+        if self._closed:
             return
         self.completed.emit(operation, result, None)
 
