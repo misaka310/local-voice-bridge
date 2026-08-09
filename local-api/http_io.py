@@ -29,6 +29,39 @@ def is_normal_client_disconnect(exc: BaseException) -> bool:
 
 MAX_POST_BODY_BYTES = 32 * 1024 * 1024
 ALLOWED_BROWSER_ORIGIN_SCHEMES = {"chrome-extension"}
+LOOPBACK_REQUEST_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def request_host_allowed(host_header: str | None, *, expected_port: int | None = None) -> bool:
+    value = str(host_header or "").strip()
+    if not value:
+        return False
+    try:
+        parsed = urlparse(f"//{value}")
+        hostname = str(parsed.hostname or "").strip().lower()
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        hostname not in LOOPBACK_REQUEST_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    if expected_port is not None and port is not None and port != int(expected_port):
+        return False
+    return True
+
+
+def validate_request_host(handler: BaseHTTPRequestHandler) -> tuple[HTTPStatus, str] | None:
+    server_port = getattr(handler.server, "server_port", None)
+    if not request_host_allowed(handler.headers.get("Host"), expected_port=server_port):
+        return HTTPStatus.MISDIRECTED_REQUEST, "request Host must be loopback"
+    return None
 
 
 def browser_origin_allowed(origin: str | None) -> bool:

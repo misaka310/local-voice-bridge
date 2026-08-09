@@ -104,7 +104,7 @@ npm run check:public
 - CIはChatGPTに似た固定フィクスチャを使い、将来の実ChatGPT DOMを保証しません。
 - 軽量デモは統合動作の確認用で、Irodoriの音声品質評価ではありません。
 - 実モデルE2EにはWindows、NVIDIA GPU、CUDA、モデル取得が必要です。
-- ローカルAPIはloopback専用で、通常Webページ由来のPOST、JSON以外のPOST、32 MiBを超えるPOSTを拒否します。一般ユーザー認証を備えた公開APIではないため、LAN、インターネット、トンネルへ公開できません。
+- ローカルAPIはloopback専用で、非loopback `Host`、通常Webページ由来のPOST、JSON以外のPOST、32 MiBを超えるPOSTを拒否します。通常レスポンスへユーザー固有の絶対ファイルパスは返しません。一般ユーザー認証を備えた公開APIではないため、LAN、インターネット、トンネルへ公開できません。
 
 ## 詳細ドキュメント
 

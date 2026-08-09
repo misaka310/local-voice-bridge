@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Hardened every Local API request with loopback `Host` validation, removed user-specific cache paths from `/health`, and added regression coverage for GET/POST/OPTIONS boundary enforcement.
+- Bounded privacy-safe structured runtime event logs with a 2 MiB rotation threshold and two backup generations.
+- Corrected the documented all-tab recovery sweep interval to the implemented 60-second default with a 20-second minimum.
 - Fixed automatic recovery of already-open ChatGPT tabs by loading the DOM mutation filter before the DOM observer during content-script reinjection.
 - Bounded durable browser consumer ACK state to 32 active consumers, expired inactive consumers after seven days, migrated legacy zero-cursor entries, and throttled last-seen persistence so stale profiles cannot block outbox compaction.
 - Added safe cleanup of abandoned E2E Chrome profiles before and after the mock browser suite while preserving profiles owned by running processes.

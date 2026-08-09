@@ -24,7 +24,7 @@ import api_router
 from control_state import ControlStateStore
 from desktop_pet_config import discover_available_pets
 from http_io import ResponseWriteError, is_normal_client_disconnect, json_response, request_json
-from http_io import MAX_POST_BODY_BYTES, browser_origin_allowed, validate_post_request
+from http_io import MAX_POST_BODY_BYTES, browser_origin_allowed, validate_post_request, validate_request_host
 from installation_identity import installation_id
 from irodori_engine import IrodoriError, cache_hint, synthesize_irodori_direct
 from live_conversation import LiveConversationService
@@ -335,7 +335,17 @@ ROUTER_CONTEXT = _RouterContext()
 class Handler(BaseHTTPRequestHandler):
     server_version = "LocalVoiceBridge/1.0"
 
+    def _reject_invalid_host(self) -> bool:
+        problem = validate_request_host(self)
+        if problem is None:
+            return False
+        status, error = problem
+        json_response(self, status, {"ok": False, "error": error})
+        return True
+
     def do_OPTIONS(self) -> None:
+        if self._reject_invalid_host():
+            return
         origin = self.headers.get("Origin")
         if origin and not browser_origin_allowed(origin):
             json_response(self, HTTPStatus.FORBIDDEN, {"ok": False, "error": "browser origin is not allowed"})
@@ -344,9 +354,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        if self._reject_invalid_host():
+            return
         api_router.route_get(self, urlparse(self.path), ROUTER_CONTEXT)
 
     def do_POST(self) -> None:
+        if self._reject_invalid_host():
+            return
         problem = validate_post_request(self)
         if problem is not None:
             status, error = problem

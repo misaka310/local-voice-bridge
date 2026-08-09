@@ -97,7 +97,6 @@ def route_get(handler, parsed, app: ModuleType) -> None:
                 "availableVoiceProfiles": app.model_list(config),
                 "availableReferenceVoices": app.reference_voice_list(config),
                 "audioOutputDir": "local-api/runtime/audio",
-                "cacheHint": app.cache_hint(),
                 "instanceId": app.INSTANCE_ID,
                 "audioRetention": app.audio_retention_policy(config),
                 "pathsExposed": False,
@@ -257,7 +256,8 @@ def route_post(handler, path: str, app: ModuleType) -> None:
             result_payload = {
                 "ok": True,
                 "audioUrl": f"{str(config.get('publicBaseUrl')).rstrip('/')}/audio/{source_file.name}",
-                **{key: value for key, value in result.items() if key != "path"},
+                "usedReferenceAudio": "applied" if result.get("usedReferenceAudio") else "",
+                **{key: value for key, value in result.items() if key not in {"path", "usedReferenceAudio"}},
             }
             json_response(handler, HTTPStatus.OK, result_payload)
         except (ValueError, json.JSONDecodeError, VoiceRuntimeError) as exc:
@@ -318,7 +318,7 @@ def post_speak(handler, app: ModuleType) -> None:
                     "voiceId": voice_id,
                     "voiceProfile": model,
                     "referenceVoice": voice_id,
-                    "usedReferenceAudio": str(runtime_result.get("usedReferenceAudio") or ""),
+                    "usedReferenceAudio": "applied" if runtime_result.get("usedReferenceAudio") else "",
                     "ttsProfile": str(runtime_result.get("ttsProfile") or profile.name),
                     "requestId": request_id,
                     "audioUrl": audio_url,
@@ -357,7 +357,7 @@ def post_speak(handler, app: ModuleType) -> None:
             "voiceId": voice_id,
             "voiceProfile": model,
             "referenceVoice": voice_id,
-            "usedReferenceAudio": used_reference_audio,
+            "usedReferenceAudio": "applied" if used_reference_audio else "",
             "ttsProfile": profile.name,
             "requestId": request_id,
             "audioUrl": audio_url,

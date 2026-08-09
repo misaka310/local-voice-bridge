@@ -88,6 +88,27 @@ class RuntimeEventLoggerTests(unittest.TestCase):
             self.assertEqual(len(records), 20)
             self.assertEqual({record["event"] for record in records}, {"recording_started"})
 
+    def test_rotates_event_log_with_finite_backups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "events.jsonl"
+            logger = RuntimeEventLogger(path, max_bytes=1024, backup_count=2)
+
+            for index in range(40):
+                logger.emit(
+                    "recording_started",
+                    sessionId=f"session-{index}-" + ("x" * 420),
+                    turnId=f"turn-{index}",
+                )
+
+            rotated = [path, path.with_name("events.jsonl.1"), path.with_name("events.jsonl.2")]
+            self.assertTrue(all(candidate.is_file() for candidate in rotated))
+            self.assertFalse(path.with_name("events.jsonl.3").exists())
+            for candidate in rotated:
+                self.assertLessEqual(candidate.stat().st_size, 1024)
+                records = [json.loads(line) for line in candidate.read_text(encoding="utf-8").splitlines()]
+                self.assertTrue(records)
+                self.assertEqual({record["event"] for record in records}, {"recording_started"})
+
 
 if __name__ == "__main__":
     unittest.main()
