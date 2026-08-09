@@ -36,13 +36,23 @@ _IDENTIFIER_FIELDS = {
     "duplicate",
     "capacity",
 }
+DEFAULT_EVENT_LOG_MAX_BYTES = 2 * 1024 * 1024
+DEFAULT_EVENT_LOG_BACKUP_COUNT = 2
 
 
 class RuntimeEventLogger:
-    """Append-only JSONL event log that never accepts prompt or reply bodies."""
+    """Privacy-safe bounded JSONL event log that never accepts prompt or reply bodies."""
 
-    def __init__(self, path: Path | str | None) -> None:
+    def __init__(
+        self,
+        path: Path | str | None,
+        *,
+        max_bytes: int = DEFAULT_EVENT_LOG_MAX_BYTES,
+        backup_count: int = DEFAULT_EVENT_LOG_BACKUP_COUNT,
+    ) -> None:
         self.path = Path(path).expanduser().resolve() if path else None
+        self.max_bytes = max(1024, int(max_bytes))
+        self.backup_count = max(0, int(backup_count))
         self._lock = threading.Lock()
 
     @staticmethod
@@ -69,6 +79,29 @@ class RuntimeEventLogger:
                 safe[key] = str(value)[:512]
         return safe
 
+    def _backup_path(self, index: int) -> Path:
+        if self.path is None:
+            raise RuntimeError("event log path is disabled")
+        return self.path.with_name(f"{self.path.name}.{index}")
+
+    def _rotate_if_needed(self, incoming_bytes: int) -> None:
+        if self.path is None:
+            return
+        try:
+            current_size = self.path.stat().st_size
+        except FileNotFoundError:
+            return
+        if current_size + max(0, int(incoming_bytes)) <= self.max_bytes:
+            return
+        if self.backup_count <= 0:
+            self.path.unlink(missing_ok=True)
+            return
+        for index in range(self.backup_count, 1, -1):
+            source = self._backup_path(index - 1)
+            if source.exists():
+                source.replace(self._backup_path(index))
+        self.path.replace(self._backup_path(1))
+
     def emit(self, event: str, **fields: Any) -> None:
         if self.path is None:
             return
@@ -86,6 +119,7 @@ class RuntimeEventLogger:
         try:
             with self._lock:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._rotate_if_needed(len(encoded.encode("utf-8")))
                 with self.path.open("a", encoding="utf-8", newline="\n") as handle:
                     handle.write(encoded)
         except (OSError, UnicodeError):

@@ -65,7 +65,7 @@ class FakeVoiceRuntime:
         )
         return {
             "path": self.audio_path,
-            "usedReferenceAudio": "reference.wav",
+            "usedReferenceAudio": str(self.audio_path.parent / "private-reference.wav"),
             "playedLocally": bool(play_local),
             "playbackCompleted": bool(play_local),
             "stopped": False,
@@ -75,7 +75,7 @@ class FakeVoiceRuntime:
         self.replay_calls.append({"path": path, "volume": volume, "text": text, "timeout": timeout})
         return {
             "path": self.audio_path,
-            "usedReferenceAudio": "reference.wav",
+            "usedReferenceAudio": str(self.audio_path.parent / "private-reference.wav"),
             "playedLocally": True,
             "playbackCompleted": True,
             "stopped": False,
@@ -413,6 +413,55 @@ class LoopbackConfigTests(unittest.TestCase):
                 thread.join(timeout=5)
                 server.CONTROL_STATE = original_store
 
+    def test_request_host_boundary_rejects_non_loopback_host_for_all_methods(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store = server.CONTROL_STATE
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                get_request = urllib.request.Request(
+                    f"{base}/v1/browser-runtime",
+                    headers={"Host": "review-rebind.example"},
+                    method="GET",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(get_request, timeout=5)
+                self.assertEqual(error.exception.code, 421)
+
+                post_request = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=json.dumps({"enabled": True}).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Host": "review-rebind.example",
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(post_request, timeout=5)
+                self.assertEqual(error.exception.code, 421)
+                self.assertFalse(server.CONTROL_STATE.snapshot()["settings"]["enabled"])
+
+                options_request = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    headers={
+                        "Host": "review-rebind.example",
+                        "Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                    },
+                    method="OPTIONS",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(options_request, timeout=5)
+                self.assertEqual(error.exception.code, 421)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                server.CONTROL_STATE = original_store
+
     def test_post_boundary_keeps_extension_and_native_clients_working(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             original_store = server.CONTROL_STATE
@@ -644,6 +693,8 @@ class LoopbackConfigTests(unittest.TestCase):
                     spoken = json.loads(response.read().decode("utf-8"))
                 self.assertTrue(spoken["playedLocally"])
                 self.assertTrue(spoken["playbackCompleted"])
+                self.assertEqual(spoken["usedReferenceAudio"], "applied")
+                self.assertNotIn(temp_dir, json.dumps(spoken))
                 self.assertEqual(runtime.synthesize_calls[0]["volume"], 0.25)
                 self.assertTrue(runtime.synthesize_calls[0]["playLocal"])
 
@@ -667,6 +718,8 @@ class LoopbackConfigTests(unittest.TestCase):
                 with urllib.request.urlopen(replay, timeout=5) as response:
                     replayed = json.loads(response.read().decode("utf-8"))
                 self.assertTrue(replayed["playedLocally"])
+                self.assertEqual(replayed["usedReferenceAudio"], "applied")
+                self.assertNotIn(temp_dir, json.dumps(replayed))
                 self.assertEqual(runtime.replay_calls[0]["volume"], 0.75)
 
                 stop = urllib.request.Request(
@@ -685,6 +738,8 @@ class LoopbackConfigTests(unittest.TestCase):
                 self.assertEqual(health["voiceRuntime"]["readiness"], "ready")
                 self.assertEqual(health["readiness"]["deviceOrModel"], "ready")
                 self.assertEqual(health["readiness"]["dependencies"], "ready")
+                self.assertFalse(health["pathsExposed"])
+                self.assertNotIn("cacheHint", health)
             finally:
                 httpd.shutdown()
                 httpd.server_close()
