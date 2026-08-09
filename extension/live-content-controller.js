@@ -298,6 +298,8 @@
       cancelEpoch += 1;
       if (!session) return { ok: false, cancelEpoch };
       session.invalidated = true;
+      if (active === session) active = null;
+      emit('interrupted', { reason, cancelEpoch });
       try {
         const result = await runtimeMessage('live-interrupt', {
           payload: {
@@ -308,8 +310,6 @@
         });
         if (result && Number.isFinite(Number(result.cancelEpoch))) cancelEpoch = Number(result.cancelEpoch);
       } catch (_error) {}
-      if (active === session) active = null;
-      emit('interrupted', { reason, cancelEpoch });
       return { ok: true, cancelEpoch };
     }
 
