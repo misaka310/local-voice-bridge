@@ -248,9 +248,9 @@ class LocalVoiceControlPanel(QWidget):
         connected = bool(extension.get("connected"))
         update_required = bool(extension.get("updateRequired"))
         reload_supported = bool(extension.get("supportsExtensionReload"))
-        if not update_required:
+        if connected and not update_required:
             self._reload_extension_requested = False
-        show_reload_button = connected and update_required and reload_supported
+        show_reload_button = (not connected) or (update_required and reload_supported)
         self.reload_extension_button.setVisible(show_reload_button)
         self.reload_extension_button.setEnabled(show_reload_button and not self._reload_extension_requested)
         model_state = str(readiness.get("deviceOrModel") or voice_runtime.get("readiness") or "").strip().lower()
@@ -288,7 +288,7 @@ class LocalVoiceControlPanel(QWidget):
         else:
             self.status_label.setText("拡張機能を再読み込みしてください")
             self._set_current_text(
-                "Chrome / Braveの拡張機能画面でLocal Voice Bridgeを再読み込みしてください。ChatGPTタブの再読み込みは不要です。"
+                "下のボタンでLocal Voice Bridge拡張機能を再読み込みしてください。ChatGPTタブの再読み込みは不要です。"
             )
 
         mic_enabled = bool(settings.get("micConversationEnabled"))

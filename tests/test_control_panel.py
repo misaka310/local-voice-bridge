@@ -241,7 +241,23 @@ class ControlPanelQtTests(unittest.TestCase):
 
             self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしてください")
             self.assertIn("ChatGPTタブの再読み込みは不要", panel.current_text_label.toolTip())
-            self.assertNotIn("Open or reload", panel.current_text_label.toolTip())
+            self.assertIn("下のボタン", panel.current_text_label.toolTip())
+            self.assertNotIn("Chrome / Braveの拡張機能画面", panel.current_text_label.toolTip())
+            self.assertFalse(panel.reload_extension_button.isHidden())
+            self.assertTrue(panel.reload_extension_button.isEnabled())
+
+            panel.reload_extension_button.click()
+            self.app.processEvents()
+
+            self.assertEqual(client.commands, ["reload_extension"])
+            self.assertFalse(panel.reload_extension_button.isEnabled())
+            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
+
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertFalse(panel.reload_extension_button.isEnabled())
+            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
             panel.shutdown()
 
     def test_controls_send_settings_and_commands(self) -> None:
