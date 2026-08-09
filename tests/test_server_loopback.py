@@ -362,6 +362,94 @@ class LoopbackConfigTests(unittest.TestCase):
         finally:
             httpd.server_close()
 
+    def test_post_boundary_rejects_normal_web_origins_non_json_and_oversized_bodies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store = server.CONTROL_STATE
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                blocked_origin = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=json.dumps({"enabled": True}).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Origin": "https://example.com",
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(blocked_origin, timeout=5)
+                self.assertEqual(error.exception.code, 403)
+                self.assertFalse(server.CONTROL_STATE.snapshot()["settings"]["enabled"])
+
+                non_json = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=b'{"enabled":true}',
+                    headers={"Content-Type": "text/plain"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(non_json, timeout=5)
+                self.assertEqual(error.exception.code, 415)
+
+                oversized = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=b"{}",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": str(server.MAX_POST_BODY_BYTES + 1),
+                    },
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(oversized, timeout=5)
+                self.assertEqual(error.exception.code, 413)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                server.CONTROL_STATE = original_store
+
+    def test_post_boundary_keeps_extension_and_native_clients_working(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store = server.CONTROL_STATE
+            server.CONTROL_STATE = server.ControlStateStore(Path(temp_dir) / "control-state.json")
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            try:
+                extension_request = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=json.dumps({"enabled": True}).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json; charset=utf-8",
+                        "Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(extension_request, timeout=5) as response:
+                    extension_payload = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(extension_payload["settings"]["enabled"])
+
+                native_request = urllib.request.Request(
+                    f"{base}/v1/control-panel/settings",
+                    data=json.dumps({"enabled": False}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(native_request, timeout=5) as response:
+                    native_payload = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(native_payload["settings"]["enabled"])
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+                server.CONTROL_STATE = original_store
+
     def test_control_panel_endpoints_share_settings_commands_and_extension_state(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             original_store = getattr(server, "CONTROL_STATE", None)
