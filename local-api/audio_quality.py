@@ -116,7 +116,21 @@ def inspect_wav(
     if differences.size:
         median_diff = float(np.median(differences))
         spike_threshold = max(0.25, median_diff * 12.0)
-        diff_spike_fraction = float(np.mean(differences >= spike_threshold))
+        large_differences = differences >= spike_threshold
+        discontinuity_spikes = np.zeros(differences.shape, dtype=bool)
+        if differences.size == 1:
+            discontinuity_spikes[0] = large_differences[0]
+        else:
+            discontinuity_spikes[0] = large_differences[0] and differences[1] <= differences[0] * 0.10
+            discontinuity_spikes[-1] = large_differences[-1] and differences[-2] <= differences[-1] * 0.10
+            if differences.size >= 3:
+                current = differences[1:-1]
+                quieter_neighbor = np.minimum(differences[:-2], differences[2:])
+                discontinuity_spikes[1:-1] = (
+                    (current >= spike_threshold)
+                    & (quieter_neighbor <= current * 0.10)
+                )
+        diff_spike_fraction = float(np.mean(discontinuity_spikes))
     else:
         diff_spike_fraction = 0.0
     high_band_ratio, spectral_flatness = _spectral_metrics(samples, sample_rate)
