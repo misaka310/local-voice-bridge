@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect, QSize
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +85,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
 
             panel.refresh_now()
@@ -111,6 +114,7 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertTrue(panel.current_text_label.text().startswith("全タブから届い"))
             self.assertIn("Queue 2", panel.queue_label.text())
             self.assertIn("3 tabs", panel.queue_label.text())
+            self.assertTrue(panel.stop_button.isEnabled())
             self.assertTrue(panel.replay_button.isEnabled())
             panel.shutdown()
 
@@ -140,6 +144,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -179,6 +184,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -187,6 +193,7 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertIn("transformers is required", panel.current_text_label.toolTip())
             self.assertFalse(panel.next_button.isEnabled())
             self.assertFalse(panel.regen_button.isEnabled())
+            self.assertFalse(panel.stop_button.isEnabled())
             self.assertFalse(panel.replay_button.isEnabled())
             panel.shutdown()
 
@@ -210,6 +217,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
 
             panel.refresh_now()
@@ -235,6 +243,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -243,6 +252,17 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertIn("ChatGPTタブの再読み込みは不要", panel.current_text_label.toolTip())
             self.assertIn("下のボタン", panel.current_text_label.toolTip())
             self.assertNotIn("Chrome / Braveの拡張機能画面", panel.current_text_label.toolTip())
+            for control in (
+                panel.auto_button,
+                panel.mic_button,
+                panel.reference_combo,
+                panel.volume_slider,
+                panel.next_button,
+                panel.regen_button,
+                panel.stop_button,
+                panel.replay_button,
+            ):
+                self.assertFalse(control.isEnabled())
             self.assertFalse(panel.reload_extension_button.isHidden())
             self.assertTrue(panel.reload_extension_button.isEnabled())
 
@@ -267,16 +287,20 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
 
             panel.auto_button.click()
             self.assertFalse(panel.mic_button.isChecked())
+            panel.volume_slider.setValue(20)
             panel.volume_slider.setValue(25)
+            QTest.qWait(180)
             panel.reference_combo.setCurrentIndex(0)
             panel.next_button.click()
             panel.regen_button.click()
+            panel.stop_button.click()
             panel.replay_button.click()
             self.app.processEvents()
 
@@ -284,9 +308,90 @@ class ControlPanelQtTests(unittest.TestCase):
                 {"enabled": False, "micConversationEnabled": False},
                 client.settings_calls,
             )
-            self.assertIn({"voiceVolume": 0.25}, client.settings_calls)
+            self.assertEqual(
+                [call for call in client.settings_calls if "voiceVolume" in call],
+                [{"voiceVolume": 0.25}],
+            )
             self.assertIn({"referenceVoice": ""}, client.settings_calls)
-            self.assertEqual(client.commands, ["next", "regen", "replay"])
+            self.assertEqual(client.commands, ["next", "regen", "stop", "replay"])
+            panel.shutdown()
+
+    def test_local_api_disconnect_disables_all_mutating_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+
+            def disconnected_snapshot() -> dict[str, object]:
+                raise OSError("local API unavailable")
+
+            client.get_snapshot = disconnected_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+                async_requests=False,
+            )
+            panel.refresh_now()
+            for control in (
+                panel.auto_button,
+                panel.mic_button,
+                panel.reference_combo,
+                panel.volume_slider,
+                panel.next_button,
+                panel.regen_button,
+                panel.stop_button,
+                panel.replay_button,
+            ):
+                self.assertFalse(control.isEnabled())
+            panel.shutdown()
+
+    def test_failed_setting_update_rolls_back_visible_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+                async_requests=False,
+            )
+            panel.refresh_now()
+            self.assertTrue(panel.auto_button.isChecked())
+
+            def reject_update(_payload: dict[str, object]) -> dict[str, object]:
+                raise RuntimeError("settings rejected")
+
+            client.update_settings = reject_update  # type: ignore[method-assign]
+            panel.auto_button.click()
+
+            self.assertTrue(panel.auto_button.isChecked())
+            self.assertEqual(panel.status_label.text(), "設定を保存できませんでした")
+            panel.shutdown()
+
+    def test_slow_snapshot_does_not_block_the_qt_ui_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            original = client.get_snapshot
+
+            def slow_snapshot() -> dict[str, object]:
+                time.sleep(0.30)
+                return original()
+
+            client.get_snapshot = slow_snapshot  # type: ignore[method-assign]
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+                async_requests=True,
+            )
+            started = time.perf_counter()
+            panel.refresh_now()
+            elapsed = time.perf_counter() - started
+
+            self.assertLess(elapsed, 0.20)
+            deadline = time.perf_counter() + 2.0
+            while panel.reference_combo.currentData() != "asuka" and time.perf_counter() < deadline:
+                QTest.qWait(25)
+                self.app.processEvents()
+            self.assertEqual(panel.reference_combo.currentData(), "asuka")
             panel.shutdown()
 
     def test_missing_stt_component_disables_microphone_controls(self) -> None:
@@ -304,6 +409,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -336,6 +442,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -343,6 +450,8 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertEqual(panel.status_label.text(), "拡張機能の再読み込みが必要")
             self.assertIn("0.1.0 → 0.2.0", panel.current_text_label.toolTip())
             self.assertTrue(panel.reload_extension_button.isHidden())
+            self.assertFalse(panel.auto_button.isEnabled())
+            self.assertFalse(panel.stop_button.isEnabled())
             panel.shutdown()
 
     def test_supported_old_extension_can_reload_itself_from_the_panel(self) -> None:
@@ -369,6 +478,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 client,
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             panel.refresh_now()
             self.app.processEvents()
@@ -394,6 +504,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 FakeControlClient(),
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=False,
+                async_requests=False,
             )
             self.assertFalse(panel.isVisible())
 
@@ -416,6 +527,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 FakeControlClient(),
                 state_path=Path(temp_dir) / "panel-window.json",
                 start_polling=True,
+                async_requests=False,
             )
 
             self.assertFalse(panel.isVisible())
@@ -439,6 +551,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 FakeControlClient(),
                 state_path=state_path,
                 start_polling=False,
+                async_requests=False,
             )
 
             panel.show_panel()

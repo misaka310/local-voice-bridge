@@ -21,7 +21,7 @@ const env = {
   ...process.env,
   LOCAL_VOICE_BROWSER_EXECUTABLE: brave,
   LOCAL_VOICE_TEST_PROFILE: profile,
-  PLAYWRIGHT_HEADED: '1',
+  PLAYWRIGHT_HEADED: process.env.LOCAL_VOICE_E2E_HEADED === '1' ? '1' : '0',
 };
 
 console.log(`[brave-mic-e2e] executable=${brave}`);

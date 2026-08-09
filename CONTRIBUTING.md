@@ -6,7 +6,7 @@ Local Voice Bridgeへの変更では、利用者向けREADMEに記載された�
 
 - Autoは有効化後に現れた新しいassistant返答だけを対象にします。
 - 既定の自動読み上げは冒頭プレビュー（最大2行・80文字）で、返答全文を自動分割して読み上げません。
-- `Next`、`Replay`、`Regen`の既存動作を変更する場合は、READMEとテストを同じPRで更新してください。
+- `Next`、`Replay`、`Regen`、`Stop`の既存動作を変更する場合は、READMEとテストを同じPRで更新してください。
 - ローカルAPIはloopback専用です。LAN、インターネット、トンネルへ公開する構成を追加しないでください。
 
 ## Multi-tab resource contract
@@ -58,7 +58,7 @@ npm run test:ci
 npm run test:e2e:brave-mic
 ```
 
-この検証は専用Braveプロファイル、テスト用拡張コピー、別APIポートを使用します。利用者の普段使いプロファイルを再起動・再利用してはいけません。ChatGPTに近いProseMirror入力欄、ネイティブ入力、送信前後のComposerノード差し替え、送信クリック、submission commitまで確認します。
+この検証は専用Braveプロファイル、テスト用拡張コピー、別APIポートを使用し、通常はheadlessで実行します。目視確認が必要な場合だけ`LOCAL_VOICE_E2E_HEADED=1`を明示してください。利用者の普段使いプロファイルを再起動・再利用してはいけません。ChatGPTに近いProseMirror入力欄、ネイティブ入力、送信前後のComposerノード差し替え、送信クリック、submission commitまで確認します。
 
 assistant本文・出典フィルタを変更した場合は、`tests/e2e/assistant-text-extractor-dom.spec.js`のDOMマトリクスを更新してください。消すべき出典だけでなく、通常リンク、説明付きリンク、本文中の数字・年・容量表記、出典チップの前後や隣にある本文が残ることも確認します。スクリーンショット1件だけを再現するテストでは完了扱いにしません。
 

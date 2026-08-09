@@ -30,5 +30,7 @@ Windows Local Voice小窓の`拡張機能を再読み込み`ボタンは通常�
 
 ## 仕様の正本
 
-- 仕様の正本: `README.md`
+- 仕様の正本: `docs/SPEC.md`
+- `README.md` と `CONTRIBUTING.md` は利用者向け公開文書として `docs/SPEC.md` と整合させる。
+- 共有の`validate-new-repository-spec.py`を`--repo .`で実行し、`NEW_REPOSITORY_SPEC_OK`を返す状態を維持する。
 - 実装前に意図する仕様を正本へ反映し、仕様変更時は同じ変更で正本と検証を更新する。

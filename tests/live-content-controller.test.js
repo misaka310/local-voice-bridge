@@ -13,6 +13,7 @@ function flush() {
 function createHarness() {
   const nodes = [{ key: 'assistant-1', text: 'old' }];
   const calls = [];
+  const states = [];
   let generating = true;
   let currentLocation = 'https://chatgpt.com/c/current?model=x';
   let activeComposer = null;
@@ -60,12 +61,14 @@ function createHarness() {
     resolveComposer: () => activeComposer,
     crypto,
     getVoiceSettings: () => ({ liveTtsProfile: 'speed', referenceVoice: 'suguha', voiceVolume: 0.6 }),
+    onState: (state) => states.push(state),
     sleep: async () => {},
   });
   return {
     controller,
     nodes,
     calls,
+    states,
     setGenerating(value) { generating = value; },
     setLocation(value) { currentLocation = value; },
     setActiveComposer(value) { activeComposer = value; },
@@ -258,6 +261,16 @@ test('manual Enter and regenerate pointer both interrupt current live ownership'
   assert.equal(second.controller.handlePointer({ target }), true);
   await flush();
   assert.equal(second.calls.find((call) => call.type === 'live-interrupt').extra.payload.reason, 'regenerate');
+});
+
+test('interrupt publishes state before the async runtime acknowledgement completes', async () => {
+  const harness = createHarness();
+  const item = { ...harness.controller.metadata('session-1', '質問'), insertedText: '質問' };
+  await harness.controller.prepareSubmission(item);
+  harness.states.length = 0;
+
+  assert.equal(harness.controller.handleKeydown({ key: 'Enter', shiftKey: false, target: {} }, () => true), true);
+  assert.equal(harness.states.at(-1)?.phase, 'interrupted');
 });
 
 test('same-tab conversation navigation invalidates the old Live ownership', async () => {

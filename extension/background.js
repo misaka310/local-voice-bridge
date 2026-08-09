@@ -352,7 +352,7 @@ function scheduleExternalControlPoll(delayMs = 0) {
     let nextDelay = 5000;
     try {
       const synchronized = await syncExternalControlPanel();
-      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 50 ? 50 : 5000;
+      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 100 ? 100 : 5000;
     } catch (_error) {}
     scheduleExternalControlPoll(nextDelay);
   }, delay);
