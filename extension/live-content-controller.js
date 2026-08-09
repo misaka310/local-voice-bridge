@@ -332,10 +332,10 @@
       ) : '';
       const currentComposer = resolveComposer(target) || session.inputComposer;
       const eventFromInputComposer = composerContainsTarget(currentComposer, target);
+      if (!eventFromInputComposer) return false;
       const inputComposerText = liveCore.normalizeText(composerText(currentComposer));
       if (
-        eventFromInputComposer
-        && (session.phase === 'arming' || session.phase === 'armed')
+        (session.phase === 'arming' || session.phase === 'armed')
         && inputComposerText === session.expectedInputText
       ) {
         session.inputComposer = currentComposer;

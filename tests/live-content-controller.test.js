@@ -119,19 +119,40 @@ test('ambiguous new assistant messages fail closed and interrupt', async () => {
 
 test('synthetic transcript input does not interrupt but real input does', async () => {
   const harness = createHarness();
+  const composer = { value: '質問' };
   const item = {
     ...harness.controller.metadata('session-1', '質問'),
     insertedText: '質問',
     syntheticMarker: 'marker-1',
+    composer,
   };
   await harness.controller.prepareSubmission(item);
 
-  assert.equal(harness.controller.handleInput({ localVoiceSyntheticInputToken: 'marker-1' }), false);
-  assert.equal(harness.controller.handleInput({}), true);
+  assert.equal(harness.controller.handleInput({ target: composer, localVoiceSyntheticInputToken: 'marker-1' }), false);
+  composer.value = '質問を変更';
+  assert.equal(harness.controller.handleInput({ target: composer, isTrusted: true }), true);
   await flush();
 
   assert.equal(harness.calls.filter((call) => call.type === 'live-interrupt').length, 1);
   assert.equal(harness.calls.find((call) => call.type === 'live-interrupt').extra.payload.reason, 'composer-input');
+});
+
+test('unrelated document input does not invalidate an armed submission', async () => {
+  const harness = createHarness();
+  const composer = { value: '質問' };
+  const unrelatedInput = { value: 'other' };
+  const item = {
+    ...harness.controller.metadata('session-1', '質問'),
+    insertedText: '質問',
+    syntheticMarker: 'marker-1',
+    composer,
+  };
+  await harness.controller.prepareSubmission(item);
+
+  assert.equal(harness.controller.handleInput({ target: unrelatedInput, isTrusted: true }), false);
+  await flush();
+
+  assert.equal(harness.calls.some((call) => call.type === 'live-interrupt'), false);
 });
 
 test('delayed native input for the unchanged inserted transcript does not invalidate the armed submission', async () => {
@@ -186,13 +207,15 @@ test('a replacement composer with the unchanged transcript does not invalidate t
 
 test('submit clear event is ignored once but trusted user input still interrupts', async () => {
   const harness = createHarness();
+  const composer = { value: '質問' };
   const item = {
     ...harness.controller.metadata('session-1', '質問'),
     insertedText: '質問',
     syntheticMarker: 'marker-1',
+    composer,
   };
   await harness.controller.prepareSubmission(item);
-  const composer = { value: '' };
+  composer.value = '';
   assert.equal(harness.controller.markSubmissionClick(item, composer), true);
 
   assert.equal(harness.controller.handleInput({ target: composer, isTrusted: false }), false);
