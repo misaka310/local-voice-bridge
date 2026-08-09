@@ -57,6 +57,7 @@ if (status === 0) {
     'tests/content-completion-marker.test.js',
     'tests/content-message-router.test.js',
     'tests/e2e-profile-cleanup.test.js',
+    'tests/brave-mic-runner.test.js',
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
     'tests/options-settings.test.js',

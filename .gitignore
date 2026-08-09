@@ -96,6 +96,8 @@ exports/
 test-results/
 playwright-report/
 =/
+/-c/
+/node scripts/
 .npm-cache/
 npm-cache/
 .DS_Store

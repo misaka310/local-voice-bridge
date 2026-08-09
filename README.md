@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 
 - Autoをオンにした後の新しいChatGPT返答だけを、完了確認後にローカル音声で読み上げ
 - 空の新規会話、回答生成中、完了未確認、明るい緑のスピーカーで示す読み上げ処理中、ChatGPTのテキスト回答生成エラーを、競合時にも点滅させない静的faviconで区別
-- 開いている複数タブの返答を1つの共通キューで管理し、`Next`・`Replay`・`Regen`で操作
+- 開いている複数タブの返答を1つの共通キューで管理し、`Next`・`Replay`・`Regen`・`Stop`で操作
 - API、生成音声、任意の参照音声を同じPC内で管理し、通常利用ではターミナルを表示しない
 - 任意のマイク会話モードでは、キーを押している間だけ録音し、ローカルfaster-whisperでChatGPT入力欄へ送信
 - 対応するYouTube Dictation Pause Controlと連携し、録音中だけYouTubeを停止・再開
@@ -68,8 +68,8 @@ setup-voice-env.cmd
 ## Usage / 起動と操作
 
 1. Windows検索で`Local Voice Bridge`を開くか、リポジトリ直下の`LocalVoiceBridge.exe`を実行します。
-2. `http://127.0.0.1:8717/health`で`ok=true`と`engine=irodori_direct`を確認します。
-3. [拡張機能の導入・更新手順](extension/INSTALL.md)に従い、Chrome / Braveへ`extension/`を読み込みます。
+2. [拡張機能の導入・更新手順](extension/INSTALL.md)に従い、Chrome / Braveへ`extension/`を読み込みます。
+3. Chrome / BraveでChatGPTを開き、Windows Local Voice小窓が接続状態になることを確認します。
 4. Windows Local Voice小窓でAutoをオンにし、ChatGPTへ新しいメッセージを送ります。返答完了後に先頭プレビューが一度だけ再生されれば準備完了です。拡張機能の再読み込みが必要な場合は、小窓の`拡張機能を再読み込み`を押します。ChatGPTタブ自体の再読み込みは不要です。
 
 読み上げ量や文字起こしモデルは拡張機能の`オプション`、Auto・参照音声・マイク会話はWindows小窓から設定します。マイク会話を使う場合はセットアップで追加機能を導入し、送信先の入力欄へフォーカスして指定キーを押している間だけ録音します。拡張機能の切断または更新待ちを検出した場合は、小窓に`拡張機能を再読み込み`ボタンを表示します。切断中は再読み込み対応可否を断定せず、loopbackの再読み込み要求を待ち行列へ入れて拡張機能の再接続を待ちます。接続済み旧版が自己再読み込み非対応と明示している場合だけ、ブラウザの拡張機能画面での手動更新を案内します。

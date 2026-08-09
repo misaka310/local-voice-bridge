@@ -47,6 +47,8 @@ for (const file of [
   'local-api/http_io.py',
   'local-api/api_router.py',
   'local-api/control_panel_client.py',
+  'local-api/control_panel_async.py',
+  'local-api/control_panel_style.py',
   'local-api/panel_window_state.py',
   'local-api/audio_recorder.py',
   'local-api/stt_runtime.py',

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import urllib.error
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,7 +17,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from control_panel_async import AsyncControlPanelDispatcher
 from control_panel_client import ControlPanelApiClient
+from control_panel_style import PANEL_STYLE
 from panel_window_state import PanelWindowStateStore, clamp_window_position
 
 
@@ -43,6 +44,7 @@ class LocalVoiceControlPanel(QWidget):
         *,
         state_path: Path,
         start_polling: bool = True,
+        async_requests: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -54,6 +56,7 @@ class LocalVoiceControlPanel(QWidget):
         self._current_text_full = "No assistant response yet"
         self._reload_extension_requested = False
         self._drag_offset: QPoint | None = None
+        self._request_dispatcher = AsyncControlPanelDispatcher(self, client, async_requests=async_requests)
 
         self.setObjectName("local-voice-control-panel")
         self.setWindowTitle("Local Voice Bridge")
@@ -74,6 +77,10 @@ class LocalVoiceControlPanel(QWidget):
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(750)
         self.refresh_timer.timeout.connect(self.refresh_now)
+        self.volume_update_timer = QTimer(self)
+        self.volume_update_timer.setSingleShot(True)
+        self.volume_update_timer.setInterval(150)
+        self.volume_update_timer.timeout.connect(self._flush_volume_change)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -162,49 +169,18 @@ class LocalVoiceControlPanel(QWidget):
         self.next_button.clicked.connect(lambda: self._send_command("next"))
         self.regen_button = QPushButton("Regen", card)
         self.regen_button.clicked.connect(lambda: self._send_command("regen"))
+        self.stop_button = QPushButton("Stop", card)
+        self.stop_button.clicked.connect(lambda: self._send_command("stop"))
         self.replay_button = QPushButton("Replay", card)
         self.replay_button.clicked.connect(lambda: self._send_command("replay"))
-        for button in (self.auto_button, self.next_button, self.regen_button, self.replay_button):
+        for button in (self.auto_button, self.next_button, self.regen_button, self.stop_button, self.replay_button):
             button.setMinimumHeight(30)
             controls.addWidget(button)
         card_layout.addLayout(controls)
-
-        self.setStyleSheet(
-            """
-            QFrame#panel-card {
-                background: rgba(10, 12, 18, 238);
-                border: 1px solid rgba(120, 180, 255, 70);
-                border-radius: 14px;
-            }
-            QLabel { color: #f5f7ff; font: 12px 'Segoe UI'; }
-            QLabel#panel-title { font-size: 14px; font-weight: 700; }
-            QLabel#panel-status { color: #9fd0ff; font-weight: 600; }
-            QLabel#panel-current-text { color: #c8d2e8; }
-            QLabel#panel-queue { color: #8792a8; font-size: 11px; }
-            QPushButton, QComboBox {
-                color: #f5f7ff;
-                background: rgba(255, 255, 255, 18);
-                border: 1px solid rgba(255, 255, 255, 35);
-                border-radius: 8px;
-                padding: 5px 8px;
-            }
-            QPushButton:hover, QComboBox:hover { background: rgba(255, 255, 255, 30); }
-            QPushButton:checked { background: rgba(73, 168, 113, 80); border-color: rgba(73, 168, 113, 150); }
-            QPushButton:disabled { color: #667085; background: rgba(255, 255, 255, 8); }
-            QPushButton#panel-hide { padding: 0; font-size: 17px; }
-            QComboBox QAbstractItemView { background: #171b25; color: #f5f7ff; selection-background-color: #2f6feb; }
-            QSlider::groove:horizontal { height: 4px; background: #3a4252; border-radius: 2px; }
-            QSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: #8fc7ff; }
-            """
-        )
+        self.setStyleSheet(PANEL_STYLE)
 
     def refresh_now(self) -> None:
-        try:
-            snapshot = self.client.get_snapshot()
-        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-            self._apply_disconnected_state()
-            return
-        self.apply_snapshot(snapshot)
+        self._request_dispatcher.refresh()
 
     def _apply_disconnected_state(self) -> None:
         self.status_label.setText("Voice Bridge starting")
@@ -213,7 +189,9 @@ class LocalVoiceControlPanel(QWidget):
         self._reload_extension_requested = False
         self.reload_extension_button.hide()
         self.reload_extension_button.setEnabled(False)
-        for button in (self.next_button, self.regen_button, self.replay_button):
+        for control in (self.auto_button, self.mic_button, self.reference_combo, self.volume_slider):
+            control.setEnabled(False)
+        for button in (self.next_button, self.regen_button, self.stop_button, self.replay_button):
             button.setEnabled(False)
 
     def _set_mic_button_text(self, title: str, detail: str, *, visible_detail: str = "") -> None:
@@ -248,6 +226,10 @@ class LocalVoiceControlPanel(QWidget):
         connected = bool(extension.get("connected"))
         update_required = bool(extension.get("updateRequired"))
         reload_supported = bool(extension.get("supportsExtensionReload"))
+        settings_available = connected and not update_required
+        self.auto_button.setEnabled(settings_available)
+        self.reference_combo.setEnabled(settings_available)
+        self.volume_slider.setEnabled(settings_available)
         if connected and not update_required:
             self._reload_extension_requested = False
         show_reload_button = (not connected) or (update_required and reload_supported)
@@ -293,7 +275,7 @@ class LocalVoiceControlPanel(QWidget):
 
         mic_enabled = bool(settings.get("micConversationEnabled"))
         stt_installed = bool(components.get("sttInstalled"))
-        self.mic_button.setEnabled(stt_installed)
+        self.mic_button.setEnabled(settings_available and stt_installed)
         if not stt_installed:
             self._set_mic_button_text(
                 "マイク会話（追加セットアップ）",
@@ -326,9 +308,10 @@ class LocalVoiceControlPanel(QWidget):
         tabs_count = max(0, int(extension.get("tabsCount") or readiness.get("tabs") or 0))
         replay_available = bool(extension.get("replayAvailable") or voice_runtime.get("replayAvailable"))
         self.queue_label.setText(f"Queue {queue_size} · {tabs_count} tabs")
-        controls_available = connected and not runtime_blocked
+        controls_available = connected and not runtime_blocked and not update_required
         self.next_button.setEnabled(controls_available)
         self.regen_button.setEnabled(controls_available)
+        self.stop_button.setEnabled(controls_available)
         self.replay_button.setEnabled(controls_available and not runtime_loading and replay_available)
 
         if update_required:
@@ -407,7 +390,10 @@ class LocalVoiceControlPanel(QWidget):
         self.volume_value.setText(f"{int(value)}%")
         if self._updating_controls:
             return
-        self._update_settings({"voiceVolume": round(int(value) / 100.0, 2)})
+        self.volume_update_timer.start()
+
+    def _flush_volume_change(self) -> None:
+        self._update_settings({"voiceVolume": round(self.volume_slider.value() / 100.0, 2)})
 
     def _on_reference_changed(self, _index: int) -> None:
         if self._updating_controls:
@@ -415,31 +401,17 @@ class LocalVoiceControlPanel(QWidget):
         self._update_settings({"referenceVoice": str(self.reference_combo.currentData() or "")})
 
     def _update_settings(self, payload: dict[str, Any]) -> None:
-        try:
-            self.client.update_settings(payload)
-        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-            self.status_label.setText("Control update failed")
+        self._request_dispatcher.update_settings(payload)
 
     def _reload_extension(self) -> None:
         if self._reload_extension_requested:
             return
         self._reload_extension_requested = True
         self.reload_extension_button.setEnabled(False)
-        try:
-            self.client.send_command("reload_extension")
-        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-            self._reload_extension_requested = False
-            self.reload_extension_button.setEnabled(True)
-            self.status_label.setText("拡張機能の再読み込み要求に失敗しました")
-            return
-        self.status_label.setText("拡張機能を再読み込みしています")
-        self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
+        self._request_dispatcher.reload_extension()
 
     def _send_command(self, command: str) -> None:
-        try:
-            self.client.send_command(command)
-        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
-            self.status_label.setText("Command failed")
+        self._request_dispatcher.send_command(command)
 
     def show_panel(self) -> None:
         self.refresh_now()
@@ -507,6 +479,8 @@ class LocalVoiceControlPanel(QWidget):
             return
         self._shutting_down = True
         self.refresh_timer.stop()
+        self.volume_update_timer.stop()
+        self._request_dispatcher.shutdown()
         self.state_store.save_position(self.pos())
         self.hide()
         self.close()
