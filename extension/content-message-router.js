@@ -1,12 +1,14 @@
 'use strict'; (function initContentMessageRouter(global) {
   function create(ctx) {
     let activePlaybackToken = '';
-    const terminalMarks = {
-      'playback-completed': ctx.markPlaybackCompleted,
-      'playback-stopped': ctx.markPlaybackStopped,
-      'playback-error': ctx.markPlaybackError,
-    };
+    const terminalMarks = { 'playback-completed': ctx.markPlaybackCompleted, 'playback-stopped': ctx.markPlaybackStopped, 'playback-error': ctx.markPlaybackError };
     const tokenOf = (message) => String((message.payload && message.payload.playbackToken) || '');
+    function reconcilePlayback(payload = {}) {
+      const active = payload.isPlaybackSource === true;
+      const token = active ? String(payload.currentPlaybackToken || '') : '';
+      if (active && token !== activePlaybackToken) { activePlaybackToken = token; ctx.markPlaybackStarted(); }
+      else if (!active && activePlaybackToken) { activePlaybackToken = ''; ctx.markPlaybackStopped(); }
+    }
     function handleTerminal(message) {
       const mark = terminalMarks[message.type];
       if (!mark) return false;
@@ -19,13 +21,11 @@
     }
     return (message, _sender, sendResponse) => {
       if (!message || typeof message.type !== 'string') return false;
-      if (message.type === 'conversation-target-status') {
-        sendResponse(ctx.conversationTargetStatus()); return false;
-      }
+      if (message.type === 'conversation-target-status') { sendResponse(ctx.conversationTargetStatus()); return false; }
       if (message.type === 'tab-activated') { ctx.clearCompletionMarker(); return false; }
       if (message.type === 'bridge-reconnect') {
         ctx.registerCurrentTab({ includeLatest: true })
-          .then((payload) => sendResponse({ ok: true, payload }))
+          .then((payload) => { reconcilePlayback(payload); sendResponse({ ok: true, payload }); })
           .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
         return true;
       }
@@ -36,7 +36,7 @@
         ctx.applySettingsSnapshot(message.payload || {}); sendResponse({ ok: true }); return false;
       }
       if (message.type === 'state-update') {
-        ctx.applyOwnerState(message.payload.isUiOwner, message.payload); return false;
+        ctx.applyOwnerState(message.payload.isUiOwner, message.payload); reconcilePlayback(message.payload); return false;
       }
       if (message.type === 'playback-started') {
         activePlaybackToken = tokenOf(message); ctx.markPlaybackStarted(); return false;
@@ -45,20 +45,7 @@
       if (message.type === 'play-audio') {
         const payload = message.payload || {};
         const token = String(payload.playbackToken || '');
-        activePlaybackToken = token;
-        ctx.markPlaybackStarted();
-        void Promise.resolve(ctx.playItem(payload.url, payload.text, payload.item, token))
-          .then((result = {}) => {
-            if (activePlaybackToken !== token) return;
-            activePlaybackToken = '';
-            if (result.ok) ctx.markPlaybackCompleted();
-            else if (result.stopped) ctx.markPlaybackStopped();
-            else ctx.markPlaybackError();
-          })
-          .catch(() => {
-            if (activePlaybackToken !== token) return;
-            activePlaybackToken = ''; ctx.markPlaybackError();
-          });
+        void Promise.resolve(ctx.playItem(payload.url, payload.text, payload.item, token)).catch(() => {});
         return false;
       }
       if (message.type === 'voice-transcript') return ctx.handleVoiceTranscript(message, sendResponse);
@@ -67,9 +54,7 @@
       }
       if (message.type === 'stop-audio') {
         const token = tokenOf(message);
-        if (ctx.audioPlayer.matches(token)) {
-          activePlaybackToken = ''; ctx.stopCurrentPlayback('stop'); ctx.markPlaybackStopped();
-        }
+        if (ctx.audioPlayer.matches(token)) ctx.stopCurrentPlayback('stop');
         sendResponse({ ok: true });
       }
       return false;

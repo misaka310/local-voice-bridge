@@ -63,7 +63,7 @@
   const {
     getPlainDocumentTitle, isTabActivelyViewed,
     clear: clearCompletionMarker,
-    markResponseGenerating, markResponseCompleted, markResponseError,
+    markResponseGenerating, markResponseGenerationEnded, markResponseCompleted, markResponseError,
     markPlaybackStarted, markPlaybackCompleted, markPlaybackError, markPlaybackStopped,
     initialize: initializeCompletionMarker,
   } = completionMarker;
@@ -75,6 +75,7 @@
     isEnabled: () => enabled,
     reportChunks: (entry, isAuto) => reportChunks(entry, isAuto),
     markResponseGenerating,
+    markResponseGenerationEnded,
     markResponseCompleted, markResponseError, setNewConversation: completionMarker.setNewConversation,
     requestAutoRecheck: (delayMs) => runtimeMessage('schedule-auto-recheck', {
       delayMs: Math.max(50, Math.min(5000, Number(delayMs) || 500)),

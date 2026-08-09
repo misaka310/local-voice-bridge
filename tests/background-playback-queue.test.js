@@ -97,6 +97,7 @@ function createHarness(options = {}) {
       tabs: {
         sendMessage: async (tabId, message) => {
           messages.push({ tabId, message });
+          if (options.sendMessage) return options.sendMessage(tabId, message);
           return { ok: true };
         },
       },
@@ -123,6 +124,43 @@ function statusTypes(harness, tabId = 202) {
     .filter((entry) => entry.tabId === tabId && entry.message.type.startsWith('playback-'))
     .map((entry) => entry.message.type);
 }
+
+test('playback waits until the source tab observes the started status', async () => {
+  let releaseStarted;
+  const started = new Promise((resolve) => { releaseStarted = resolve; });
+  const harness = createHarness({
+    queue: [queueItem()],
+    sendMessage: (_tabId, message) => (message.type === 'playback-started' ? started : { ok: true }),
+  });
+
+  const playback = harness.controller.playNext();
+  await delay(20);
+  assert.equal(harness.speakCalls(), 0);
+
+  releaseStarted({ ok: true });
+  await playback;
+  assert.equal(harness.speakCalls(), 1);
+  assert.deepEqual(statusTypes(harness), ['playback-started', 'playback-completed']);
+});
+
+test('terminal playback status retries after transient source-tab delivery failures', async () => {
+  let completionAttempts = 0;
+  const harness = createHarness({
+    queue: [queueItem()],
+    sendMessage: (_tabId, message) => {
+      if (message.type !== 'playback-completed') return { ok: true };
+      completionAttempts += 1;
+      if (completionAttempts < 3) throw new Error('receiver temporarily unavailable');
+      return { ok: true };
+    },
+  });
+
+  await harness.controller.playNext();
+  await delay(350);
+
+  assert.equal(completionAttempts, 3);
+  assert.equal(statusTypes(harness).filter((type) => type === 'playback-completed').length, 3);
+});
 
 test('runtime persistence cannot block local playback or source-tab status', async () => {
   const harness = createHarness({

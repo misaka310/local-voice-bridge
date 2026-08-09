@@ -17,7 +17,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createHarness(playItem = async () => ({ ok: true })) {
+function createHarness(playItem = async () => ({ ok: true }), options = {}) {
   const marks = [];
   let stopped = 0;
   const context = vm.createContext({ console, Promise });
@@ -26,7 +26,7 @@ function createHarness(playItem = async () => ({ ok: true })) {
   const router = context.LocalVoiceContentMessageRouter.create({
     conversationTargetStatus: () => ({ ok: true }),
     clearCompletionMarker: () => marks.push('clear'),
-    registerCurrentTab: async () => ({}),
+    registerCurrentTab: async () => (options.registerPayload || {}),
     applyOwnerState() {},
     applySettingsSnapshot() {},
     inspectLatestAssistant() {},
@@ -66,7 +66,7 @@ test('local playback status ignores stale completion tokens', () => {
   assert.deepEqual(harness.marks, ['playing', 'playing', 'complete']);
 });
 
-test('play-audio marks only the active token as completed', async () => {
+test('browser playback execution does not take favicon ownership from the answer tab', async () => {
   const first = deferred();
   const second = deferred();
   const calls = [];
@@ -78,27 +78,34 @@ test('play-audio marks only the active token as completed', async () => {
   send(harness.router, { type: 'play-audio', payload: { playbackToken: 'first', url: 'a' } });
   send(harness.router, { type: 'play-audio', payload: { playbackToken: 'second', url: 'b' } });
   first.resolve({ ok: false, stopped: true });
-  await Promise.resolve();
-  assert.deepEqual(harness.marks, ['playing', 'playing']);
-
   second.resolve({ ok: true, stopped: false });
   await Promise.resolve();
   assert.deepEqual(calls, ['first', 'second']);
-  assert.deepEqual(harness.marks, ['playing', 'playing', 'complete']);
+  assert.deepEqual(harness.marks, []);
 });
 
-test('playback failure and explicit stop terminate the active playback indicator', async () => {
+test('authoritative background state clears a playback favicon after terminal delivery was lost', () => {
+  const harness = createHarness();
+
+  send(harness.router, { type: 'playback-started', payload: { playbackToken: 'active' } });
+  send(harness.router, { type: 'state-update', payload: { isUiOwner: false, isPlaybackSource: false, currentPlaybackToken: '' } });
+
+  assert.deepEqual(harness.marks, ['playing', 'stopped']);
+});
+
+test('explicit stop controls audio while the playback terminal message owns favicon cleanup', async () => {
   const pending = deferred();
   const harness = createHarness(() => pending.promise);
 
+  send(harness.router, { type: 'playback-started', payload: { playbackToken: 'active' } });
   send(harness.router, { type: 'play-audio', payload: { playbackToken: 'active', url: 'a' } });
   send(harness.router, { type: 'stop-audio', payload: { playbackToken: 'active' } });
   assert.equal(harness.stopped(), 1);
-  assert.deepEqual(harness.marks, ['playing', 'stopped']);
+  assert.deepEqual(harness.marks, ['playing']);
 
-  send(harness.router, { type: 'playback-error', payload: { error: 'generation failed' } });
-  assert.deepEqual(harness.marks, ['playing', 'stopped', 'error']);
+  send(harness.router, { type: 'playback-stopped', payload: { playbackToken: 'active' } });
+  assert.deepEqual(harness.marks, ['playing', 'stopped']);
   pending.resolve({ ok: false, stopped: true });
   await Promise.resolve();
-  assert.deepEqual(harness.marks, ['playing', 'stopped', 'error']);
+  assert.deepEqual(harness.marks, ['playing', 'stopped']);
 });

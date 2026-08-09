@@ -188,6 +188,12 @@
       setTerminalStatus(null);
     }
 
+    function markResponseGenerationEnded() {
+      if (!generating) return;
+      generating = false;
+      sync();
+    }
+
     function markResponseCompleted() {
       generating = false;
       setTerminalStatus('complete');
@@ -259,6 +265,7 @@
       clear: acknowledge,
       acknowledge,
       markResponseGenerating,
+      markResponseGenerationEnded,
       markResponseCompleted,
       markResponseError,
       markPlaybackStarted,

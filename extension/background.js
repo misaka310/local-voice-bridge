@@ -123,6 +123,8 @@ function statePayload(forTabId = null) {
   ensureOwner();
   return {
     isUiOwner: forTabId ? forTabId === uiOwnerTabId : undefined,
+    isPlaybackSource: Boolean(forTabId && isPlaying && currentItem && Number(currentItem.tabId) === Number(forTabId)),
+    currentPlaybackToken: forTabId && isPlaying && currentItem && Number(currentItem.tabId) === Number(forTabId) ? String(currentToken || '') : '',
     uiOwnerTabId,
     selectedTabId,
     tabs: Array.from(tabs.entries()).map(([id, info]) => ({ id, title: info.title, url: info.url })),

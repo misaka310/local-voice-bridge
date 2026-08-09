@@ -56,16 +56,26 @@
       return tabId && ctx.tabs.has(tabId) ? tabId : null;
     }
 
-    function notifyPlaybackStatus(item, type, playbackToken, error = '') {
+    async function notifyPlaybackStatus(item, type, playbackToken, error = '') {
       const tabId = statusTabId(item);
-      if (!tabId) return;
-      ctx.chrome.tabs.sendMessage(tabId, {
+      if (!tabId) return false;
+      const message = {
         type,
         payload: {
           playbackToken: String(playbackToken || ''),
           error: String(error || ''),
         },
-      }).catch(() => {});
+      };
+      const attempts = type === 'playback-started' ? 1 : 3;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          await ctx.chrome.tabs.sendMessage(tabId, message);
+          return true;
+        } catch (_error) {
+          if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+        }
+      }
+      return false;
     }
 
     function playbackLeaseMs(durationSeconds) {
@@ -167,10 +177,11 @@
         currentPlaybackTabId: null,
       });
       ctx.setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
+      const playbackStatusReady = notifyPlaybackStatus(item, 'playback-started', playbackToken);
       ctx.broadcastState();
-      notifyPlaybackStatus(item, 'playback-started', playbackToken);
       try {
         await flushBeforePlayback();
+        await playbackStatusReady;
         let payload;
         if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text);
         else {
