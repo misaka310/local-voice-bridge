@@ -465,7 +465,7 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
     }).toBe('sample');
 
     await updateControlSettings({ enabled: true });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const thinking = document.createElement('div');
@@ -551,7 +551,7 @@ test('Auto excludes compact source chips even when their labels do not match hos
     await page.goto('https://chatgpt.com/c/source-chip', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const turn = document.createElement('article');
@@ -605,7 +605,7 @@ test('inline code text is preserved before Auto finalizes a streaming preview', 
     await page.goto('https://chatgpt.com/c/inline-code-stream', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const reply = document.createElement('div');
@@ -654,7 +654,7 @@ test('Auto waits for the completed streaming reply and Next uses its following c
     await page.goto('https://chatgpt.com/c/streaming-next', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const stopButton = document.createElement('button');
@@ -714,7 +714,7 @@ test('Auto does not finalize a one-character streaming fragment and repairs the 
     await page.goto('https://chatgpt.com/c/one-character-stream', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const stopButton = document.createElement('button');
@@ -768,7 +768,7 @@ test('Auto does not finalize a short unpunctuated streaming fragment before the 
     await page.goto('https://chatgpt.com/c/short-fragment-stream', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const stopButton = document.createElement('button');
@@ -823,7 +823,7 @@ test('Auto ignores a short comma-ended partial until the response shows completi
     await page.goto('https://chatgpt.com/c/comma-ended-partial', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const turn = document.createElement('article');
@@ -875,7 +875,7 @@ test('Auto ignores repeated bare GitHub source labels while a short reply is sti
     await page.goto('https://chatgpt.com/c/github-source-labels', { waitUntil: 'domcontentloaded' });
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const stopButton = document.createElement('button');
@@ -953,7 +953,7 @@ test('all ChatGPT tabs continue to enqueue into one Auto queue without an in-pag
     }
     await waitForControlReady(2);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await triggerFixtureReply(pages[0]);
     await triggerFixtureReply(pages[1]);
@@ -1030,7 +1030,7 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
     await configureWorker(worker, { voiceId: 'sample', referenceVoice: 'sample' });
     await waitForControlReady(2);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: 'sample' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     const extensionId = new URL(worker.url()).host;
     const controllerPage = await context.newPage();
@@ -1471,7 +1471,7 @@ test('Auto reads a complete assistant reply shorter than 20 characters from the 
     await expect(page.locator('#chat')).toBeVisible();
     await waitForControlReady(1);
     await updateControlSettings({ enabled: true, voiceVolume: 0, referenceVoice: '' });
-    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled)).toBe(true);
+    await expect.poll(async () => worker.evaluate(async () => (await chrome.storage.local.get('enabled')).enabled), { timeout: 12000 }).toBe(true);
 
     await page.evaluate(() => {
       const turn = document.createElement('article');

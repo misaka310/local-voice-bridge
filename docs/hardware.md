@@ -16,12 +16,12 @@
 | CPU実行 | なし | なし | 通常セットアップでは未対応 | 再現可能なCPUセットアップとE2Eを提供していない |
 | macOS | 軽量デモのみ想定 | なし | 実音声・デモとも未検証 | 対応済みとは記載しない |
 | Linux | CIで使用する軽量経路 | なし | 軽量デモ・実音声とも未検証 | GitHub Actions用の構成はあるが、実音声の正式導線ではない |
-| 実音声モード | Windows / Python / NVIDIA / CUDA / モデル | Irodori v3 direct | 上記以外 | `setup-voice-env.cmd` → `run-voice-stack.cmd` |
+| 実音声モード | Windows / Python / NVIDIA / CUDA / モデル | Irodori v3 direct | 上記以外 | 初回`setup-voice-env.cmd` → 通常起動`LocalVoiceBridge.exe` |
 | 軽量デモモード | Node.js 22 / Chromium | Windows 11 / Playwright Chromium | Firefox | Python、CUDA、GPU、モデル、ChatGPTログイン不要 |
 
 ## 通常セットアップ
 
-`setup-voice-env.cmd`と`run-voice-stack.cmd`はCUDAを必須チェックします。`--strict-cuda`を外してCPU実行へ切り替える方法は、通常利用としてサポートしていません。
+`setup-voice-env.cmd`で環境を準備し、通常利用は`LocalVoiceBridge.exe`から開始します。起動時のpreflightでもCUDAとモデル環境を確認します。`run-voice-stack.cmd`はターミナルでサーバーログを直接確認する診断用で、通常利用の入口ではありません。`--strict-cuda`を外してCPU実行へ切り替える方法は、通常利用としてサポートしていません。
 
 ## CIとデモの範囲
 

@@ -2,7 +2,7 @@
 
 まずはWindows Local Voice小窓で`Ref=none`にして確認してください。
 
-通常起動では、通知領域の`Local Voice Bridge`を終了しないでください。変更後は、`chrome://extensions`で拡張機能をreloadし、開いているChatGPTタブも再読み込みしてください。
+通常起動では、通知領域の`Local Voice Bridge`を終了しないでください。拡張機能の更新後はWindows Local Voice小窓の`拡張機能を再読み込み`を使用してください。正式な再読み込み導線では拡張機能の再接続まで確認するため、通常はChatGPTタブ自体の再読み込みは不要です。
 
 ## 確認するもの
 
@@ -28,22 +28,22 @@
 
 ローカルAPIは起動していますが、更新後の拡張機能が接続していません。
 
-1. `chrome://extensions`で`Local Voice Bridge`をreloadする
-2. 開いているChatGPTタブをすべて再読み込みする
+1. Windows Local Voice小窓の`拡張機能を再読み込み`を押す
+2. 小窓が再接続し、更新後の拡張機能versionを認識するまで待つ
 3. ChatGPTタブが小窓の`tabs`表示へ数えられることを確認する
 
 Chrome内にLocal Voice操作パネルが出ないのは正常です。
 
 ## Chrome内に古いLocal Voiceパネルが残る
 
-拡張機能をreloadし、ChatGPTタブを再読み込みしてください。現在の構成では、Chrome内に操作パネルを生成しません。旧`panelPosition`と`panelCollapsed`設定も設定バージョン9への移行時に削除されます。
+Windows Local Voice小窓の`拡張機能を再読み込み`を押してください。現在の構成では、Chrome内に操作パネルを生成しません。旧`panelPosition`と`panelCollapsed`設定も設定バージョン9への移行時に削除されます。
 
 ## 全ChatGPTタブの返答を読まない
 
 Autoは最後に触った1タブだけではなく、開いているすべてのChatGPTタブを対象にします。
 
 - 小窓の`tabs`数が開いているChatGPTタブ数と一致するか確認する
-- 対象タブを更新後の拡張機能で再読み込みする
+- 小窓の`拡張機能を再読み込み`で更新後の拡張機能へ再接続する
 - Autoを一度オフにしてからオンにし、その後に新しい返答を生成する
 
 Autoをオンにする前から表示されていた返答は読みません。`思考中`、`考え中`、`Thinking`、`画像を分析しています`だけの途中状態も読みません。
