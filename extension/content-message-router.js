@@ -36,7 +36,7 @@
         ctx.applySettingsSnapshot(message.payload || {}); sendResponse({ ok: true }); return false;
       }
       if (message.type === 'state-update') {
-        ctx.applyOwnerState(message.payload.isUiOwner, message.payload); reconcilePlayback(message.payload); return false;
+        reconcilePlayback(message.payload); return false;
       }
       if (message.type === 'playback-started') {
         activePlaybackToken = tokenOf(message); ctx.markPlaybackStarted(); return false;

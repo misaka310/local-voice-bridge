@@ -64,6 +64,9 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - ローカルAPIはloopback専用を維持し、全HTTPリクエストで`Host`をloopback名またはloopback IPへ限定する。POSTはJSONだけを受け付け、通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。
 - Local APIのレスポンスへユーザー名を含む絶対ファイルパスやローカルキャッシュの実パスを返さない。診断上のパスはローカルログまたは明示的な開発者向け経路だけで扱う。
 - マイク録音の生音声と文字起こし履歴は保存しない。一方、再接続・Service Worker復旧・未配送イベントの再配信に必要なassistant返答チャンク、読み上げキュー、未ACKの文字起こしイベントはローカルruntime状態へ限定的に保存してよい。privacy-safeなstructured runtime event logはサイズ上限と有限世代でローテーションし、無制限に増加させない。
+- 30個以上のChatGPTタブを開く通常利用を前提に、定常時のブラウザ負荷をタブ数へ比例して高頻度化させない。Local APIの制御pollはマイク会話オフ時5秒、マイク会話ONの待機時500ms、録音・文字起こし・送信中など低遅延が必要な間だけ100msを上限とする。
+- 通常の回答生成中は、MutationObserverの関連イベントから生成状態を追跡しても、Auto読み上げのためにassistant DOM全体を毎回cloneして本文抽出しない。本文抽出は回答完了時、または実際にstreaming本文が必要なLive会話中に限定する。
+- 同一ChatGPTタブ内の通常クリック・フォーカスだけで全登録タブへ状態broadcastしない。所有者・URL・タイトルなど共有状態が実際に変化した場合だけ全タブ通知する。
 
 ## 5. 非目標
 
@@ -87,6 +90,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - [ ] 通常利用でターミナルやコンソールが表示されない。
 - [ ] 非loopback `Host`のGET/POST/OPTIONSは拒否され、通常WebページからLocal APIのPOST系変更操作を実行できず、拡張機能とWindows小窓の正常通信は維持される。
 - [ ] Local APIレスポンスにユーザー固有の絶対ファイルパスが露出せず、structured runtime event logは有限サイズでローテーションされる。
+- [ ] 30タブ想定で、アイドル中にsub-second全タブpollや同一タブ操作起点の全タブbroadcastが発生せず、通常生成中のAuto監視がassistant本文の全DOM cloneを繰り返さない。
 - [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。
 
 ## 7. 検証方法

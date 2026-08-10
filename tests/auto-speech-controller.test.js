@@ -44,10 +44,14 @@ function createHarness() {
   let autoEnabled = true;
   let generating = false;
   let completionMarks = 0;
+  let extractCount = 0;
   const controller = createAutoSpeechController({
     sentFlag: 'sent',
     getAssistantNodes: () => nodes,
-    extractAssistantText: (node) => node.text,
+    extractAssistantText: (node) => {
+      extractCount += 1;
+      return node.text;
+    },
     getStableKey: (node) => node.key,
     isResponseGenerating: () => generating,
     hasResponseCompletionControl: (node) => Boolean(node.complete),
@@ -76,6 +80,7 @@ function createHarness() {
     setAutoEnabled: (value) => { autoEnabled = value; },
     setGenerating: (value) => { generating = value; },
     completionMarks: () => completionMarks,
+    extractCount: () => extractCount,
   };
 }
 
@@ -144,6 +149,30 @@ test('new completed reply queues exactly one Auto preview and one completion mar
   assert.equal(harness.completionMarks(), 1);
   harness.controller.processNode(node);
   assert.equal(harness.completionMarks(), 1);
+});
+
+test('ordinary generation avoids repeated assistant text extraction before completion', () => {
+  const harness = createHarness();
+  const node = { key: 'streaming-lightweight', text: '生成途中の返答です。', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+
+  for (let index = 0; index < 20; index += 1) {
+    node.text = '生成途中の返答です。' + String(index);
+    harness.controller.processNode(node);
+  }
+
+  assert.equal(harness.extractCount(), 0);
+  assert.equal(harness.reports.length, 0);
+
+  harness.setGenerating(false);
+  node.complete = true;
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+
+  assert.ok(harness.extractCount() >= 1);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-with-action-control');
 });
 
 test('short streaming fragment waits for stable completion evidence before Auto', () => {

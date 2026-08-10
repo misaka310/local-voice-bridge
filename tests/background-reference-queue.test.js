@@ -14,6 +14,7 @@ const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-ru
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
+const BACKGROUND_CONTROL_POLL_POLICY_PATH = path.join(ROOT, 'extension', 'background-control-poll-policy.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
 const BACKGROUND_TAB_RECONNECT_PATH = path.join(ROOT, 'extension', 'background-tab-reconnect.js');
@@ -176,6 +177,7 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_QUEUE_CORE_PATH,
     BACKGROUND_AUTO_RECHECK_PATH,
     BACKGROUND_STATE_PUBLISHER_PATH,
+    BACKGROUND_CONTROL_POLL_POLICY_PATH,
     BACKGROUND_CONTROL_SYNC_PATH,
     BACKGROUND_TAB_REGISTRY_PATH,
     BACKGROUND_TAB_RECONNECT_PATH,

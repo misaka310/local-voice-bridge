@@ -56,6 +56,7 @@ if (status === 0) {
     'tests/content-dom-observer.test.js',
     'tests/content-completion-marker.test.js',
     'tests/content-message-router.test.js',
+    'tests/content-mic-keepalive.test.js',
     'tests/e2e-profile-cleanup.test.js',
     'tests/brave-mic-runner.test.js',
     'tests/delivery-id-core.test.js',

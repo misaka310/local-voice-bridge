@@ -18,9 +18,9 @@
       }
 
       if (message.type === 'register-tab') {
-        ctx.registerTab(message, sender);
+        const registration = ctx.registerTab(message, sender);
         sendResponse({ ok: true, payload: ctx.statePayload(senderTabId) });
-        ctx.broadcastState();
+        if (registration && registration.changed) ctx.broadcastState();
         return false;
       }
 
@@ -103,6 +103,12 @@
           .then((payload) => sendResponse({ ok: true, payload }))
           .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
         return true;
+      }
+
+      if (message.type === 'mic-control-keepalive') {
+        ctx.scheduleExternalControlPoll(0);
+        sendResponse({ ok: true });
+        return false;
       }
 
       if (message.type === 'external-control-poll') {

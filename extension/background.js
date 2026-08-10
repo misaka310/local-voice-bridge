@@ -354,7 +354,10 @@ function scheduleExternalControlPoll(delayMs = 0) {
     let nextDelay = 5000;
     try {
       const synchronized = await syncExternalControlPanel();
-      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 100 ? 100 : 5000;
+      const requestedDelay = Number(synchronized && synchronized.pollIntervalMs);
+      nextDelay = Number.isFinite(requestedDelay)
+        ? Math.max(100, Math.min(5000, requestedDelay))
+        : 5000;
     } catch (_error) {}
     scheduleExternalControlPoll(nextDelay);
   }, delay);
@@ -425,6 +428,7 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   getSettings,
   pushOptionSettings,
   syncExternalControlPanel,
+  scheduleExternalControlPoll,
   liveMessageTypes: globalThis.BackgroundLiveClient.MESSAGE_TYPES,
   liveClient,
   postConversationState,

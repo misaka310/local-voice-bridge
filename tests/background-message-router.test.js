@@ -23,6 +23,22 @@ function createRouter(overrides = {}) {
   });
 }
 
+test('mic keepalive wakes the external control poll immediately', () => {
+  const delays = [];
+  const router = createRouter({ scheduleExternalControlPoll: (delayMs) => delays.push(delayMs) });
+  let response = null;
+
+  const asyncResponse = router(
+    { type: 'mic-control-keepalive' },
+    { tab: { id: 101 } },
+    (value) => { response = value; },
+  );
+
+  assert.equal(asyncResponse, false);
+  assert.deepEqual(delays, [0]);
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { ok: true });
+});
+
 test('content tab can schedule one background-owned Auto recheck', () => {
   const calls = [];
   const router = createRouter({

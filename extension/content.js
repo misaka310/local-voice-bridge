@@ -13,7 +13,6 @@
   let enabled = false;
   let observer = null;
   let liveController = null;
-  let isUiOwner = null;
 
   function getCurrentVoiceProfile() {
     return DEFAULT_SETTINGS.voiceProfile;
@@ -118,6 +117,12 @@
     handlePageHide,
   } = conversationBridge;
 
+  const micKeepalive = globalThis.LocalVoiceMicKeepalive?.create({
+    chrome, document,
+    getSettings: () => settings,
+    setInterval: window.setInterval.bind(window), clearInterval: window.clearInterval.bind(window),
+  }) || null;
+
   const audioPlayer = globalThis.LocalVoiceContentAudioPlayer.create({
     chrome,
     Audio,
@@ -151,6 +156,7 @@
         void ensureLiveController()?.reconcile();
       }
     }
+    if (Object.prototype.hasOwnProperty.call(incoming, 'micConversationEnabled')) micKeepalive?.sync();
     if (Object.prototype.hasOwnProperty.call(incoming, 'voiceId')
       || Object.prototype.hasOwnProperty.call(incoming, 'referenceVoice')) {
       void syncDesktopPetSelection();
@@ -161,7 +167,6 @@
     conversationTargetStatus,
     clearCompletionMarker,
     registerCurrentTab: (options) => registerCurrentTab(options),
-    applyOwnerState,
     applySettingsSnapshot,
     markPlaybackStarted, markPlaybackCompleted, markPlaybackError, markPlaybackStopped,
     inspectLatestAssistant,
@@ -236,20 +241,13 @@
       title: getPlainDocumentTitle(),
       claimOwner: Boolean(claimOwner),
     });
-    applyOwnerState(response && typeof response.isUiOwner !== 'undefined' ? response.isUiOwner : null, response || null);
     if (includeLatest) await reportLatestAssistantSnapshot();
     return response || null;
   }
 
   async function syncDesktopPetSelection(referenceVoice = getCurrentReferenceVoice()) {
-    const petId = resolveDesktopPetId(referenceVoice);
-    try {
-      await runtimeMessage('desktop-pet-selection', { petId });
-    } catch (_error) {}
-  }
-
-  function applyOwnerState(nextIsOwner) {
-    isUiOwner = nextIsOwner;
+    try { await runtimeMessage('desktop-pet-selection', { petId: resolveDesktopPetId(referenceVoice) }); }
+    catch (_error) {}
   }
 
   async function loadSettings() {
@@ -269,16 +267,13 @@
     document.getElementById('local-voice-pixel-pet')?.remove();
     document.getElementById('local-voice-bridge-panel')?.remove();
     await loadSettings();
+    micKeepalive?.sync();
     await syncDesktopPetSelection();
     await initializeCompletionMarker();
     markExistingMessagesAsSeen();
     observer = new MutationObserver(scheduleInspect);
     observer.observe(document.body, { childList: true, subtree: true });
-    try {
-      await registerCurrentTab({ includeLatest: true });
-    } catch (_error) {
-      applyOwnerState(null);
-    }
+    try { await registerCurrentTab({ includeLatest: true }); } catch (_error) {}
     scheduleInspect();
     const live = ensureLiveController();
     if (settings.micConversationEnabled) void live?.reconcile();
@@ -287,6 +282,7 @@
     };
     window.addEventListener('focus', clearCompletionMarker);
     document.addEventListener('visibilitychange', () => {
+      micKeepalive?.sync();
       void isTabActivelyViewed().then((active) => {
         if (active) clearCompletionMarker();
       });
@@ -308,7 +304,10 @@
       if (settings.micConversationEnabled) live?.handlePointer(event);
     }, { capture: true });
     reportComposerFocus();
-    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pagehide', () => {
+      micKeepalive?.stop();
+      handlePageHide();
+    });
   }
 
   if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {

@@ -11,6 +11,7 @@
     'assistant-text-extractor.js',
     'auto-speech-controller.js',
     'content-settings.js',
+    'content-mic-keepalive.js',
     'content-mutation-filter.js',
     'content-dom-observer.js',
     'content-completion-marker.js',
