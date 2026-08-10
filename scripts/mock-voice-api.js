@@ -10,6 +10,7 @@ const host = '127.0.0.1';
 const port = Number(process.env.MOCK_VOICE_PORT || 8717);
 const requiredTestToken = String(process.env.MOCK_VOICE_TOKEN || '');
 const localPlaybackDelayMs = Math.max(0, Number(process.env.MOCK_LOCAL_PLAYBACK_DELAY_MS || 0));
+const submissionArmDelayMs = Math.max(0, Number(process.env.MOCK_SUBMISSION_ARM_DELAY_MS || 0));
 const events = [];
 const referenceVoices = [{ id: '', label: 'none' }, { id: 'sample', label: 'sample' }];
 let control;
@@ -96,13 +97,20 @@ wav.writeUInt32LE(8000, 40);
 wav.fill(128, 44);
 
 function json(res, status, value) {
-  const body = Buffer.from(JSON.stringify(value));
-  res.writeHead(status, {
+  const send = () => {
+    const body = Buffer.from(JSON.stringify(value));
+    res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': body.length,
     'Cache-Control': 'no-store',
   });
-  res.end(body);
+    res.end(body);
+  };
+  if (status === 200 && submissionArmDelayMs > 0 && value && value.action === 'arm') {
+    setTimeout(send, submissionArmDelayMs);
+    return;
+  }
+  return send();
 }
 
 function localPlaybackJson(res, value) {
