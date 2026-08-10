@@ -50,7 +50,7 @@ class VoiceConversationController:
         pause_executor: Any | None = None,
         sleep: Callable[[float], None] = time.sleep,
         stop_poll_interval_seconds: float = 0.02,
-        stop_wait_seconds: float = 0.5,
+        stop_wait_seconds: float = 1.5,
     ) -> None:
         root = Path(__file__).resolve().parent
         self.client = client
@@ -256,8 +256,18 @@ class VoiceConversationController:
                 extension = snapshot.get("extension") if isinstance(snapshot, dict) else {}
                 if not isinstance(extension, dict):
                     extension = {}
-                phase = str(extension.get("playbackPhase") or "idle").strip().lower()
-                active = bool(extension.get("isPlaying")) or phase in {"playing", "stopping"}
+                if extension.get("connected") is False:
+                    return True
+                raw_phase = extension.get("playbackPhase")
+                phase = str(raw_phase or "").strip().lower()
+                if phase in {"playing", "stopping"}:
+                    active = True
+                elif phase in {"idle", "generating"}:
+                    # generating keeps isPlaying=true even though no audio is audible yet.
+                    # Start recording while the queued stop command cancels that pending generation.
+                    active = False
+                else:
+                    active = bool(extension.get("isPlaying"))
                 if not active:
                     return True
             except Exception:

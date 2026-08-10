@@ -67,7 +67,7 @@ test('manifest uses the core-backed service worker entry', () => {
   assert.match(entry, /background\.js/);
   assert.match(heartbeat, /periodInMinutes:\s*1/);
   assert.match(heartbeat, /alarms\.onAlarm/);
-  assert.match(controlSync, /micConversationEnabled\s*\?\s*100\s*:\s*5000/);
+  assert.match(controlSync, /micConversationEnabled\s*\?\s*100\s*:\s*500/);
   assert.match(statePublisher, /heartbeatMs[^\n]*30000/);
-  assert.match(background, /pollIntervalMs[^\n]*===\s*100\s*\?\s*100\s*:\s*5000/);
+  assert.match(background, /pollIntervalMs[^\n]*===\s*100\s*\?\s*100\s*:\s*500/);
 });

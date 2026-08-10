@@ -351,10 +351,10 @@ function scheduleExternalControlPoll(delayMs = 0) {
   const delay = Math.max(0, Math.min(5000, Number(delayMs) || 0));
   externalControlPollTimer = setTimeout(async () => {
     externalControlPollTimer = null;
-    let nextDelay = 5000;
+    let nextDelay = 500;
     try {
       const synchronized = await syncExternalControlPanel();
-      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 100 ? 100 : 5000;
+      nextDelay = Number(synchronized && synchronized.pollIntervalMs) === 100 ? 100 : 500;
     } catch (_error) {}
     scheduleExternalControlPoll(nextDelay);
   }, delay);

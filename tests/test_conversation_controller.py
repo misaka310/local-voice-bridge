@@ -390,12 +390,34 @@ class VoiceConversationControllerTests(unittest.TestCase):
 
     def test_tts_generation_without_audio_does_not_block_recording_start(self):
         controller, client, recorder, _ = self.make_controller()
+        client.playing_states = [True]
         client.playback_phases = ["generating"]
 
         self.press_chord(controller)
 
         self.assertEqual(recorder.started, 1)
         self.assertEqual(client.states[-1]["phase"], "recording")
+
+    def test_recording_waits_through_slow_external_stop_delivery(self):
+        controller, client, recorder, _ = self.make_controller()
+        client.playing_states = ([True] * 30) + [False]
+        client.playback_phases = (["playing"] * 30) + ["idle"]
+
+        self.press_chord(controller)
+
+        self.assertEqual(recorder.started, 1)
+        self.assertEqual(client.states[-1]["phase"], "recording")
+
+    def test_recording_still_blocks_when_audio_never_stops(self):
+        controller, client, recorder, _ = self.make_controller()
+        client.playing_states = [True] * 100
+        client.playback_phases = ["playing"] * 100
+
+        self.press_chord(controller)
+
+        self.assertEqual(recorder.started, 0)
+        self.assertEqual(client.states[-1]["phase"], "error")
+        self.assertIn("読み上げ停止を確認できない", str(client.states[-1]["statusText"]))
 
     def test_left_ctrl_does_not_start_recording(self):
         controller, client, recorder, _ = self.make_controller()
