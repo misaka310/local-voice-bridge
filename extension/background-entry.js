@@ -10,6 +10,7 @@ importScripts(
   'background-queue-core.js',
   'background-auto-recheck.js',
   'background-state-publisher.js',
+  'background-control-poll-policy.js',
   'background-control-sync.js',
   'background-control-heartbeat.js',
   'background-tab-registry.js',

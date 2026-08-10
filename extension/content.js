@@ -13,7 +13,6 @@
   let enabled = false;
   let observer = null;
   let liveController = null;
-  let isUiOwner = null;
 
   function getCurrentVoiceProfile() {
     return DEFAULT_SETTINGS.voiceProfile;
@@ -119,11 +118,9 @@
   } = conversationBridge;
 
   const micKeepalive = globalThis.LocalVoiceMicKeepalive?.create({
-    chrome,
-    document,
+    chrome, document,
     getSettings: () => settings,
-    setInterval: (callback, delay) => window.setInterval(callback, delay),
-    clearInterval: (timerId) => window.clearInterval(timerId),
+    setInterval: window.setInterval.bind(window), clearInterval: window.clearInterval.bind(window),
   }) || null;
 
   const audioPlayer = globalThis.LocalVoiceContentAudioPlayer.create({
@@ -170,7 +167,6 @@
     conversationTargetStatus,
     clearCompletionMarker,
     registerCurrentTab: (options) => registerCurrentTab(options),
-    applyOwnerState,
     applySettingsSnapshot,
     markPlaybackStarted, markPlaybackCompleted, markPlaybackError, markPlaybackStopped,
     inspectLatestAssistant,
@@ -245,20 +241,13 @@
       title: getPlainDocumentTitle(),
       claimOwner: Boolean(claimOwner),
     });
-    applyOwnerState(response && typeof response.isUiOwner !== 'undefined' ? response.isUiOwner : null, response || null);
     if (includeLatest) await reportLatestAssistantSnapshot();
     return response || null;
   }
 
   async function syncDesktopPetSelection(referenceVoice = getCurrentReferenceVoice()) {
-    const petId = resolveDesktopPetId(referenceVoice);
-    try {
-      await runtimeMessage('desktop-pet-selection', { petId });
-    } catch (_error) {}
-  }
-
-  function applyOwnerState(nextIsOwner) {
-    isUiOwner = nextIsOwner;
+    try { await runtimeMessage('desktop-pet-selection', { petId: resolveDesktopPetId(referenceVoice) }); }
+    catch (_error) {}
   }
 
   async function loadSettings() {
@@ -284,11 +273,7 @@
     markExistingMessagesAsSeen();
     observer = new MutationObserver(scheduleInspect);
     observer.observe(document.body, { childList: true, subtree: true });
-    try {
-      await registerCurrentTab({ includeLatest: true });
-    } catch (_error) {
-      applyOwnerState(null);
-    }
+    try { await registerCurrentTab({ includeLatest: true }); } catch (_error) {}
     scheduleInspect();
     const live = ensureLiveController();
     if (settings.micConversationEnabled) void live?.reconcile();

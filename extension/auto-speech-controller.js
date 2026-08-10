@@ -171,12 +171,20 @@
       return Math.max(50, Math.min(500, Math.max(stableRemaining, completionRemaining)));
     }
 
+    function scheduleGenerationRecheck(node, item) {
+      item.generationObserved = true;
+      resetCompletionCandidate(item);
+      if (item.idleTimer) clearTimer(item.idleTimer);
+      item.idleTimer = setTimer(() => { item.idleTimer = null; if (!item.sent) processNode(node); }, generationRecheckMs);
+    }
+
     function schedulePendingSend(node, item, preview) {
       const delay = pendingDelay(preview, item);
       if (item.idleTimer) clearTimer(item.idleTimer);
       item.idleTimer = setTimer(() => {
         item.idleTimer = null;
         if (item.sent) return;
+        if (isResponseGenerating()) { scheduleGenerationRecheck(node, item); return; }
         const latest = extractAssistantText(node);
         if (!latest) return;
         if (latest !== item.lastText) {
@@ -198,16 +206,15 @@
     }
 
     function processNode(node) {
+      if (isResponseGenerating()) {
+        scheduleGenerationRecheck(node, ensureElementState(node, '')); return true;
+      }
       const text = extractAssistantText(node);
       if (!text) {
         pendingElements.add(node);
         return false;
       }
       const item = ensureElementState(node, text);
-      if (isResponseGenerating()) {
-        item.generationObserved = true;
-        resetCompletionCandidate(item);
-      }
       if (item.sent) {
         if (text === item.lastText) return true;
         item.lastText = text;

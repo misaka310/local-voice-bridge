@@ -26,8 +26,13 @@
     function registerTab(message, sender) {
       const senderTabId = sender && sender.tab ? sender.tab.id : null;
       if (!senderTabId) return null;
+      const wasRegistered = ctx.tabs.has(senderTabId);
       const existing = ctx.tabs.get(senderTabId)
         || { lastAssistantMessage: null, lastReadIndex: -1, lastAutoQueueSignature: '' };
+      const previousTitle = String(existing.title || '');
+      const previousUrl = String(existing.url || '');
+      const previousOwner = ctx.uiOwnerTabId();
+      const previousSelected = ctx.selectedTabId();
       existing.title = String(message.title || sender.tab.title || 'ChatGPT');
       existing.url = sender.tab.url || existing.url || '';
       ctx.tabs.set(senderTabId, existing);
@@ -35,7 +40,14 @@
         ctx.setUiOwnerTabId(senderTabId);
         ctx.setSelectedTabId(senderTabId);
       }
-      return senderTabId;
+      return {
+        tabId: senderTabId,
+        changed: !wasRegistered
+          || previousTitle !== existing.title
+          || previousUrl !== existing.url
+          || previousOwner !== ctx.uiOwnerTabId()
+          || previousSelected !== ctx.selectedTabId(),
+      };
     }
 
     function noteComposerFocused(tabId) {

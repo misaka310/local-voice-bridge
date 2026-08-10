@@ -306,7 +306,7 @@
         if (recovered) await deps.reconnectOpenChatGptTabs();
         return {
           ...state,
-          pollIntervalMs: effectiveSettings.micConversationEnabled ? 100 : 500,
+          pollIntervalMs: globalThis.BackgroundControlPollPolicy.intervalMs(effectiveSettings.micConversationEnabled, conversation.phase),
         };
       })();
       try {

@@ -18,9 +18,9 @@
       }
 
       if (message.type === 'register-tab') {
-        ctx.registerTab(message, sender);
+        const registration = ctx.registerTab(message, sender);
         sendResponse({ ok: true, payload: ctx.statePayload(senderTabId) });
-        ctx.broadcastState();
+        if (registration && registration.changed) ctx.broadcastState();
         return false;
       }
 

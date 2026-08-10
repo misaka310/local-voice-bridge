@@ -71,6 +71,7 @@ for (const file of [
   'extension/background-settings-core.js',
   'extension/background-runtime-core.js',
   'extension/background-queue-core.js',
+  'extension/background-control-poll-policy.js',
   'extension/background-control-sync.js',
   'extension/background-tab-registry.js',
   'extension/background-conversation-target.js',
@@ -86,6 +87,7 @@ for (const file of [
   'extension/assistant-text-extractor.js',
   'extension/auto-speech-controller.js',
   'extension/content-settings.js',
+  'extension/content-mic-keepalive.js',
   'extension/content-dom-observer.js',
   'extension/content-completion-marker.js',
   'extension/content-audio-player.js',
@@ -164,7 +166,7 @@ requireText(
 );
 requireText(
   'extension/manifest.json',
-  '"content-settings.js", "content-mutation-filter.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"',
+  '"content-settings.js", "content-mic-keepalive.js", "content-mutation-filter.js", "content-dom-observer.js", "content-completion-marker.js", "content-conversation-bridge.js", "content-audio-player.js", "content-message-router.js", "content.js"',
   'content scripts must load focused controllers before content.js',
 );
 requireText(
@@ -352,7 +354,7 @@ requireText(
 );
 requireText(
   'extension/background-tab-reconnect.js',
-  "'content-settings.js',\n    'content-mutation-filter.js',\n    'content-dom-observer.js'",
+  "'content-settings.js',\n    'content-mic-keepalive.js',\n    'content-mutation-filter.js',\n    'content-dom-observer.js'",
   'reconnect injection must load the mutation filter before the DOM observer',
 );
 forbidText(

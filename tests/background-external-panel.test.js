@@ -14,6 +14,7 @@ const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-ru
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
+const BACKGROUND_CONTROL_POLL_POLICY_PATH = path.join(ROOT, 'extension', 'background-control-poll-policy.js');
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
 const BACKGROUND_TAB_RECONNECT_PATH = path.join(ROOT, 'extension', 'background-tab-reconnect.js');
@@ -290,6 +291,7 @@ function createHarness({
       BACKGROUND_QUEUE_CORE_PATH,
       BACKGROUND_AUTO_RECHECK_PATH,
       BACKGROUND_STATE_PUBLISHER_PATH,
+      BACKGROUND_CONTROL_POLL_POLICY_PATH,
       BACKGROUND_CONTROL_SYNC_PATH,
       BACKGROUND_TAB_REGISTRY_PATH,
       BACKGROUND_TAB_RECONNECT_PATH,
@@ -624,6 +626,57 @@ test('API recovery retries browser-runtime hydration and resumes the persisted q
   assert.equal(recovered.ok, true);
   await waitFor(() => harness.speakPosts.length === 1);
   assert.equal(harness.speakPosts[0].text, '復元キューです。');
+});
+
+test('control polling is slow when mic is off, moderate while armed, and fast only during active mic phases', async () => {
+  const offHarness = createHarness();
+  await offHarness.ready();
+  offHarness.setControl({
+    settingsRevision: 4,
+    settings: { ...offHarness.control().settings, micConversationEnabled: false },
+    commands: [],
+    conversation: { phase: 'off' },
+  });
+  const off = await offHarness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(off.payload.pollIntervalMs, 5000);
+
+  const idleHarness = createHarness();
+  await idleHarness.ready();
+  idleHarness.setControl({ commands: [], conversation: { phase: 'idle' } });
+  const idle = await idleHarness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(idle.payload.pollIntervalMs, 500);
+
+  const preparingHarness = createHarness();
+  await preparingHarness.ready();
+  preparingHarness.setControl({ commands: [], conversation: { phase: 'preparing_model' } });
+  const preparing = await preparingHarness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(preparing.payload.pollIntervalMs, 500);
+
+  const activeHarness = createHarness();
+  await activeHarness.ready();
+  activeHarness.setControl({ commands: [], conversation: { phase: 'transcribing' } });
+  const active = await activeHarness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(active.payload.pollIntervalMs, 100);
+});
+
+test('repeated registration from the unchanged owner tab does not broadcast to every tab', async () => {
+  const harness = createHarness();
+  await harness.ready();
+  for (let index = 0; index < 30; index += 1) {
+    const tabId = 101 + index;
+    harness.send({ type: 'register-tab', title: 'Tab ' + String(index + 1) }, tabId, 'Tab ' + String(index + 1));
+  }
+  harness.send({ type: 'register-tab', title: 'Tab A', claimOwner: true }, 101, 'Tab A');
+  harness.sentMessages.length = 0;
+
+  for (let index = 0; index < 20; index += 1) {
+    harness.send({ type: 'register-tab', title: 'Tab A', claimOwner: true }, 101, 'Tab A');
+  }
+
+  assert.equal(harness.sentMessages.filter((entry) => entry.message.type === 'state-update').length, 0);
+
+  harness.send({ type: 'register-tab', title: 'Tab A renamed', claimOwner: true }, 101, 'Tab A renamed');
+  assert.equal(harness.sentMessages.filter((entry) => entry.message.type === 'state-update').length, 30);
 });
 
 test('control polling uses one recovery sweep instead of repeated all-tab rechecks', async () => {
