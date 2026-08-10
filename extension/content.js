@@ -118,6 +118,14 @@
     handlePageHide,
   } = conversationBridge;
 
+  const micKeepalive = globalThis.LocalVoiceMicKeepalive?.create({
+    chrome,
+    document,
+    getSettings: () => settings,
+    setInterval: (callback, delay) => window.setInterval(callback, delay),
+    clearInterval: (timerId) => window.clearInterval(timerId),
+  }) || null;
+
   const audioPlayer = globalThis.LocalVoiceContentAudioPlayer.create({
     chrome,
     Audio,
@@ -151,6 +159,7 @@
         void ensureLiveController()?.reconcile();
       }
     }
+    if (Object.prototype.hasOwnProperty.call(incoming, 'micConversationEnabled')) micKeepalive?.sync();
     if (Object.prototype.hasOwnProperty.call(incoming, 'voiceId')
       || Object.prototype.hasOwnProperty.call(incoming, 'referenceVoice')) {
       void syncDesktopPetSelection();
@@ -269,6 +278,7 @@
     document.getElementById('local-voice-pixel-pet')?.remove();
     document.getElementById('local-voice-bridge-panel')?.remove();
     await loadSettings();
+    micKeepalive?.sync();
     await syncDesktopPetSelection();
     await initializeCompletionMarker();
     markExistingMessagesAsSeen();
@@ -287,6 +297,7 @@
     };
     window.addEventListener('focus', clearCompletionMarker);
     document.addEventListener('visibilitychange', () => {
+      micKeepalive?.sync();
       void isTabActivelyViewed().then((active) => {
         if (active) clearCompletionMarker();
       });
@@ -308,7 +319,10 @@
       if (settings.micConversationEnabled) live?.handlePointer(event);
     }, { capture: true });
     reportComposerFocus();
-    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pagehide', () => {
+      micKeepalive?.stop();
+      handlePageHide();
+    });
   }
 
   if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {

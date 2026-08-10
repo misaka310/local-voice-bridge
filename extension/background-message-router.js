@@ -105,6 +105,12 @@
         return true;
       }
 
+      if (message.type === 'mic-control-keepalive') {
+        ctx.scheduleExternalControlPoll(0);
+        sendResponse({ ok: true });
+        return false;
+      }
+
       if (message.type === 'external-control-poll') {
         ctx.syncExternalControlPanel()
           .then((payload) => sendResponse({ ok: true, payload }))

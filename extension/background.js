@@ -425,6 +425,7 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   getSettings,
   pushOptionSettings,
   syncExternalControlPanel,
+  scheduleExternalControlPoll,
   liveMessageTypes: globalThis.BackgroundLiveClient.MESSAGE_TYPES,
   liveClient,
   postConversationState,
