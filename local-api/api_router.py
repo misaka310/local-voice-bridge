@@ -184,16 +184,6 @@ def route_post(handler, path: str, app: ModuleType) -> None:
         except (OSError, RuntimeError) as exc:
             json_response(handler, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
         return
-    if path == "/v1/debug/chatgpt-network-event":
-        try:
-            payload = request_json(handler)
-            event = app.NETWORK_EVENT_LOGGER.record(payload)
-            json_response(handler, HTTPStatus.OK, {"ok": True, "event": event})
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            json_response(handler, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
-        except OSError as exc:
-            json_response(handler, HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
-        return
     if path == "/v1/control-panel/state":
         try:
             payload = request_json(handler)
