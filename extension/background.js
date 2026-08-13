@@ -163,7 +163,14 @@ const {
   replayLocalAudio,
   stopLocalAudio,
   postConversationState,
+  postNetworkDiagnostic,
 } = localApiClient;
+
+const networkMonitor = globalThis.BackgroundNetworkMonitor?.create({
+  webRequest: chrome.webRequest,
+  postEvent: postNetworkDiagnostic,
+});
+networkMonitor?.start();
 const runtimeStore = globalThis.BackgroundRuntimeStore.create({
   runtimeCore: globalThis.BackgroundRuntimeCore,
   snapshot: () => ({

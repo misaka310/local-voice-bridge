@@ -170,6 +170,15 @@
       });
     }
 
+    async function postNetworkDiagnostic(payload) {
+      const settings = await getSettings();
+      const safe = payload && typeof payload === 'object' ? payload : {};
+      return controlPanelRequest(settings, '/v1/debug/chatgpt-network-event', {
+        method: 'POST',
+        body: safe,
+      });
+    }
+
     return {
       speak,
       fetchAudioPayload,
@@ -180,6 +189,7 @@
       replayLocalAudio,
       stopLocalAudio,
       postConversationState,
+      postNetworkDiagnostic,
     };
   }
 
