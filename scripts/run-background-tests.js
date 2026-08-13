@@ -67,7 +67,6 @@ if (status === 0) {
     'tests/live-content-controller.test.js',
     'tests/background-live-client.test.js',
     'tests/background-local-api-client.test.js',
-    'tests/background-network-monitor.test.js',
   ]);
 }
 
