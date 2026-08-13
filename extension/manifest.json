@@ -3,7 +3,7 @@
   "name": "Local Voice Bridge",
   "version": "0.4.2",
   "description": "Unofficial local voice assistance for chatgpt.com, with optional push-to-talk input and local reply playback.",
-  "permissions": ["storage", "scripting", "alarms"],
+  "permissions": ["storage", "scripting", "alarms", "webRequest"],
   "host_permissions": [
     "http://127.0.0.1:8717/*",
     "http://localhost:8717/*",

@@ -17,6 +17,7 @@ importScripts(
   'background-tab-reconnect.js',
   'background-conversation-target.js',
   'background-local-api-client.js',
+  'background-network-monitor.js',
   'background-runtime-store.js',
   'background-playback-queue.js',
   'background-live-client.js',

@@ -30,6 +30,7 @@ from irodori_engine import IrodoriError, cache_hint, synthesize_irodori_direct
 from live_conversation import LiveConversationService
 from live_http import get_live_state, post_interrupt, post_live_chunk, post_submission
 from maintenance import audio_retention_policy
+from network_diagnostics import ChatgptNetworkEventLogger, default_chatgpt_network_log_path
 from runtime_events import RuntimeEventLogger, default_event_log_path
 from runtime_readiness import enrich_snapshot, runtime_snapshot, structured_readiness
 from server_logging import configure_server_process_logging
@@ -53,6 +54,7 @@ ROOT = Path(__file__).resolve().parent
 APP_ROOT = ROOT.parent
 INSTANCE_ID = installation_id(APP_ROOT)
 EVENT_LOGGER = RuntimeEventLogger(default_event_log_path(APP_ROOT))
+NETWORK_EVENT_LOGGER = ChatgptNetworkEventLogger(default_chatgpt_network_log_path(ROOT))
 INSTANCE_STATE_PATH = Path(
     os.environ.get("LOCAL_VOICE_INSTANCE_STATE") or ROOT / "runtime" / "server-instance.json"
 ).expanduser().resolve()

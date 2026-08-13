@@ -16,6 +16,7 @@ const TEST_MODULES = [
   'tests.test_tts_profiles',
   'tests.test_audio_quality',
   'tests.test_runtime_events',
+  'tests.test_network_diagnostics',
   'tests.test_conversation_submission',
   'tests.test_live_conversation',
   'tests.test_live_http',
