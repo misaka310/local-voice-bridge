@@ -1,9 +1,15 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from network_diagnostics import ChatgptNetworkEventLogger, sanitize_network_event
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL_API = ROOT / "local-api"
+if str(LOCAL_API) not in sys.path:
+    sys.path.insert(0, str(LOCAL_API))
+
+from network_diagnostics import ChatgptNetworkEventLogger, sanitize_network_event  # noqa: E402
 
 
 class NetworkDiagnosticsTests(unittest.TestCase):
