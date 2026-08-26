@@ -120,7 +120,10 @@ class TrayControllerContractTests(unittest.TestCase):
         setup_gui = (ROOT / "scripts" / "setup" / "setup-gui.ps1").read_text(encoding="utf-8")
 
         self.assertIn("pythonw.exe", launcher)
-        self.assertIn("from PySide6 import QtWidgets, QtSvg", launcher)
+        self.assertIn("importlib.util.find_spec('PySide6')", launcher)
+        self.assertNotIn("from PySide6 import QtWidgets, QtSvg", launcher)
+        self.assertIn("EnvironmentValidationTimeoutMs", launcher)
+        self.assertIn("WaitForExit(EnvironmentValidationTimeoutMs)", launcher)
         self.assertIn("--self-test", launcher)
         self.assertIn("--setup", launcher)
         self.assertIn("WindowsApplication", build_script)
