@@ -129,7 +129,7 @@ namespace LocalVoiceBridgeLauncher
             {
                 ProcessStartInfo checkInfo = new ProcessStartInfo();
                 checkInfo.FileName = python;
-                checkInfo.Arguments = "-c \"import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PySide6') else 1)\"";
+                checkInfo.Arguments = "-c \"from PySide6 import QtWidgets, QtSvg\"";
                 checkInfo.WorkingDirectory = workingDirectory;
                 checkInfo.UseShellExecute = false;
                 checkInfo.CreateNoWindow = true;
