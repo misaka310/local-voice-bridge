@@ -13,6 +13,7 @@ namespace LocalVoiceBridgeLauncher
     internal static class Program
     {
         private const string AppTitle = "Local Voice Bridge";
+        private const int EnvironmentValidationTimeoutMs = 15000;
 
         [STAThread]
         private static int Main(string[] args)
@@ -128,7 +129,7 @@ namespace LocalVoiceBridgeLauncher
             {
                 ProcessStartInfo checkInfo = new ProcessStartInfo();
                 checkInfo.FileName = python;
-                checkInfo.Arguments = "-c \"from PySide6 import QtWidgets, QtSvg\"";
+                checkInfo.Arguments = "-c \"import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PySide6') else 1)\"";
                 checkInfo.WorkingDirectory = workingDirectory;
                 checkInfo.UseShellExecute = false;
                 checkInfo.CreateNoWindow = true;
@@ -140,7 +141,18 @@ namespace LocalVoiceBridgeLauncher
                     {
                         return "Python環境を確認できませんでした。";
                     }
-                    check.WaitForExit();
+                    if (!check.WaitForExit(EnvironmentValidationTimeoutMs))
+                    {
+                        try
+                        {
+                            check.Kill();
+                        }
+                        catch (Exception)
+                        {
+                            // Best effort only. The launcher must not block forever on validation cleanup.
+                        }
+                        return "Python環境の確認がタイムアウトしました。もう一度起動してください。";
+                    }
                     if (check.ExitCode != 0)
                     {
                         return "Windows小窓に必要なPySide6が見つかりません。";
