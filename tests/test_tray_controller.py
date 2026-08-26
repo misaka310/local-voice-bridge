@@ -121,6 +121,9 @@ class TrayControllerContractTests(unittest.TestCase):
 
         self.assertIn("pythonw.exe", launcher)
         self.assertIn("from PySide6 import QtWidgets, QtSvg", launcher)
+        self.assertIn("EnvironmentValidationTimeoutMs", launcher)
+        self.assertIn("WaitForExit(EnvironmentValidationTimeoutMs)", launcher)
+        self.assertIn("check.Kill()", launcher)
         self.assertIn("--self-test", launcher)
         self.assertIn("--setup", launcher)
         self.assertIn("WindowsApplication", build_script)
