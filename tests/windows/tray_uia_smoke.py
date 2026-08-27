@@ -49,6 +49,7 @@ SMTO_ABORTIFHUNG = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 @dataclass(frozen=True)
@@ -208,14 +209,26 @@ def wait_for_stable_single_controller(timeout: float = 15.0, stable_for: float =
 
 
 def launch_app() -> psutil.Process:
-    completed = subprocess.run([str(EXE)], cwd=ROOT, timeout=15, check=False)
+    completed = subprocess.run(
+        [str(EXE)],
+        cwd=ROOT,
+        timeout=15,
+        check=False,
+        creationflags=CREATE_NO_WINDOW,
+    )
     if completed.returncode != 0:
         raise RuntimeError(f"{EXE.name} returned {completed.returncode}")
     return wait_for_stable_single_controller(timeout=15)
 
 
 def assert_single_instance(original_pid: int) -> None:
-    completed = subprocess.run([str(EXE)], cwd=ROOT, timeout=15, check=False)
+    completed = subprocess.run(
+        [str(EXE)],
+        cwd=ROOT,
+        timeout=15,
+        check=False,
+        creationflags=CREATE_NO_WINDOW,
+    )
     if completed.returncode != 0:
         raise RuntimeError(f"second launcher returned {completed.returncode}")
     time.sleep(2)
@@ -385,17 +398,37 @@ def move_window(hwnd: int, x: int, y: int) -> None:
         raise ctypes.WinError()
 
 
-def assert_window_responsive(hwnd: int) -> None:
+def window_is_responsive(hwnd: int, *, timeout_ms: int = 2000) -> bool:
+    if not USER32.IsWindow(hwnd):
+        return False
     result = ctypes.c_size_t()
-    ok = USER32.SendMessageTimeoutW(hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, ctypes.byref(result))
-    if not ok:
+    return bool(
+        USER32.SendMessageTimeoutW(
+            hwnd,
+            WM_NULL,
+            0,
+            0,
+            SMTO_ABORTIFHUNG,
+            int(timeout_ms),
+            ctypes.byref(result),
+        )
+    )
+
+
+def assert_window_responsive(hwnd: int) -> None:
+    if not window_is_responsive(hwnd):
         raise AssertionError(f"window {hwnd} is not responding")
 
 
 def verify_panel_toggle(pid: int) -> None:
     click_menu_item(pid, "Show Local Voice panel")
     panel = wait_until("Local Voice panel", lambda: panel_window(pid), timeout=25)
-    assert_window_responsive(panel.hwnd)
+    wait_until(
+        "Local Voice panel responsiveness",
+        lambda: window_is_responsive(panel.hwnd, timeout_ms=500),
+        timeout=10,
+        interval=0.2,
+    )
     click_menu_item(pid, "Hide Local Voice panel")
     wait_until("Local Voice panel to hide", lambda: panel_window(pid) is None, timeout=15)
 

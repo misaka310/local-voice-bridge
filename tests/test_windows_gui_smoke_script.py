@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE_SCRIPT = ROOT / "scripts" / "run-windows-gui-smoke.ps1"
 SMOKE_WORKFLOW = ROOT / ".github" / "workflows" / "windows-gui-smoke.yml"
+TRAY_UIA_SMOKE = ROOT / "tests" / "windows" / "tray_uia_smoke.py"
 HOSTED_ONLY_MESSAGE = "Windows GUI smoke must run only on GitHub-hosted windows-latest."
 
 
@@ -17,6 +18,7 @@ class WindowsGuiSmokeScriptTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = SMOKE_SCRIPT.read_text(encoding="utf-8-sig")
         cls.workflow = SMOKE_WORKFLOW.read_text(encoding="utf-8")
+        cls.tray_uia_smoke = TRAY_UIA_SMOKE.read_text(encoding="utf-8")
 
     def test_prefers_actions_configured_python_for_venv_creation(self) -> None:
         self.assertIn("$env:pythonLocation", self.script)
@@ -84,6 +86,15 @@ class WindowsGuiSmokeScriptTests(unittest.TestCase):
     def test_workflow_sets_the_hosted_runner_contract(self) -> None:
         self.assertIn("runs-on: windows-latest", self.workflow)
         self.assertIn("LOCAL_VOICE_GUI_RUNNER: github-hosted-windows-latest", self.workflow)
+
+    def test_panel_responsiveness_waits_for_bounded_recovery(self) -> None:
+        self.assertIn("def window_is_responsive", self.tray_uia_smoke)
+        self.assertIn('"Local Voice panel responsiveness"', self.tray_uia_smoke)
+        self.assertIn("timeout=10", self.tray_uia_smoke)
+
+    def test_packaged_launcher_smoke_never_opens_a_console(self) -> None:
+        self.assertIn('CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)', self.tray_uia_smoke)
+        self.assertGreaterEqual(self.tray_uia_smoke.count("creationflags=CREATE_NO_WINDOW"), 2)
 
 
 if __name__ == "__main__":
