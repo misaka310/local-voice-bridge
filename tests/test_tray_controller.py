@@ -121,6 +121,9 @@ class TrayControllerContractTests(unittest.TestCase):
 
         self.assertIn("pythonw.exe", launcher)
         self.assertIn("from PySide6 import QtWidgets, QtSvg", launcher)
+        self.assertIn("SEM_FAILCRITICALERRORS", launcher)
+        self.assertIn('"--version"', launcher)
+        self.assertIn("Python仮想環境が壊れています", launcher)
         self.assertIn("EnvironmentValidationTimeoutMs", launcher)
         self.assertIn("WaitForExit(EnvironmentValidationTimeoutMs)", launcher)
         self.assertIn("check.Kill()", launcher)
@@ -149,6 +152,16 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn('$visibleProfileKeys = @("reading", "stt")', setup_gui)
         self.assertIn('if ($advancedCheck.Checked)', setup_gui)
         self.assertIn("失敗内容をコピー", setup_gui)
+
+    def test_setup_preserves_venv_launchers_and_repairs_a_broken_interpreter(self) -> None:
+        setup_engine = (ROOT / "scripts" / "setup" / "setup-engine.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("Copy-RealPythonExecutables", setup_engine)
+        self.assertNotIn('Copy-Item -LiteralPath (Join-Path $home "python.exe") -Destination $python -Force', setup_engine)
+        self.assertIn("function Test-VenvPython", setup_engine)
+        self.assertIn("function Repair-VoiceVenv", setup_engine)
+        self.assertIn('Arguments @("--version")', setup_engine)
+        self.assertIn('@("-m", "venv", "--upgrade", $venv)', setup_engine)
 
     def test_public_tree_has_no_vbs_launcher(self) -> None:
         self.assertFalse((ROOT / "start-voice-bridge.vbs").exists())

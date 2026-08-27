@@ -220,16 +220,43 @@ function New-VoiceVenv {
     Invoke-Native -FilePath $systemPython.Source -Arguments @("-m", "venv", $venv) -FailureMessage "Python仮想環境を作成できませんでした。"
 }
 
-function Copy-RealPythonExecutables {
+function Get-VenvBasePython {
     $cfgPath = Join-Path $venv "pyvenv.cfg"
+    if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) { return $null }
     $homeLine = Get-Content -LiteralPath $cfgPath | Where-Object { $_ -like "home = *" } | Select-Object -First 1
-    if (-not $homeLine) { throw "pyvenv.cfgからPython本体を特定できません。" }
+    if (-not $homeLine) { return $null }
     $home = ($homeLine -replace "^home = ", "").Trim()
-    Copy-Item -LiteralPath (Join-Path $home "python.exe") -Destination $python -Force
-    $sourcePythonw = Join-Path $home "pythonw.exe"
-    if (Test-Path -LiteralPath $sourcePythonw) {
-        Copy-Item -LiteralPath $sourcePythonw -Destination $pythonw -Force
+    $basePython = Join-Path $home "python.exe"
+    if (Test-Path -LiteralPath $basePython -PathType Leaf) { return $basePython }
+    return $null
+}
+
+function Test-VenvPython {
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { return $false }
+
+    $basePython = Get-VenvBasePython
+    if ($null -ne $basePython) {
+        try {
+            $venvHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $python).Hash
+            $baseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $basePython).Hash
+            if ($venvHash -eq $baseHash) {
+                return $false
+            }
+        } catch {
+            return $false
+        }
     }
+
+    return Test-Native -FilePath $python -Arguments @("--version")
+}
+
+function Repair-VoiceVenv {
+    $basePython = Get-VenvBasePython
+    if ($null -eq $basePython -or -not (Test-Native -FilePath $basePython -Arguments @("--version"))) {
+        throw "既存のPython仮想環境の元になったPython本体が見つかりません。Python 3.11を修復または再インストールしてから、もう一度セットアップしてください。"
+    }
+    Invoke-Native -FilePath $basePython -Arguments @("-m", "venv", "--upgrade", $venv) -FailureMessage "Python仮想環境のランチャー修復に失敗しました。"
 }
 
 function Get-FreeSpaceGb {
@@ -239,8 +266,7 @@ function Get-FreeSpaceGb {
 }
 
 function Test-ReadingEnvironmentReady {
-    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { return $false }
-    if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { return $false }
+    if (-not (Test-VenvPython)) { return $false }
     if (-not (Test-Path -LiteralPath (Join-Path $localApi "runtime\ffmpeg-shared\bin") -PathType Container)) { return $false }
     if (-not (Test-Path -LiteralPath (Join-Path $venv "Lib\site-packages\local_voice_ffmpeg_bootstrap.pth") -PathType Leaf)) { return $false }
     return Test-PythonImport "import torch, torchaudio, torchcodec, PySide6, irodori"
@@ -273,16 +299,16 @@ try {
         }
     }
 
-    Invoke-SetupStage -Id "venv" -Name "Python仮想環境の作成" -Code "LVB-SETUP-010" -Verify { Test-Path -LiteralPath $python -PathType Leaf } -Action {
-        if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { New-VoiceVenv }
+    Invoke-SetupStage -Id "venv" -Name "Python仮想環境の作成・修復" -Code "LVB-SETUP-010" -Verify { Test-VenvPython } -Action {
+        if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            New-VoiceVenv
+        } elseif (-not (Test-VenvPython)) {
+            Repair-VoiceVenv
+        }
     }
 
     Invoke-SetupStage -Id "pip" -Name "pip・setuptools・wheelの更新" -Code "LVB-SETUP-020" -Verify { Test-Native -FilePath $python -Arguments @("-m", "pip", "--version") } -Action {
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel") -FailureMessage "pip基盤の更新に失敗しました。"
-    }
-
-    Invoke-SetupStage -Id "python-launchers" -Name "非表示起動用Pythonランチャーの準備" -Code "LVB-SETUP-030" -Verify { (Test-Path -LiteralPath $python) -and (Test-Path -LiteralPath $pythonw) } -Action {
-        Copy-RealPythonExecutables
     }
 
     Invoke-SetupStage -Id "torch" -Name "CUDA版PyTorch・TorchAudioの導入" -Code "LVB-SETUP-040" -Verify { Test-PythonImport "import torch, torchaudio" } -Action {
