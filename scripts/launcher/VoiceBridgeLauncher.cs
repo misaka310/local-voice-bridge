@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Local Voice Bridge Launcher")]
@@ -14,6 +15,11 @@ namespace LocalVoiceBridgeLauncher
     {
         private const string AppTitle = "Local Voice Bridge";
         private const int EnvironmentValidationTimeoutMs = 15000;
+        private const uint SEM_FAILCRITICALERRORS = 0x0001;
+        private const uint SEM_NOGPFAULTERRORBOX = 0x0002;
+
+        [DllImport("kernel32.dll")]
+        private static extern uint SetErrorMode(uint uMode);
 
         [STAThread]
         private static int Main(string[] args)
@@ -49,13 +55,15 @@ namespace LocalVoiceBridgeLauncher
 
             try
             {
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = pythonw;
-                startInfo.Arguments = Quote(controller);
-                startInfo.WorkingDirectory = localApi;
-                startInfo.UseShellExecute = false;
-                startInfo.CreateNoWindow = true;
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = pythonw,
+                    Arguments = Quote(controller),
+                    WorkingDirectory = localApi,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
                 Process.Start(startInfo);
                 return 0;
             }
@@ -96,13 +104,15 @@ namespace LocalVoiceBridgeLauncher
                     powershell = "powershell.exe";
                 }
 
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = powershell;
-                startInfo.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File " + Quote(setupGui);
-                startInfo.WorkingDirectory = root;
-                startInfo.UseShellExecute = false;
-                startInfo.CreateNoWindow = true;
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = powershell,
+                    Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File " + Quote(setupGui),
+                    WorkingDirectory = root,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
                 Process.Start(startInfo);
                 return 0;
             }
@@ -120,6 +130,11 @@ namespace LocalVoiceBridgeLauncher
                 return "音声環境がありません。";
             }
 
+            if (VenvPythonWasReplacedWithBaseInterpreter(python))
+            {
+                return "Python仮想環境が壊れています。セットアップで修復できます。";
+            }
+
             if (!File.Exists(controller))
             {
                 return "local-api\\tray_controller.py が見つかりません。";
@@ -127,36 +142,40 @@ namespace LocalVoiceBridgeLauncher
 
             try
             {
-                ProcessStartInfo checkInfo = new ProcessStartInfo();
-                checkInfo.FileName = python;
-                checkInfo.Arguments = "-c \"from PySide6 import QtWidgets, QtSvg\"";
-                checkInfo.WorkingDirectory = workingDirectory;
-                checkInfo.UseShellExecute = false;
-                checkInfo.CreateNoWindow = true;
-                checkInfo.WindowStyle = ProcessWindowStyle.Hidden;
-
-                using (Process check = Process.Start(checkInfo))
+                uint previousErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+                try
                 {
-                    if (check == null)
+                    int versionExitCode = RunEnvironmentCheck(python, "--version", workingDirectory);
+                    if (versionExitCode == -2)
+                    {
+                        return "Python環境の確認がタイムアウトしました。もう一度起動してください。";
+                    }
+                    if (versionExitCode == -1)
                     {
                         return "Python環境を確認できませんでした。";
                     }
-                    if (!check.WaitForExit(EnvironmentValidationTimeoutMs))
+                    if (versionExitCode != 0)
                     {
-                        try
-                        {
-                            check.Kill();
-                        }
-                        catch (Exception)
-                        {
-                            // Best effort only. The launcher must not block forever on validation cleanup.
-                        }
+                        return "Python仮想環境が壊れています。セットアップで修復できます。";
+                    }
+
+                    int qtExitCode = RunEnvironmentCheck(python, "-c \"from PySide6 import QtWidgets, QtSvg\"", workingDirectory);
+                    if (qtExitCode == -2)
+                    {
                         return "Python環境の確認がタイムアウトしました。もう一度起動してください。";
                     }
-                    if (check.ExitCode != 0)
+                    if (qtExitCode == -1)
+                    {
+                        return "Python環境を確認できませんでした。";
+                    }
+                    if (qtExitCode != 0)
                     {
                         return "Windows小窓に必要なPySide6が見つかりません。";
                     }
+                }
+                finally
+                {
+                    SetErrorMode(previousErrorMode);
                 }
             }
             catch (Exception ex)
@@ -165,6 +184,108 @@ namespace LocalVoiceBridgeLauncher
             }
 
             return null;
+        }
+
+        private static int RunEnvironmentCheck(string python, string arguments, string workingDirectory)
+        {
+            ProcessStartInfo checkInfo = new ProcessStartInfo
+            {
+                FileName = python,
+                Arguments = arguments,
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            using (Process check = Process.Start(checkInfo))
+            {
+                if (check == null)
+                {
+                    return -1;
+                }
+                if (!check.WaitForExit(EnvironmentValidationTimeoutMs))
+                {
+                    try
+                    {
+                        check.Kill();
+                    }
+                    catch (Exception)
+                    {
+                        // Best effort only. The launcher must not block forever on validation cleanup.
+                    }
+                    return -2;
+                }
+                return check.ExitCode;
+            }
+        }
+
+        private static bool VenvPythonWasReplacedWithBaseInterpreter(string python)
+        {
+            try
+            {
+                DirectoryInfo scriptsDirectory = Directory.GetParent(python);
+                if (scriptsDirectory == null || scriptsDirectory.Parent == null)
+                {
+                    return false;
+                }
+
+                string cfgPath = Path.Combine(scriptsDirectory.Parent.FullName, "pyvenv.cfg");
+                if (!File.Exists(cfgPath))
+                {
+                    return false;
+                }
+
+                string home = null;
+                foreach (string line in File.ReadAllLines(cfgPath))
+                {
+                    if (line.StartsWith("home = ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        home = line.Substring("home = ".Length).Trim();
+                        break;
+                    }
+                }
+                if (String.IsNullOrEmpty(home))
+                {
+                    return false;
+                }
+
+                string basePython = Path.Combine(home, "python.exe");
+                if (!File.Exists(basePython))
+                {
+                    return false;
+                }
+
+                FileInfo venvInfo = new FileInfo(python);
+                FileInfo baseInfo = new FileInfo(basePython);
+                if (venvInfo.Length != baseInfo.Length)
+                {
+                    return false;
+                }
+                return FilesHaveSameBytes(python, basePython);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static bool FilesHaveSameBytes(string firstPath, string secondPath)
+        {
+            byte[] first = File.ReadAllBytes(firstPath);
+            byte[] second = File.ReadAllBytes(secondPath);
+            if (first.Length != second.Length)
+            {
+                return false;
+            }
+            for (int i = 0; i < first.Length; i++)
+            {
+                if (first[i] != second[i])
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static bool ShowSetupPrompt(string message)
