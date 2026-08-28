@@ -108,6 +108,13 @@
         chrome.runtime.reload();
         return;
       }
+      if (command === 'open_options') {
+        await chrome.runtime.openOptionsPage();
+        await deps.flushBrowserRuntimeState();
+        await acknowledge(effectiveSettings, consumerId, { commandId });
+        lastCommandId = commandId;
+        return;
+      }
       const referenceVoice = settingsCore.normalizeStoredReference(effectiveSettings.referenceVoice);
       const result = deps.executeUiCommand(
         String(item.command || ''),

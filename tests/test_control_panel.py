@@ -280,6 +280,20 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
             panel.shutdown()
 
+    def test_volume_debounce_is_single_shot_and_starts_only_after_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            panel = LocalVoiceControlPanel(
+                FakeControlClient(),
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+                async_requests=False,
+            )
+            self.assertEqual(panel.volume_update_timer.interval(), 0)
+            panel.volume_slider.setValue(20)
+            self.assertTrue(panel.volume_update_timer.isActive())
+            self.assertEqual(panel.volume_update_timer.interval(), 150)
+            panel.shutdown()
+
     def test_controls_send_settings_and_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = FakeControlClient()
@@ -316,6 +330,34 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertEqual(client.commands, ["next", "regen", "stop", "replay"])
             panel.shutdown()
 
+    def test_windows_panel_exposes_voice_and_advanced_settings_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=False,
+                async_requests=False,
+            )
+            panel.refresh_now()
+            self.app.processEvents()
+
+            self.assertEqual(panel.reference_label.text(), "Voice")
+            self.assertIn("ペット", panel.reference_label.toolTip())
+            self.assertIn("ペット", panel.reference_combo.toolTip())
+            self.assertEqual(panel.details_button.text(), "詳細設定")
+            self.assertTrue(panel.details_button.isEnabled())
+            self.assertEqual(panel.auto_button.text(), "Auto")
+            self.assertEqual(panel.next_button.text(), "Next")
+            self.assertEqual(panel.regen_button.text(), "Regen")
+            self.assertEqual(panel.stop_button.text(), "Stop")
+            self.assertEqual(panel.replay_button.text(), "Replay")
+
+            panel.details_button.click()
+            self.app.processEvents()
+            self.assertEqual(client.commands, ["open_options"])
+            panel.shutdown()
+
     def test_local_api_disconnect_disables_all_mutating_controls(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = FakeControlClient()
@@ -340,6 +382,7 @@ class ControlPanelQtTests(unittest.TestCase):
                 panel.regen_button,
                 panel.stop_button,
                 panel.replay_button,
+                panel.details_button,
             ):
                 self.assertFalse(control.isEnabled())
             panel.shutdown()
@@ -540,6 +583,40 @@ class ControlPanelQtTests(unittest.TestCase):
             panel.hide_panel()
             self.app.processEvents()
             self.assertFalse(panel.refresh_timer.isActive())
+            panel.shutdown()
+
+    def test_visible_panel_uses_fast_active_polling_and_slow_idle_polling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = FakeControlClient()
+            panel = LocalVoiceControlPanel(
+                client,
+                state_path=Path(temp_dir) / "panel-window.json",
+                start_polling=True,
+                async_requests=False,
+            )
+            panel.show_panel()
+            self.app.processEvents()
+            self.assertLessEqual(panel.refresh_timer.interval(), 1000)
+
+            idle = client.get_snapshot()
+            idle["settings"] = {**idle["settings"], "micConversationEnabled": False}
+            idle["conversation"] = {"phase": "idle", "statusText": ""}
+            idle["extension"] = {
+                **idle["extension"],
+                "statusText": "Ready",
+                "queueSize": 0,
+                "isPlaying": False,
+                "playbackPhase": "idle",
+            }
+            idle["readiness"] = {
+                "deviceOrModel": "ready",
+                "repairRequired": False,
+                "tabs": 3,
+                "ready": True,
+            }
+            panel.apply_snapshot(idle)
+            self.app.processEvents()
+            self.assertGreaterEqual(panel.refresh_timer.interval(), 5000)
             panel.shutdown()
 
 
