@@ -165,6 +165,33 @@ function Test-PythonImport {
     return Test-Native -FilePath $python -Arguments @("-c", $Imports)
 }
 
+function Test-EarlyNvidiaCapability {
+    $nvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
+    if ($null -eq $nvidiaSmi) {
+        $fallback = Join-Path $env:ProgramFiles "NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            $nvidiaSmi = Get-Item -LiteralPath $fallback
+        }
+    }
+    if ($null -eq $nvidiaSmi) { return $false }
+    try {
+        $target = if ($nvidiaSmi.PSObject.Properties.Name -contains "Source" -and -not [string]::IsNullOrWhiteSpace([string]$nvidiaSmi.Source)) {
+            [string]$nvidiaSmi.Source
+        } elseif ($nvidiaSmi.PSObject.Properties.Name -contains "FullName" -and -not [string]::IsNullOrWhiteSpace([string]$nvidiaSmi.FullName)) {
+            [string]$nvidiaSmi.FullName
+        } else {
+            [string]$nvidiaSmi.Name
+        }
+        $output = @(& $target --query-gpu=name --format=csv,noheader 2>$null)
+        if ($nvidiaSmi.CommandType -eq [System.Management.Automation.CommandTypes]::Application -and $LASTEXITCODE -ne 0) {
+            return $false
+        }
+        return -not [string]::IsNullOrWhiteSpace(($output -join "`n"))
+    } catch {
+        return $false
+    }
+}
+
 function Invoke-SetupStage {
     param(
         [Parameter(Mandatory = $true)][string]$Id,
@@ -345,11 +372,11 @@ function Get-RequiredFreeSpaceGb {
 
 try {
     Write-SetupLog "==== Setup start profile=$Profile ===="
-    $profile = $profileInfo[$Profile]
+    $selectedProfileInfo = $profileInfo[$Profile]
     $freeGb = Get-FreeSpaceGb
     $requiredFreeGb = Get-RequiredFreeSpaceGb -SelectedProfile $Profile
-    $spaceLabel = if ($requiredFreeGb -lt [double]$profile.MinimumFreeGb) { "追加分の最低空き ${requiredFreeGb} GB" } else { "最低空き ${requiredFreeGb} GB" }
-    Write-StageEvent -Id "profile" -Status "info" -Message ("{0} / ダウンロード {1} / 必要容量 {2} / {3} / 現在の空き {4} GB" -f $profile.Title, $profile.Download, $profile.Disk, $spaceLabel, $freeGb)
+    $spaceLabel = if ($requiredFreeGb -lt [double]$selectedProfileInfo.MinimumFreeGb) { "追加分の最低空き ${requiredFreeGb} GB" } else { "最低空き ${requiredFreeGb} GB" }
+    Write-StageEvent -Id "profile" -Status "info" -Message ("{0} / ダウンロード {1} / 必要容量 {2} / {3} / 現在の空き {4} GB" -f $selectedProfileInfo.Title, $selectedProfileInfo.Download, $selectedProfileInfo.Disk, $spaceLabel, $freeGb)
 
     Invoke-SetupStage -Id "preflight" -Name "Python・空き容量の確認" -Code "LVB-SETUP-001" -AlwaysRun -Action {
         if ($freeGb -lt $requiredFreeGb) {
@@ -357,6 +384,9 @@ try {
         }
         if (-not (Get-Command py.exe -ErrorAction SilentlyContinue) -and -not (Get-Command python.exe -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $python)) {
             throw "Python 3.10以上が見つかりません。"
+        }
+        if (-not (Test-EarlyNvidiaCapability)) {
+            throw "NVIDIA GPUまたはNVIDIAドライバーを確認できません。Local Voice Bridgeの実音声機能にはNVIDIA GPU/CUDAが必要です。"
         }
     }
 
@@ -444,7 +474,7 @@ try {
         }
     }
 
-    Write-StageEvent -Id "complete" -Status "passed" -Message ("{0}のセットアップが完了しました。" -f $profile.Title)
+    Write-StageEvent -Id "complete" -Status "passed" -Message ("{0}のセットアップが完了しました。" -f $selectedProfileInfo.Title)
     Write-SetupLog "==== Setup complete profile=$Profile ===="
     exit 0
 } catch {

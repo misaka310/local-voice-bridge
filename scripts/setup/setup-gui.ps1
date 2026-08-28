@@ -119,35 +119,43 @@ $form.Controls.Add($status)
 $startButton = New-Object System.Windows.Forms.Button
 $startButton.Text = "セットアップ開始"
 $startButton.Location = New-Object System.Drawing.Point(28, 552)
-$startButton.Size = New-Object System.Drawing.Size(165, 38)
+$startButton.Size = New-Object System.Drawing.Size(145, 38)
 $startButton.Anchor = "Bottom,Left"
 $form.Controls.Add($startButton)
 
+$cancelButton = New-Object System.Windows.Forms.Button
+$cancelButton.Text = "キャンセル"
+$cancelButton.Location = New-Object System.Drawing.Point(185, 552)
+$cancelButton.Size = New-Object System.Drawing.Size(120, 38)
+$cancelButton.Anchor = "Bottom,Left"
+$cancelButton.Enabled = $false
+$form.Controls.Add($cancelButton)
+
 $copyButton = New-Object System.Windows.Forms.Button
 $copyButton.Text = "失敗内容をコピー"
-$copyButton.Location = New-Object System.Drawing.Point(205, 552)
-$copyButton.Size = New-Object System.Drawing.Size(165, 38)
+$copyButton.Location = New-Object System.Drawing.Point(317, 552)
+$copyButton.Size = New-Object System.Drawing.Size(145, 38)
 $copyButton.Anchor = "Bottom,Left"
 $form.Controls.Add($copyButton)
 
 $logButton = New-Object System.Windows.Forms.Button
 $logButton.Text = "ログを開く"
-$logButton.Location = New-Object System.Drawing.Point(382, 552)
-$logButton.Size = New-Object System.Drawing.Size(130, 38)
+$logButton.Location = New-Object System.Drawing.Point(474, 552)
+$logButton.Size = New-Object System.Drawing.Size(105, 38)
 $logButton.Anchor = "Bottom,Left"
 $form.Controls.Add($logButton)
 
 $guideButton = New-Object System.Windows.Forms.Button
 $guideButton.Text = "拡張機能の導入手順"
-$guideButton.Location = New-Object System.Drawing.Point(524, 552)
-$guideButton.Size = New-Object System.Drawing.Size(175, 38)
+$guideButton.Location = New-Object System.Drawing.Point(591, 552)
+$guideButton.Size = New-Object System.Drawing.Size(165, 38)
 $guideButton.Anchor = "Bottom,Left"
 $form.Controls.Add($guideButton)
 
 $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Text = "閉じる"
-$closeButton.Location = New-Object System.Drawing.Point(711, 552)
-$closeButton.Size = New-Object System.Drawing.Size(142, 38)
+$closeButton.Location = New-Object System.Drawing.Point(768, 552)
+$closeButton.Size = New-Object System.Drawing.Size(85, 38)
 $closeButton.Anchor = "Bottom,Right"
 $form.Controls.Add($closeButton)
 
@@ -255,6 +263,58 @@ function Process-ProgressLines {
     }
 }
 
+function Start-SetupProcessNoWindow {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = ($Arguments -join " ")
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        $process.Dispose()
+        throw "セットアップ処理を開始できませんでした。"
+    }
+    $process.BeginOutputReadLine()
+    $process.BeginErrorReadLine()
+    return $process
+}
+
+function Stop-SetupProcessTree {
+    param([System.Diagnostics.Process]$Process)
+    if ($null -eq $Process) { return }
+    try {
+        if ($Process.HasExited) { return }
+    } catch {
+        return
+    }
+    $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $taskkill
+    $startInfo.Arguments = "/PID $($Process.Id) /T /F"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $killer = [System.Diagnostics.Process]::Start($startInfo)
+    try {
+        if (-not $killer.WaitForExit(10000)) {
+            try { $killer.Kill() } catch {}
+            throw "セットアップのキャンセル処理がタイムアウトしました。"
+        }
+    } finally {
+        $killer.Dispose()
+    }
+    if (-not $Process.WaitForExit(10000)) {
+        throw "セットアップ処理を終了できませんでした。"
+    }
+}
+
 function Finish-SetupProcess {
     Process-ProgressLines
     $exitCode = $script:process.ExitCode
@@ -271,6 +331,7 @@ function Finish-SetupProcess {
     $profileBox.Enabled = $true
     $advancedCheck.Enabled = $true
     $closeButton.Enabled = $true
+    $cancelButton.Enabled = $false
     $script:process.Dispose()
     $script:process = $null
 }
@@ -315,7 +376,8 @@ $startButton.Add_Click({
             "-File", ('"' + $engine + '"'),
             "-Profile", $script:activeProfile
         )
-        $script:process = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $script:process = Start-SetupProcessNoWindow -FilePath "powershell.exe" -Arguments $arguments
+        $cancelButton.Enabled = $true
         $timer.Start()
     } catch {
         $status.Text = "セットアップ処理を開始できませんでした: $($_.Exception.Message)"
@@ -324,6 +386,37 @@ $startButton.Add_Click({
         $profileBox.Enabled = $true
         $advancedCheck.Enabled = $true
         $closeButton.Enabled = $true
+        $cancelButton.Enabled = $false
+    }
+})
+
+$cancelButton.Add_Click({
+    if ($null -eq $script:process) { return }
+    try {
+        if ($script:process.HasExited) { return }
+    } catch {
+        return
+    }
+    $cancelButton.Enabled = $false
+    $status.Text = "セットアップをキャンセルしています…"
+    $status.ForeColor = [System.Drawing.Color]::Black
+    try {
+        Stop-SetupProcessTree -Process $script:process
+        $timer.Stop()
+        Process-ProgressLines
+        $script:process.Dispose()
+        $script:process = $null
+        $status.Text = "セットアップをキャンセルしました。再実行すると完了済み工程を再確認して続きから再開します。"
+        $status.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+        $startButton.Text = "再確認・再実行"
+        $startButton.Enabled = $true
+        $profileBox.Enabled = $true
+        $advancedCheck.Enabled = $true
+        $closeButton.Enabled = $true
+    } catch {
+        $status.Text = "セットアップのキャンセルに失敗しました: $($_.Exception.Message)"
+        $status.ForeColor = [System.Drawing.Color]::DarkRed
+        $cancelButton.Enabled = $true
     }
 })
 
@@ -365,7 +458,7 @@ $form.Add_FormClosing({
     param($sender, $eventArgs)
     if ($null -ne $script:process -and -not $script:process.HasExited) {
         $eventArgs.Cancel = $true
-        [System.Windows.Forms.MessageBox]::Show("セットアップ中は閉じられません。工程が完了するまで待つか、タスクマネージャーで中止してください。", "Local Voice Bridge", "OK", "Warning") | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("セットアップ中は閉じられません。中止する場合は「キャンセル」を押してください。", "Local Voice Bridge", "OK", "Warning") | Out-Null
     }
 })
 
