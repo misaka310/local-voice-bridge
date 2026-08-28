@@ -50,6 +50,8 @@ for (const file of [
   'local-api/control_panel_async.py',
   'local-api/control_panel_style.py',
   'local-api/panel_window_state.py',
+  'local-api/server_supervisor.py',
+  'local-api/windows_integration.py',
   'local-api/audio_recorder.py',
   'local-api/stt_runtime.py',
   'local-api/windows_push_to_talk.py',
@@ -104,6 +106,7 @@ capLines('local-api/server.py', 450);
 capLines('local-api/api_router.py', 500);
 capLines('local-api/conversation_controller.py', 520);
 capLines('local-api/control_panel.py', 540);
+capLines('local-api/tray_controller.py', 650);
 capLines('extension/content.js', 330);
 capLines('extension/background.js', 470);
 capLines('extension/background-playback-queue.js', 330);
@@ -254,6 +257,36 @@ forbidText(
   'local-api/control_panel.py',
   'urllib.request',
   'control-panel HTTP calls belong in control_panel_client.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'class VoiceBridgeController',
+  'local server supervision belongs in server_supervisor.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'def probe_health(',
+  'server health probing belongs in server_supervisor.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'winreg',
+  'Windows startup registry ownership belongs in windows_integration.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'CreateMutex',
+  'Windows single-instance ownership belongs in windows_integration.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'subprocess.Popen(',
+  'post-exit process launching belongs in windows_integration.py',
+);
+forbidText(
+  'local-api/tray_controller.py',
+  'cmd.exe',
+  'normal Windows recovery flows must not launch cmd.exe',
 );
 forbidText(
   'extension/background.js',

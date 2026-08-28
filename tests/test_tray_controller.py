@@ -16,11 +16,14 @@ assert SPEC and SPEC.loader
 tray = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tray)
 
+import server_supervisor as supervisor  # noqa: E402
+import windows_integration as windows  # noqa: E402
+
 
 class TrayControllerContractTests(unittest.TestCase):
     def test_expected_health_payload_is_accepted(self) -> None:
         self.assertTrue(
-            tray.compatible_health_payload(
+            supervisor.compatible_health_payload(
                 {
                     "ok": True,
                     "runtime": "irodori_direct",
@@ -30,9 +33,9 @@ class TrayControllerContractTests(unittest.TestCase):
         )
 
     def test_wrong_or_incomplete_health_payload_is_rejected(self) -> None:
-        self.assertFalse(tray.compatible_health_payload({"ok": True}))
+        self.assertFalse(supervisor.compatible_health_payload({"ok": True}))
         self.assertFalse(
-            tray.compatible_health_payload(
+            supervisor.compatible_health_payload(
                 {
                     "ok": True,
                     "runtime": "another-service",
@@ -40,24 +43,24 @@ class TrayControllerContractTests(unittest.TestCase):
                 }
             )
         )
-        self.assertFalse(tray.compatible_health_payload(None))
+        self.assertFalse(supervisor.compatible_health_payload(None))
 
     def test_server_is_started_directly_with_the_venv_python(self) -> None:
-        command = tray.server_command()
-        self.assertEqual(command[0], str(tray.SERVER_PYTHON))
-        self.assertEqual(command[1], str(tray.SERVER_SCRIPT))
+        command = supervisor.server_command()
+        self.assertEqual(command[0], str(supervisor.SERVER_PYTHON))
+        self.assertEqual(command[1], str(supervisor.SERVER_SCRIPT))
         self.assertNotIn("cmd.exe", " ".join(command).lower())
         self.assertNotIn(".bat", " ".join(command).lower())
 
     def test_preflight_keeps_the_existing_cuda_contract(self) -> None:
-        command = tray.preflight_command()
+        command = supervisor.preflight_command()
         self.assertIn("--strict-cuda", command)
         self.assertIn("--quick", command)
-        self.assertEqual(command[0], str(tray.SERVER_PYTHON))
+        self.assertEqual(command[0], str(supervisor.SERVER_PYTHON))
 
     def test_startup_command_targets_the_small_exe_launcher(self) -> None:
         launcher = Path(r"C:\Voice Bridge\LocalVoiceBridge.exe")
-        self.assertEqual(tray.startup_command(launcher), f'"{launcher}"')
+        self.assertEqual(windows.startup_command(launcher), f'"{launcher}"')
 
     def test_startup_toggle_uses_the_current_user_run_registry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -66,21 +69,21 @@ class TrayControllerContractTests(unittest.TestCase):
             legacy_entry = Path(temp_dir) / "ChatGPT Local Voice Bridge.vbs"
             legacy_entry.write_text("legacy", encoding="utf-8")
             with (
-                mock.patch.object(tray, "LAUNCHER_EXE", launcher),
-                mock.patch.object(tray, "legacy_startup_entry_paths", return_value=(legacy_entry,)),
-                mock.patch.object(tray, "_write_startup_command") as write_startup,
-                mock.patch.object(tray, "_delete_startup_command") as delete_startup,
+                mock.patch.object(windows, "LAUNCHER_EXE", launcher),
+                mock.patch.object(windows, "legacy_startup_entry_paths", return_value=(legacy_entry,)),
+                mock.patch.object(windows, "_write_startup_command") as write_startup,
+                mock.patch.object(windows, "_delete_startup_command") as delete_startup,
             ):
-                tray.set_startup_enabled(True)
+                windows.set_startup_enabled(True)
                 write_startup.assert_called_once_with(f'"{launcher}"')
-                delete_startup.assert_called_once_with(tray.LEGACY_WINDOWS_RUN_VALUE)
+                delete_startup.assert_called_once_with(windows.LEGACY_WINDOWS_RUN_VALUE)
                 self.assertFalse(legacy_entry.exists())
 
                 delete_startup.reset_mock()
-                tray.set_startup_enabled(False)
+                windows.set_startup_enabled(False)
                 self.assertEqual(
                     delete_startup.call_args_list,
-                    [mock.call(), mock.call(tray.LEGACY_WINDOWS_RUN_VALUE)],
+                    [mock.call(), mock.call(windows.LEGACY_WINDOWS_RUN_VALUE)],
                 )
 
     def test_legacy_startup_entry_is_migrated_to_the_exe(self) -> None:
@@ -90,11 +93,11 @@ class TrayControllerContractTests(unittest.TestCase):
             legacy_entry = Path(temp_dir) / "ChatGPT Local Voice Bridge.vbs"
             legacy_entry.write_text("legacy", encoding="utf-8")
             with (
-                mock.patch.object(tray, "LAUNCHER_EXE", launcher),
-                mock.patch.object(tray, "legacy_startup_entry_paths", return_value=(legacy_entry,)),
-                mock.patch.object(tray, "_write_startup_command") as write_startup,
+                mock.patch.object(windows, "LAUNCHER_EXE", launcher),
+                mock.patch.object(windows, "legacy_startup_entry_paths", return_value=(legacy_entry,)),
+                mock.patch.object(windows, "_write_startup_command") as write_startup,
             ):
-                self.assertTrue(tray.migrate_legacy_startup())
+                self.assertTrue(windows.migrate_legacy_startup())
 
             write_startup.assert_called_once_with(f'"{launcher}"')
             self.assertFalse(legacy_entry.exists())
@@ -103,11 +106,11 @@ class TrayControllerContractTests(unittest.TestCase):
         home = Path("voice-test-home")
         with (
             mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch.object(tray, "IS_WINDOWS", True),
-            mock.patch.object(tray.Path, "home", return_value=home),
+            mock.patch.object(windows, "IS_WINDOWS", True),
+            mock.patch.object(windows.Path, "home", return_value=home),
         ):
             self.assertEqual(
-                tray.startup_folder(),
+                windows.startup_folder(),
                 home / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup",
             )
 
@@ -191,13 +194,13 @@ class TrayControllerContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = Path(temp_dir) / "generated-audio"
             with (
-                mock.patch.object(tray, "IS_WINDOWS", True),
-                mock.patch.object(tray.subprocess, "Popen") as popen,
+                mock.patch.object(windows, "IS_WINDOWS", True),
+                mock.patch.object(windows.subprocess, "Popen") as popen,
             ):
-                tray.open_path(directory)
+                windows.open_path(directory)
             popen.assert_called_once_with(
                 ["explorer.exe", str(directory)],
-                creationflags=tray.CREATE_NO_WINDOW,
+                creationflags=windows.CREATE_NO_WINDOW,
             )
 
     def test_server_disables_only_implicit_hugging_face_tokens(self) -> None:

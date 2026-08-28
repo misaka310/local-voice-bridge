@@ -24,6 +24,7 @@
     const conversationSessionTargets = requireDependency(deps, 'conversationSessionTargets');
     const conversationSessionTargetLocations = requireDependency(deps, 'conversationSessionTargetLocations');
     const tabs = requireDependency(deps, 'tabs');
+    const pushSettingsToRegisteredTabs = requireDependency(deps, 'pushMessageToRegisteredTabs');
     const requestAutoRecheckForRegisteredTabs = requireDependency(deps, 'requestAutoRecheckForRegisteredTabs');
     const statePublisher = requireDependency(deps, 'statePublisher');
     let pollPromise = null;
@@ -59,21 +60,11 @@
       });
     }
 
-    async function pushSettingsToRegisteredTabs(nextSettings) {
-      const message = { type: 'settings-update', payload: { ...nextSettings } };
-      await Promise.all(Array.from(tabs.keys()).map(async (tabId) => {
-        await Promise.race([
-          chrome.tabs.sendMessage(Number(tabId), message).catch(() => null),
-          new Promise((resolve) => setTimeout(resolve, 750)),
-        ]);
-      }));
-    }
-
     async function applyExternalSettings(payload, settingsRevision) {
       const current = await deps.getSettings();
       const plan = settingsCore.planExternalSettings(current, payload);
       if (plan.changed) {
-        await pushSettingsToRegisteredTabs(plan.next);
+        await pushSettingsToRegisteredTabs({ type: 'settings-update', payload: { ...plan.next } });
         await chrome.storage.local.set(plan.next);
       }
       if (plan.changedReference) {
