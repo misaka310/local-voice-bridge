@@ -64,7 +64,19 @@ namespace LocalVoiceBridgeLauncher
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                Process.Start(startInfo);
+                uint previousErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+                try
+                {
+                    Process process = Process.Start(startInfo);
+                    if (process == null)
+                    {
+                        throw new InvalidOperationException("Python小窓プロセスを開始できませんでした。");
+                    }
+                }
+                finally
+                {
+                    SetErrorMode(previousErrorMode);
+                }
                 return 0;
             }
             catch (Exception ex)
@@ -130,7 +142,7 @@ namespace LocalVoiceBridgeLauncher
                 return "音声環境がありません。";
             }
 
-            if (VenvPythonWasReplacedWithBaseInterpreter(python))
+            if (!VenvLaunchersAreValid(python, pythonw))
             {
                 return "Python仮想環境が壊れています。セットアップで修復できます。";
             }
@@ -155,6 +167,20 @@ namespace LocalVoiceBridgeLauncher
                         return "Python環境を確認できませんでした。";
                     }
                     if (versionExitCode != 0)
+                    {
+                        return "Python仮想環境が壊れています。セットアップで修復できます。";
+                    }
+
+                    int pythonwExitCode = RunEnvironmentCheck(pythonw, "-c \"import sys; raise SystemExit(0)\"", workingDirectory);
+                    if (pythonwExitCode == -2)
+                    {
+                        return "Python小窓環境の確認がタイムアウトしました。もう一度起動してください。";
+                    }
+                    if (pythonwExitCode == -1)
+                    {
+                        return "Python小窓環境を確認できませんでした。";
+                    }
+                    if (pythonwExitCode != 0)
                     {
                         return "Python仮想環境が壊れています。セットアップで修復できます。";
                     }
@@ -220,7 +246,7 @@ namespace LocalVoiceBridgeLauncher
             }
         }
 
-        private static bool VenvPythonWasReplacedWithBaseInterpreter(string python)
+        private static bool VenvLaunchersAreValid(string python, string pythonw)
         {
             try
             {
@@ -236,33 +262,30 @@ namespace LocalVoiceBridgeLauncher
                     return false;
                 }
 
-                string home = null;
+                string baseHome = null;
                 foreach (string line in File.ReadAllLines(cfgPath))
                 {
                     if (line.StartsWith("home = ", StringComparison.OrdinalIgnoreCase))
                     {
-                        home = line.Substring("home = ".Length).Trim();
+                        baseHome = line.Substring("home = ".Length).Trim();
                         break;
                     }
                 }
-                if (String.IsNullOrEmpty(home))
+                if (String.IsNullOrWhiteSpace(baseHome))
                 {
                     return false;
                 }
 
-                string basePython = Path.Combine(home, "python.exe");
-                if (!File.Exists(basePython))
+                string templateRoot = Path.Combine(baseHome, "Lib", "venv", "scripts", "nt");
+                string pythonTemplate = Path.Combine(templateRoot, "python.exe");
+                string pythonwTemplate = Path.Combine(templateRoot, "pythonw.exe");
+                if (!File.Exists(pythonTemplate) || !File.Exists(pythonwTemplate))
                 {
                     return false;
                 }
 
-                FileInfo venvInfo = new FileInfo(python);
-                FileInfo baseInfo = new FileInfo(basePython);
-                if (venvInfo.Length != baseInfo.Length)
-                {
-                    return false;
-                }
-                return FilesHaveSameBytes(python, basePython);
+                return FilesHaveSameBytes(python, pythonTemplate)
+                    && FilesHaveSameBytes(pythonw, pythonwTemplate);
             }
             catch (Exception)
             {

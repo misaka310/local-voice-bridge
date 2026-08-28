@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
+import time
 import unittest
 from pathlib import Path
+from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE_SCRIPT = ROOT / "scripts" / "run-windows-gui-smoke.ps1"
 SMOKE_WORKFLOW = ROOT / ".github" / "workflows" / "windows-gui-smoke.yml"
 TRAY_UIA_SMOKE = ROOT / "tests" / "windows" / "tray_uia_smoke.py"
+HOSTED_TRAY_UIA_SMOKE = ROOT / "tests" / "windows" / "hosted_tray_uia_smoke.py"
 HOSTED_ONLY_MESSAGE = "Windows GUI smoke must run only on GitHub-hosted windows-latest."
 
 
@@ -19,6 +23,16 @@ class WindowsGuiSmokeScriptTests(unittest.TestCase):
         cls.script = SMOKE_SCRIPT.read_text(encoding="utf-8-sig")
         cls.workflow = SMOKE_WORKFLOW.read_text(encoding="utf-8")
         cls.tray_uia_smoke = TRAY_UIA_SMOKE.read_text(encoding="utf-8")
+        cls.hosted_tray_uia_smoke = HOSTED_TRAY_UIA_SMOKE.read_text(encoding="utf-8")
+
+        module = ast.parse(cls.tray_uia_smoke)
+        cls.tray_uia_module = module
+        wait_until = next(
+            node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "wait_until"
+        )
+        namespace = {"time": time, "Callable": Callable}
+        exec(compile(ast.Module(body=[wait_until], type_ignores=[]), str(TRAY_UIA_SMOKE), "exec"), namespace)
+        cls.wait_until = staticmethod(namespace["wait_until"])
 
     def test_prefers_actions_configured_python_for_venv_creation(self) -> None:
         self.assertIn("$env:pythonLocation", self.script)
@@ -88,13 +102,46 @@ class WindowsGuiSmokeScriptTests(unittest.TestCase):
         self.assertIn("LOCAL_VOICE_GUI_RUNNER: github-hosted-windows-latest", self.workflow)
 
     def test_panel_responsiveness_waits_for_bounded_recovery(self) -> None:
-        self.assertIn("def window_is_responsive", self.tray_uia_smoke)
-        self.assertIn('"Local Voice panel responsiveness"', self.tray_uia_smoke)
-        self.assertIn("timeout=10", self.tray_uia_smoke)
+        verify_panel_toggle = next(
+            node
+            for node in self.tray_uia_module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "verify_panel_toggle"
+        )
+        responsiveness_calls = [
+            node
+            for node in ast.walk(verify_panel_toggle)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "wait_until"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "Local Voice panel responsiveness"
+        ]
+        self.assertEqual(len(responsiveness_calls), 1)
+        responsiveness_call = responsiveness_calls[0]
+        self.assertGreaterEqual(len(responsiveness_call.args), 2)
+        predicate = responsiveness_call.args[1]
+        self.assertIsInstance(predicate, ast.Lambda)
+        self.assertIsInstance(predicate.body, ast.Call)
+        self.assertIsInstance(predicate.body.func, ast.Name)
+        self.assertEqual(predicate.body.func.id, "window_is_responsive")
+        predicate_keywords = {keyword.arg: keyword.value for keyword in predicate.body.keywords}
+        self.assertEqual(ast.literal_eval(predicate_keywords["timeout_ms"]), 500)
+        wait_keywords = {keyword.arg: keyword.value for keyword in responsiveness_call.keywords}
+        self.assertEqual(ast.literal_eval(wait_keywords["timeout"]), 10)
+        self.assertEqual(ast.literal_eval(wait_keywords["interval"]), 0.2)
+
+        attempts = iter((False, False, True))
+        self.assertTrue(self.wait_until("transient responsiveness", lambda: next(attempts), timeout=0.1, interval=0))
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            self.wait_until("permanent hang", lambda: False, timeout=0.01, interval=0.001)
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_packaged_launcher_smoke_never_opens_a_console(self) -> None:
         self.assertIn('CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)', self.tray_uia_smoke)
         self.assertGreaterEqual(self.tray_uia_smoke.count("creationflags=CREATE_NO_WINDOW"), 2)
+        self.assertIn("creationflags=smoke.CREATE_NO_WINDOW", self.hosted_tray_uia_smoke)
 
 
 if __name__ == "__main__":
