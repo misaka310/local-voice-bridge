@@ -94,7 +94,13 @@ def assert_single_instance(original_pid: int) -> None:
     if original_pid not in baseline:
         raise AssertionError(f"original controller PID {original_pid} not in baseline {baseline}")
 
-    completed = subprocess.run([str(smoke.EXE)], cwd=smoke.ROOT, timeout=15, check=False)
+    completed = subprocess.run(
+        [str(smoke.EXE)],
+        cwd=smoke.ROOT,
+        timeout=15,
+        check=False,
+        creationflags=smoke.CREATE_NO_WINDOW,
+    )
     if completed.returncode != 0:
         raise RuntimeError(f"second launcher returned {completed.returncode}")
 

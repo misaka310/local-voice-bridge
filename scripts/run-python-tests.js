@@ -30,6 +30,7 @@ const TEST_MODULES = [
   'tests.test_tray_controller',
   'tests.test_tray_controller_processes',
   'tests.test_tray_qt_runtime',
+  'tests.test_venv_launcher_integrity',
   'tests.test_windows_gui_smoke_script',
   'tests.test_windows_process_identity',
   'tests.test_extension_reload_script',

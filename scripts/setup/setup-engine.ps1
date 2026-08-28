@@ -225,10 +225,42 @@ function Get-VenvBasePython {
     if (-not (Test-Path -LiteralPath $cfgPath -PathType Leaf)) { return $null }
     $homeLine = Get-Content -LiteralPath $cfgPath | Where-Object { $_ -like "home = *" } | Select-Object -First 1
     if (-not $homeLine) { return $null }
-    $home = ($homeLine -replace "^home = ", "").Trim()
-    $basePython = Join-Path $home "python.exe"
+    $baseHome = ($homeLine -replace "^home = ", "").Trim()
+    if ([string]::IsNullOrWhiteSpace($baseHome)) { return $null }
+    $basePython = Join-Path $baseHome "python.exe"
     if (Test-Path -LiteralPath $basePython -PathType Leaf) { return $basePython }
     return $null
+}
+
+function Get-FileSha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Test-VenvLauncherMatchesTemplate {
+    param(
+        [Parameter(Mandatory = $true)][string]$LauncherPath,
+        [Parameter(Mandatory = $true)][string]$TemplatePath
+    )
+    if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath $TemplatePath -PathType Leaf)) { return $false }
+    try {
+        $launcherHash = Get-FileSha256Hex -Path $LauncherPath
+        $templateHash = Get-FileSha256Hex -Path $TemplatePath
+        return $launcherHash -eq $templateHash
+    } catch {
+        return $false
+    }
 }
 
 function Test-VenvPython {
@@ -236,27 +268,56 @@ function Test-VenvPython {
     if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { return $false }
 
     $basePython = Get-VenvBasePython
-    if ($null -ne $basePython) {
-        try {
-            $venvHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $python).Hash
-            $baseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $basePython).Hash
-            if ($venvHash -eq $baseHash) {
-                return $false
-            }
-        } catch {
-            return $false
-        }
-    }
-
-    return Test-Native -FilePath $python -Arguments @("--version")
+    if ($null -eq $basePython) { return $false }
+    $baseHome = Split-Path -Parent $basePython
+    $templateRoot = Join-Path $baseHome "Lib\venv\scripts\nt"
+    $pythonTemplate = Join-Path $templateRoot "python.exe"
+    $pythonwTemplate = Join-Path $templateRoot "pythonw.exe"
+    if (-not (Test-VenvLauncherMatchesTemplate -LauncherPath $python -TemplatePath $pythonTemplate)) { return $false }
+    if (-not (Test-VenvLauncherMatchesTemplate -LauncherPath $pythonw -TemplatePath $pythonwTemplate)) { return $false }
+    return $true
 }
 
 function Repair-VoiceVenv {
     $basePython = Get-VenvBasePython
-    if ($null -eq $basePython -or -not (Test-Native -FilePath $basePython -Arguments @("--version"))) {
+    if ($null -eq $basePython) {
         throw "既存のPython仮想環境の元になったPython本体が見つかりません。Python 3.11を修復または再インストールしてから、もう一度セットアップしてください。"
     }
-    Invoke-Native -FilePath $basePython -Arguments @("-m", "venv", "--upgrade", $venv) -FailureMessage "Python仮想環境のランチャー修復に失敗しました。"
+    $quotedVenv = '"' + ($venv -replace '"', '\"') + '"'
+    Write-SetupLog ("RUN {0} -m venv --upgrade {1}" -f $basePython, $quotedVenv)
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $basePython
+    $startInfo.Arguments = "-m venv --upgrade $quotedVenv"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        $process.Dispose()
+        throw "Python仮想環境のランチャー修復プロセスを開始できませんでした。"
+    }
+    $process.StandardInput.Close()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(300000)) {
+        try { $process.Kill() } catch { }
+        $process.Dispose()
+        throw "Python仮想環境のランチャー修復が5分以内に完了しませんでした。"
+    }
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-SetupLog $stdout.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) { Write-SetupLog $stderr.Trim() }
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    if ($exitCode -ne 0) {
+        # $exitCode was captured before disposing the repair process.
+        throw "Python仮想環境のランチャー修復に失敗しました。 (exit=$exitCode)"
+    }
 }
 
 function Get-FreeSpaceGb {
