@@ -254,5 +254,30 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertNotIn("pystray", core + stt + bundle)
 
 
+    def test_public_docs_match_the_windows_control_and_recovery_flow(self) -> None:
+        daily_controls = ("Voice", "Volume", "マイク会話", "Auto", "Next", "Regen", "Stop", "Replay", "詳細設定")
+        for relative_path in ("README.md", "docs/startup.md", "docs/operation.md", "ARCHITECTURE.md"):
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            for control in daily_controls:
+                self.assertIn(control, source, f"{relative_path} must document {control}")
+
+        architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("server_supervisor.py", architecture)
+        self.assertIn("windows_integration.py", architecture)
+        self.assertIn("referenceVoice", architecture)
+        self.assertIn("ペット", architecture)
+
+        setup = (ROOT / "docs" / "setup.md").read_text(encoding="utf-8")
+        self.assertIn("NVIDIA GPU", setup)
+        self.assertIn("キャンセル", setup)
+
+        install = (ROOT / "extension" / "INSTALL.md").read_text(encoding="utf-8")
+        self.assertIn("Windows Local Voice小窓", install)
+        self.assertIn("詳細設定", install)
+        self.assertIn("拡張機能を再読み込み", install)
+        self.assertIn("chrome://extensions", install)
+        self.assertIn("フォールバック", install)
+
+
 if __name__ == "__main__":
     unittest.main()

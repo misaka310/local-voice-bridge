@@ -5,8 +5,10 @@
 ## 役割
 
 - `LocalVoiceBridge.exe`: 既存の`local-api/.venv`と`pythonw.exe`を使い、通知領域アプリを起動する小さなランチャー
-- `local-api/tray_controller.py`: Windows小窓、デスクトップペット、APIプロセス、通知領域、自動起動を管理
-- `local-api/control_panel.py`: `Ref`、`Volume`、`Auto`、`Next`、`Regen`、`Replay`、状態、現在文章、キュー数を表示する常時最前面の小窓
+- `local-api/tray_controller.py`: Qt通知領域、Windows小窓、デスクトップペット、マイクControllerを組み立てるUI composition層
+- `local-api/server_supervisor.py`: API health、CUDA preflight、所有server process、restart/shutdown、controller/server log・生成音声メンテナンスを担当
+- `local-api/windows_integration.py`: Windows自動起動、legacy移行、single-instance mutex、Explorer/MessageBox、再起動・再セットアップ・uninstallのno-window process launchを担当
+- `local-api/control_panel.py`: `Voice`、`Volume`、`マイク会話`、`Auto`、`Next`、`Regen`、`Stop`、`Replay`、`詳細設定`、状態、現在文章、キュー数を表示する常時最前面の小窓
 - `local-api/control_state.py`: 設定、ブラウザ状態、配信outboxを組み合わせて保存する薄い調整層
 - `local-api/state_normalization.py`: 設定・拡張状態・マイク状態の入力境界と既定値
 - `local-api/browser_runtime_state.py`: タブ・最新返答・キュー・録音開始時送信先の永続スキーマ
@@ -58,14 +60,17 @@
 
 小窓に表示する日常操作は次だけです。
 
-- `Ref`
+- `Voice`
+- `マイク会話`
 - `Volume`
 - `Auto`
 - `Next`
 - `Regen`
+- `Stop`
 - `Replay`
+- `詳細設定`
 
-`Voice`はIrodori v3 direct固定です。小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から表示・非表示を切り替えます。×は終了ではなく非表示です。位置は`local-api/runtime/control-panel-window.json`へ保存します。
+`Voice`は既存の参照音声設定`referenceVoice`の表示名で、同じIDのペット素材がある場合はデスクトップペットも連動します。TTS runtime/modelはIrodori v3 direct固定です。`詳細設定`は設定を小窓へ複製せず、拡張機能が所有する読み上げ範囲・STT・送信猶予・Live profile設定画面を開きます。小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から表示・非表示を切り替えます。×は終了ではなく非表示です。位置は`local-api/runtime/control-panel-window.json`へ保存します。
 
 小窓と拡張機能は次のloopback APIで同期します。
 
@@ -145,9 +150,9 @@ right Ctrl + VK_OEM_102 start/stop
 
 通知は任意連携です。接続失敗やタイムアウトは録音・文字起こし・送信を失敗させません。無効化と正常終了時は、残留activeを避けるため`false`を送信します。
 
-## Refとデスクトップペット
+## Voice（referenceVoice）とデスクトップペット
 
-外部小窓で`Ref`を変更すると、同じIDを次へ送ります。
+外部小窓で`Voice`を変更すると、保存キー`referenceVoice`の同じIDを次へ送ります。
 
 ```text
 POST http://127.0.0.1:8717/v1/desktop-pet
