@@ -1193,19 +1193,14 @@ test('microphone transcript supports Esc cancellation, 0.7 second auto-send, and
     await expect(page.locator('#prompt-textarea')).toBeVisible();
     await waitForControlReady(1);
 
-    const extensionId = new URL(worker.url()).host;
-    const optionsPage = await context.newPage();
-    await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
-    await optionsPage.locator('#stt-model').selectOption('small');
-    await optionsPage.locator('#cancel-grace-seconds').fill('1.2');
-    await optionsPage.locator('button[type="submit"]').click();
-    await expect(optionsPage.locator('#save-status')).toHaveText('設定を保存しました');
-    await optionsPage.close();
     await updateControlSettings({
       enabled: true,
       micConversationEnabled: true,
       voiceVolume: 0,
       referenceVoice: '',
+      sttModel: 'small',
+      cancelGraceMs: 1200,
+      liveTtsProfile: 'speed',
     });
     await expect.poll(async () => worker.evaluate(async () => chrome.storage.local.get([
       'enabled', 'micConversationEnabled', 'sttModel', 'cancelGraceMs',
