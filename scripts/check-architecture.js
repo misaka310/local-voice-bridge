@@ -289,6 +289,11 @@ forbidText(
   'normal Windows recovery flows must not launch cmd.exe',
 );
 forbidText(
+  'local-api/tray_controller.py',
+  'import ctypes',
+  'Windows message-shell APIs belong in windows_integration.py',
+);
+forbidText(
   'extension/background.js',
   'function queueIdentity(',
   'queue identity and merge rules belong in background-runtime-core.js',

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import ctypes
-import os
 import sys
 import urllib.error
 from pathlib import Path
 from typing import Any, Sequence
+
+LOCAL_API_DIR = Path(__file__).resolve().parent
+if str(LOCAL_API_DIR) not in sys.path:
+    sys.path.insert(0, str(LOCAL_API_DIR))
+
+from windows_integration import show_message  # noqa: E402
 
 try:
     from PySide6.QtCore import QObject, QTimer, Qt, Signal
@@ -13,15 +17,8 @@ try:
     from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 except ImportError as exc:
     message = "PySide6 が見つかりません。setup-voice-env.cmd をもう一度実行してください。"
-    if os.name == "nt":
-        ctypes.windll.user32.MessageBoxW(None, message, "Local Voice Bridge", 0x10)
-    else:
-        print(f"{message}\nImportError: {exc}", file=sys.stderr)
+    show_message("Local Voice Bridge", message, error=True)
     raise SystemExit(2) from exc
-
-LOCAL_API_DIR = Path(__file__).resolve().parent
-if str(LOCAL_API_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_API_DIR))
 
 from control_panel import ControlPanelApiClient, LocalVoiceControlPanel  # noqa: E402
 from conversation_controller import GlobalRightCtrlHook, VoiceConversationController  # noqa: E402
@@ -43,7 +40,6 @@ from windows_integration import (  # noqa: E402
     migrate_legacy_startup,
     release_single_instance,
     set_startup_enabled,
-    show_message,
 )
 
 PET_ROOT = APP_ROOT / "extension" / "assets" / "pet"
