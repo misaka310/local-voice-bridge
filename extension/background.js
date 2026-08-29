@@ -353,6 +353,7 @@ function scheduleExternalControlPoll(delayMs = 0) {
   const delay = Math.max(0, Math.min(5000, Number(delayMs) || 0));
   externalControlPollTimer = setTimeout(async () => {
     externalControlPollTimer = null;
+    requestAutoRecheckForRegisteredTabs();
     let nextDelay = 5000;
     try {
       const synchronized = await syncExternalControlPanel();
