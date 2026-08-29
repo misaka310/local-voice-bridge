@@ -12,6 +12,7 @@ const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
+const BACKGROUND_EXTERNAL_STATE_PATH = path.join(ROOT, 'extension', 'background-external-state.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
 const BACKGROUND_CONTROL_POLL_POLICY_PATH = path.join(ROOT, 'extension', 'background-control-poll-policy.js');
@@ -238,6 +239,7 @@ function createHarness({
           ...(Object.prototype.hasOwnProperty.call(body, 'micConversationEnabled') ? { micConversationEnabled: Boolean(body.micConversationEnabled) } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'sttModel') ? { sttModel: String(body.sttModel || 'small') } : {}),
           ...(Object.prototype.hasOwnProperty.call(body, 'cancelGraceMs') ? { cancelGraceMs: Number(body.cancelGraceMs ?? 700) } : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, 'liveTtsProfile') ? { liveTtsProfile: String(body.liveTtsProfile || 'speed') } : {}),
         },
       };
       return response(control);
@@ -296,6 +298,7 @@ function createHarness({
       BACKGROUND_SETTINGS_CORE_PATH,
       BACKGROUND_RUNTIME_CORE_PATH,
       BACKGROUND_QUEUE_CORE_PATH,
+      BACKGROUND_EXTERNAL_STATE_PATH,
       BACKGROUND_AUTO_RECHECK_PATH,
       BACKGROUND_STATE_PUBLISHER_PATH,
       BACKGROUND_CONTROL_POLL_POLICY_PATH,
@@ -755,6 +758,9 @@ test('external panel poll applies settings, executes each command once, and post
           voiceId: 'asuka',
           referenceVoice: 'asuka',
           micConversationEnabled: true,
+          sttModel: 'small',
+          cancelGraceMs: 700,
+          liveTtsProfile: 'speed',
         },
       },
     }],
@@ -890,6 +896,7 @@ test('first extension poll seeds an uninitialized external panel from existing C
     micConversationEnabled: false,
     sttModel: 'small',
     cancelGraceMs: 700,
+    liveTtsProfile: 'speed',
     initialized: true,
   });
 });
@@ -1343,19 +1350,15 @@ test('content conversation state is posted to the loopback service without trans
   });
 });
 
-test('options page pushes STT model and send grace to the local runtime', async () => {
+test('options updates do not push Local API-owned runtime settings', async () => {
   const harness = createHarness();
   await harness.ready();
   harness.storage.sttModel = 'large-v3-turbo';
   harness.storage.cancelGraceMs = 1500;
+  const before = harness.settingsPosts.length;
 
   const result = await harness.sendAsync({ type: 'options-settings-updated' });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(harness.settingsPosts.at(-1), {
-    sttModel: 'large-v3-turbo',
-    cancelGraceMs: 1500,
-  });
-  assert.equal(harness.control().settings.sttModel, 'large-v3-turbo');
-  assert.equal(harness.control().settings.cancelGraceMs, 1500);
+  assert.equal(harness.settingsPosts.length, before);
 });
