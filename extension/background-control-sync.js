@@ -74,20 +74,6 @@
       return deps.rememberReferenceVoice(plan.effectiveSettings);
     }
 
-    async function pushOptionSettings(settings = null) {
-      const current = settings || await deps.getSettings();
-      const payload = await deps.controlPanelRequest(current, '/v1/control-panel/settings', {
-        method: 'POST',
-        body: {
-          sttModel: settingsCore.normalizeSttModel(current.sttModel),
-          cancelGraceMs: settingsCore.normalizeCancelGraceMs(current.cancelGraceMs),
-        },
-      });
-      const revision = Number(payload.settingsRevision);
-      if (Number.isFinite(revision)) lastSettingsRevision = revision;
-      return payload;
-    }
-
     async function handleCommand(item, effectiveSettings, consumerId) {
       const commandId = Number(item && item.id || 0);
       if (!commandId || commandId <= lastCommandId) return;
@@ -226,8 +212,9 @@
               referenceVoice: settingsCore.normalizeStoredReference(localSettings.referenceVoice),
               referenceVoiceExplicit: true,
               micConversationEnabled: Boolean(localSettings.micConversationEnabled),
-              sttModel: String(localSettings.sttModel || 'small'),
-              cancelGraceMs: Number(localSettings.cancelGraceMs ?? 700),
+              sttModel: settingsCore.normalizeSttModel(localSettings.sttModel),
+              cancelGraceMs: settingsCore.normalizeCancelGraceMs(localSettings.cancelGraceMs),
+              liveTtsProfile: settingsCore.normalizeLiveTtsProfile(localSettings.liveTtsProfile),
               initialized: true,
             },
           });
@@ -261,18 +248,7 @@
             referenceVoice,
           };
         }
-        effectiveSettings = settingsCore.sanitizeSettings({
-          ...effectiveSettings,
-          sttModel: localSettings.sttModel,
-          cancelGraceMs: localSettings.cancelGraceMs,
-        });
-        if (
-          payload.settings
-          && (settingsCore.normalizeSttModel(payload.settings.sttModel) !== effectiveSettings.sttModel
-            || settingsCore.normalizeCancelGraceMs(payload.settings.cancelGraceMs) !== effectiveSettings.cancelGraceMs)
-        ) {
-          await pushOptionSettings(effectiveSettings);
-        }
+        effectiveSettings = settingsCore.sanitizeSettings(effectiveSettings);
 
         const conversation = payload.conversation && typeof payload.conversation === 'object'
           ? payload.conversation
@@ -317,10 +293,7 @@
       }
     }
 
-    return {
-      pushOptionSettings,
-      synchronize,
-    };
+    return { synchronize };
   }
 
   return { create };
