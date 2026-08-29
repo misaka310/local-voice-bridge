@@ -145,13 +145,25 @@
       micConversationEnabled: Object.prototype.hasOwnProperty.call(remote, 'micConversationEnabled')
         ? Boolean(remote.micConversationEnabled)
         : Boolean(current.micConversationEnabled),
+      sttModel: Object.prototype.hasOwnProperty.call(remote, 'sttModel')
+        ? normalizeSttModel(remote.sttModel)
+        : normalizeSttModel(current.sttModel),
+      cancelGraceMs: Object.prototype.hasOwnProperty.call(remote, 'cancelGraceMs')
+        ? normalizeCancelGraceMs(remote.cancelGraceMs)
+        : normalizeCancelGraceMs(current.cancelGraceMs),
+      liveTtsProfile: Object.prototype.hasOwnProperty.call(remote, 'liveTtsProfile')
+        ? normalizeLiveTtsProfile(remote.liveTtsProfile)
+        : normalizeLiveTtsProfile(current.liveTtsProfile),
     };
     const changedReference = normalizeStoredReference(current.referenceVoice) !== referenceVoice;
     const changed = Boolean(current.enabled) !== next.enabled
       || Number(current.voiceVolume) !== next.voiceVolume
       || changedReference
       || normalizeStoredReference(current.voiceId) !== referenceVoice
-      || Boolean(current.micConversationEnabled) !== next.micConversationEnabled;
+      || Boolean(current.micConversationEnabled) !== next.micConversationEnabled
+      || normalizeSttModel(current.sttModel) !== next.sttModel
+      || normalizeCancelGraceMs(current.cancelGraceMs) !== next.cancelGraceMs
+      || normalizeLiveTtsProfile(current.liveTtsProfile) !== next.liveTtsProfile;
     return {
       changed,
       changedReference,
