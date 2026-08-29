@@ -113,6 +113,7 @@ class UxResponsibilityFinalizationTests(unittest.TestCase):
             self.assertEqual(panel.stop_button.text(), "停止")
             self.assertEqual(panel.replay_button.text(), "もう一度")
             self.assertEqual(panel.details_button.text(), "詳細設定")
+            self.assertEqual(panel.reference_combo.itemText(0), "標準")
             panel.shutdown()
 
     def test_auto_toggle_does_not_mutate_microphone_setting(self) -> None:
