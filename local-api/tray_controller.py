@@ -16,7 +16,7 @@ try:
     from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
     from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 except ImportError as exc:
-    message = "PySide6 が見つかりません。setup-voice-env.cmd をもう一度実行してください。"
+    message = "PySide6 が見つかりません。Local Voice Bridge の環境修復を実行してください。"
     show_message("Local Voice Bridge", message, error=True)
     raise SystemExit(2) from exc
 
@@ -132,6 +132,7 @@ class VoiceBridgeQtRuntime(QObject):
         self.right_ctrl_hook.start()
         self.pet.panel_toggle_requested.connect(self.toggle_control_panel)
         self.control_panel.visibility_changed.connect(self._sync_panel_action)
+        self.control_panel.repair_requested.connect(self.exit_and_run_setup)
         self.pet_settings_timer = QTimer(self)
         self.pet_settings_timer.setInterval(500)
         self.pet_settings_timer.timeout.connect(self.sync_pet_settings_from_disk)
@@ -385,7 +386,7 @@ def main() -> int:
         LOGGER.exception("Tray application failed")
         show_message(
             APP_NAME,
-            "起動に失敗しました。controller.log を確認し、setup-voice-env.cmd を再実行してください。",
+            "起動に失敗しました。controller.log を確認し、Local Voice Bridge の環境修復を実行してください。",
             error=True,
         )
         return 2
