@@ -136,10 +136,9 @@
     }
 
     function shouldSendNow(node, text, preview, timestamp, item) {
-      if (!preview) return false;
       const completion = observeCompletion(node, item, text, timestamp);
       if (!completion.confirmed) return false;
-      return timestamp - item.lastChangedAt >= stableDelayForPreview(preview);
+      return timestamp - item.lastChangedAt >= stableDelayForPreview(preview || text);
     }
 
     function notifyCompleted(item) {
@@ -165,7 +164,7 @@
       const autoEnabled = Boolean(isAutoEnabled());
       item.sent = true;
       notifyCompleted(item);
-      if (!autoEnabled) return;
+      if (!autoEnabled || !preview || !chunks.length) return;
       if (node.dataset) node.dataset[sentFlag] = '1';
       void reportEntry(node, item, text, chunks, preview, true);
     }
@@ -173,7 +172,7 @@
     function pendingDelay(preview, item) {
       if (isResponseGenerating()) return generationRecheckMs;
       const timestamp = now();
-      const stableRemaining = stableDelayForPreview(preview) - (timestamp - item.lastChangedAt);
+      const stableRemaining = stableDelayForPreview(preview || item.lastText) - (timestamp - item.lastChangedAt);
       const completionRemaining = item.completionCandidateText
         ? completionEvidenceStableMs - (timestamp - item.completionCandidateSince)
         : 500;
@@ -201,7 +200,7 @@
           return;
         }
         const { chunks, preview: pendingPreview } = previewParts(latest);
-        if (!pendingPreview) return;
+        if (!pendingPreview && !hasResponseCompletionControl(node)) return;
         if (!shouldSendNow(node, latest, pendingPreview, now(), item)) {
           schedulePendingSend(node, item, pendingPreview);
           return;
@@ -241,7 +240,7 @@
         resetCompletionCandidate(item);
       }
       const { chunks, preview } = previewParts(text);
-      if (!preview) return false;
+      if (!preview && !hasResponseCompletionControl(node)) return false;
       if (shouldSendNow(node, text, preview, now(), item)) {
         finalizeCompletedResponse(node, item, text, chunks, preview);
         return true;
