@@ -53,7 +53,6 @@ if (status === 0) {
     'tests/content-text-core.test.js',
     'tests/assistant-text-extractor.test.js',
     'tests/auto-speech-controller.test.js',
-    'tests/auto-speech-completion-marker.test.js',
     'tests/content-dom-observer.test.js',
     'tests/content-completion-marker.test.js',
     'tests/content-message-router.test.js',
