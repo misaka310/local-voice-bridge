@@ -317,15 +317,15 @@ class TrayQtRuntimeTests(unittest.TestCase):
 
         with (
             mock.patch.object(tray, "release_single_instance", side_effect=lambda: events.append("release")),
-            mock.patch.object(tray.subprocess, "Popen") as popen,
+            mock.patch.object(tray, "launch_application", side_effect=lambda exe, cwd: events.append("launch")) as launch,
         ):
             runtime._launch_application_after_exit()
 
-        self.assertEqual(events, ["release"])
-        popen.assert_called_once_with(
-            [str(tray.LAUNCHER_EXE)],
-            cwd=tray.APP_ROOT,
-            creationflags=tray.CREATE_NO_WINDOW | tray.CREATE_NEW_PROCESS_GROUP,
+        self.assertEqual(events, ["release", "launch"])
+        launch.assert_called_once_with(
+            tray.LAUNCHER_EXE,
+            tray.APP_ROOT,
+
         )
 
     def test_pet_return_action_restores_and_shows_the_desktop_pet(self) -> None:
