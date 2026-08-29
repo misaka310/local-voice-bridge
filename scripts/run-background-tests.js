@@ -55,6 +55,7 @@ if (status === 0) {
     'tests/auto-speech-controller.test.js',
     'tests/completion-favicon-non-speakable.test.js',
     'tests/completion-favicon-recovery.test.js',
+    'tests/completion-favicon-api-down-recovery.test.js',
     'tests/content-dom-observer.test.js',
     'tests/content-completion-marker.test.js',
     'tests/content-message-router.test.js',
