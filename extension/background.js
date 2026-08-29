@@ -9,6 +9,8 @@ const {
 } = settingsCore;
 const queueCore = globalThis.BackgroundQueueCore;
 if (!queueCore) throw new Error('background-queue-core.js must be loaded before background.js');
+const externalState = globalThis.BackgroundExternalState;
+if (!externalState) throw new Error('background-external-state.js must be loaded before background.js');
 const CHATGPT_TAB_PATTERNS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
 const BRIDGE_CONSUMER_ID_KEY = 'bridgeConsumerId';
 
@@ -146,7 +148,6 @@ function broadcastState() {
     chrome.tabs.sendMessage(tabId, { type: 'state-update', payload: statePayload(tabId) }).catch(() => {});
   }
 }
-
 
 const localApiClient = globalThis.BackgroundLocalApiClient.create({
   fetch,
@@ -293,6 +294,7 @@ const reconnectOpenChatGptTabs = tabReconnect.reconnectOpenTabs;
 
 function externalStateSnapshot() {
   const currentText = String(currentItem?.text || lastPlayedItem?.text || '');
+  const manualTargetTabId = queueCore.selectedTarget(tabs, null, selectedTabId);
   return {
     statusText: lastStatusText,
     statusLevel: lastStatusLevel,
@@ -302,8 +304,23 @@ function externalStateSnapshot() {
     playbackPhase,
     replayAvailable: Boolean(lastPlayedItem && lastPlayedItem.audioUrl),
     tabsCount: tabs.size,
+    ...externalState.buildContext({
+      tabs,
+      manualTargetTabId,
+      currentItem,
+      lastPlayedItem,
+    }),
     loadedVersion: chrome.runtime.getManifest().version,
     supportsExtensionReload: true,
+  };
+}
+
+async function broadcastOptionSettings() {
+  const settings = await getSettings();
+  await pushMessageToRegisteredTabs({ type: 'settings-update', payload: { ...settings } });
+  return {
+    previewMaxLines: Number(settings.previewMaxLines),
+    previewMaxChars: Number(settings.previewMaxChars),
   };
 }
 
@@ -339,10 +356,6 @@ const externalControlSync = globalThis.BackgroundControlSync.create({
   getActiveConversationTargetTabId: () => activeConversationTargetTabId,
   setActiveConversationTargetTabId: (value) => { activeConversationTargetTabId = value; },
 });
-
-async function pushOptionSettings(settings = null) {
-  return externalControlSync.pushOptionSettings(settings);
-}
 
 async function syncExternalControlPanel() {
   return externalControlSync.synchronize();
@@ -429,7 +442,7 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   fetchReferenceVoices,
   syncDesktopPetSelection,
   getSettings,
-  pushOptionSettings,
+  broadcastOptionSettings,
   syncExternalControlPanel,
   scheduleExternalControlPoll,
   liveMessageTypes: globalThis.BackgroundLiveClient.MESSAGE_TYPES,
@@ -438,4 +451,3 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   executeUiCommand,
   flushBrowserRuntimeState,
 }));
-
