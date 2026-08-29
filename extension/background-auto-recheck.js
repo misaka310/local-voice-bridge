@@ -53,8 +53,8 @@
       return true;
     }
 
-    function heartbeat(enabled) {
-      if (!enabled || tabs.size === 0) return false;
+    function heartbeat() {
+      if (tabs.size === 0) return false;
       const timestamp = now();
       if (timestamp - lastHeartbeatAt < recoverySweepIntervalMs) return false;
       lastHeartbeatAt = timestamp;
