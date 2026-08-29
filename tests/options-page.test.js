@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8'));
-const { DEFAULTS, SETTINGS_VERSION, normalizeSettings } = require('../extension/options.js');
+const { SETTINGS_VERSION, normalizeSettings } = require('../extension/options.js');
 
 test('extension exposes a standard right-click options page', () => {
   assert.deepEqual(manifest.options_ui, {
@@ -17,10 +17,10 @@ test('extension exposes a standard right-click options page', () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'extension', manifest.options_ui.page)));
   assert.ok(fs.existsSync(path.join(ROOT, 'extension', 'options.css')));
   const optionsSource = fs.readFileSync(path.join(ROOT, 'extension', 'options.js'), 'utf8');
-  assert.match(optionsSource, /load\(\)\.then\(syncRuntimeSettings\)/);
+  assert.match(optionsSource, /load\(\)\.then\(syncBrowserSettings\)/);
 });
 
-test('options settings preserve valid values and clamp unsafe input', () => {
+test('options settings preserve and clamp browser-only preview values', () => {
   assert.deepEqual(normalizeSettings({
     previewMaxLines: 10,
     previewMaxChars: 480,
@@ -31,22 +31,14 @@ test('options settings preserve valid values and clamp unsafe input', () => {
     settingsVersion: SETTINGS_VERSION,
     previewMaxLines: 10,
     previewMaxChars: 480,
-    sttModel: 'large-v3-turbo',
-    cancelGraceMs: 1500,
-    liveTtsProfile: 'balanced',
   });
 
   assert.deepEqual(normalizeSettings({
     previewMaxLines: 99,
     previewMaxChars: 1,
-    sttModel: 'unknown',
-    cancelGraceMs: -100,
   }), {
     settingsVersion: SETTINGS_VERSION,
     previewMaxLines: 20,
     previewMaxChars: 40,
-    sttModel: DEFAULTS.sttModel,
-    cancelGraceMs: 0,
-    liveTtsProfile: DEFAULTS.liveTtsProfile,
   });
 });
