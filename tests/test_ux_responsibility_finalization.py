@@ -101,6 +101,20 @@ class UxResponsibilityFinalizationTests(unittest.TestCase):
         self.app.processEvents()
         return panel
 
+    def test_daily_controls_use_the_user_facing_japanese_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            panel = self.create_panel(FakeControlClient(), temp_dir)
+
+            self.assertEqual(panel.reference_label.text(), "キャラクター")
+            self.assertEqual(panel.volume_label.text(), "音量")
+            self.assertEqual(panel.auto_button.text(), "自動読み上げ")
+            self.assertEqual(panel.next_button.text(), "次へ")
+            self.assertEqual(panel.regen_button.text(), "再生成")
+            self.assertEqual(panel.stop_button.text(), "停止")
+            self.assertEqual(panel.replay_button.text(), "もう一度")
+            self.assertEqual(panel.details_button.text(), "詳細設定")
+            panel.shutdown()
+
     def test_auto_toggle_does_not_mutate_microphone_setting(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = FakeControlClient()
