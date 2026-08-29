@@ -97,6 +97,7 @@ const {
   noteComposerFocused,
   removeTab,
   activateTab,
+  pushMessageToRegisteredTabs,
 } = tabRegistry;
 
 const conversationTarget = globalThis.BackgroundConversationTarget.create({
@@ -329,6 +330,7 @@ const externalControlSync = globalThis.BackgroundControlSync.create({
   deliverVoiceTranscript,
   postConversationState,
   ensureOwner,
+  pushMessageToRegisteredTabs,
   requestAutoRecheckForRegisteredTabs,
   reconnectOpenChatGptTabs,
   externalStateSnapshot,

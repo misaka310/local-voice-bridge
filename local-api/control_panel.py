@@ -22,6 +22,9 @@ from control_panel_client import ControlPanelApiClient
 from control_panel_style import PANEL_STYLE
 from panel_window_state import PanelWindowStateStore, clamp_window_position
 
+ACTIVE_REFRESH_MS = 750
+IDLE_REFRESH_MS = 5000
+
 
 class ControlPanelClient(Protocol):
     def get_snapshot(self) -> dict[str, Any]: ...
@@ -75,11 +78,11 @@ class LocalVoiceControlPanel(QWidget):
             self.move(saved_position)
 
         self.refresh_timer = QTimer(self)
-        self.refresh_timer.setInterval(750)
+        self.refresh_timer.setSingleShot(True)
+        self._next_refresh_ms = IDLE_REFRESH_MS
         self.refresh_timer.timeout.connect(self.refresh_now)
         self.volume_update_timer = QTimer(self)
         self.volume_update_timer.setSingleShot(True)
-        self.volume_update_timer.setInterval(150)
         self.volume_update_timer.timeout.connect(self._flush_volume_change)
 
     def _build_ui(self) -> None:
@@ -127,12 +130,14 @@ class LocalVoiceControlPanel(QWidget):
         card_layout.addWidget(self.queue_label)
 
         ref_row = QHBoxLayout()
-        ref_label = QLabel("Ref", card)
-        ref_label.setFixedWidth(46)
+        self.reference_label = QLabel("Voice", card)
+        self.reference_label.setFixedWidth(46)
+        self.reference_label.setToolTip("参照音声を選択します。同じIDのペット素材がある場合はペットも連動します。")
         self.reference_combo = QComboBox(card)
         self.reference_combo.setObjectName("panel-reference")
+        self.reference_combo.setToolTip(self.reference_label.toolTip())
         self.reference_combo.currentIndexChanged.connect(self._on_reference_changed)
-        ref_row.addWidget(ref_label)
+        ref_row.addWidget(self.reference_label)
         ref_row.addWidget(self.reference_combo, 1)
         card_layout.addLayout(ref_row)
 
@@ -177,10 +182,21 @@ class LocalVoiceControlPanel(QWidget):
             button.setMinimumHeight(30)
             controls.addWidget(button)
         card_layout.addLayout(controls)
+
+        self.details_button = QPushButton("詳細設定", card)
+        self.details_button.setObjectName("panel-details")
+        self.details_button.setMinimumHeight(30)
+        self.details_button.clicked.connect(lambda: self._send_command("open_options"))
+        card_layout.addWidget(self.details_button)
         self.setStyleSheet(PANEL_STYLE)
 
     def refresh_now(self) -> None:
         self._request_dispatcher.refresh()
+
+    def _schedule_refresh(self, delay_ms: int) -> None:
+        self._next_refresh_ms = max(1, int(delay_ms))
+        if self._poll_when_visible and self.isVisible():
+            self.refresh_timer.start(self._next_refresh_ms)
 
     def _apply_disconnected_state(self) -> None:
         self.status_label.setText("Voice Bridge starting")
@@ -189,10 +205,11 @@ class LocalVoiceControlPanel(QWidget):
         self._reload_extension_requested = False
         self.reload_extension_button.hide()
         self.reload_extension_button.setEnabled(False)
-        for control in (self.auto_button, self.mic_button, self.reference_combo, self.volume_slider):
+        for control in (self.auto_button, self.mic_button, self.reference_combo, self.volume_slider, self.details_button):
             control.setEnabled(False)
         for button in (self.next_button, self.regen_button, self.stop_button, self.replay_button):
             button.setEnabled(False)
+        self._schedule_refresh(ACTIVE_REFRESH_MS)
 
     def _set_mic_button_text(self, title: str, detail: str, *, visible_detail: str = "") -> None:
         safe_title = str(title or "マイク会話")
@@ -230,6 +247,7 @@ class LocalVoiceControlPanel(QWidget):
         self.auto_button.setEnabled(settings_available)
         self.reference_combo.setEnabled(settings_available)
         self.volume_slider.setEnabled(settings_available)
+        self.details_button.setEnabled(settings_available)
         if connected and not update_required:
             self._reload_extension_requested = False
         show_reload_button = (not connected) or (update_required and reload_supported)
@@ -326,6 +344,16 @@ class LocalVoiceControlPanel(QWidget):
             self.status_label.setText("拡張機能を再読み込みしています")
             self._set_current_text("再接続を待っています。ChatGPTタブの再読み込みは不要です。")
 
+        conversation_phase = str(conversation.get("phase") or "idle").strip().lower()
+        playback_phase = str(extension.get("playbackPhase") or voice_runtime.get("phase") or "idle").strip().lower()
+        active = (
+            runtime_loading
+            or queue_size > 0
+            or playback_phase in {"generating", "playing", "stopping"}
+            or conversation_phase not in {"", "idle", "ready", "disabled", "off"}
+        )
+        self._schedule_refresh(ACTIVE_REFRESH_MS if active else IDLE_REFRESH_MS)
+
     def _set_current_text(self, text: str, *, tooltip: str | None = None) -> None:
         self._current_text_full = str(text or "")
         self.current_text_label.setToolTip(self._current_text_full if tooltip is None else tooltip)
@@ -390,7 +418,7 @@ class LocalVoiceControlPanel(QWidget):
         self.volume_value.setText(f"{int(value)}%")
         if self._updating_controls:
             return
-        self.volume_update_timer.start()
+        self.volume_update_timer.start(150)
 
     def _flush_volume_change(self) -> None:
         self._update_settings({"voiceVolume": round(self.volume_slider.value() / 100.0, 2)})
@@ -426,8 +454,7 @@ class LocalVoiceControlPanel(QWidget):
             self.state_store.save_position(corrected_position)
         self.raise_()
         self.activateWindow()
-        if self._poll_when_visible and not self.refresh_timer.isActive():
-            self.refresh_timer.start()
+        self._schedule_refresh(ACTIVE_REFRESH_MS)
         self.visibility_changed.emit(True)
 
     def hide_panel(self) -> None:

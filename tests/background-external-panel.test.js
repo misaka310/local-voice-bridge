@@ -76,6 +76,8 @@ function createHarness({
   const injectedScripts = [];
   const lifecycleEvents = [];
   let runtimeReloads = 0;
+  let optionsPageOpens = 0;
+  let optionsPageError = null;
   const injectedTabs = new Set();
   const missingContentScripts = new Set(missingContentScriptTabs.map(Number));
   const tabMessageResponders = new Map();
@@ -136,6 +138,11 @@ function createHarness({
       reload() {
         lifecycleEvents.push('reload');
         runtimeReloads += 1;
+      },
+      async openOptionsPage() {
+        if (optionsPageError) throw new Error(optionsPageError);
+        lifecycleEvents.push('options');
+        optionsPageOpens += 1;
       },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -340,6 +347,7 @@ function createHarness({
     setControl(next) { control = { ...control, ...next }; },
     setPollError(error) { pollError = error ? String(error) : null; },
     setAckError(error) { ackError = error ? String(error) : null; },
+    setOptionsPageError(error) { optionsPageError = error ? String(error) : null; },
     setBrowserRuntimeError(error) { browserRuntimeError = error ? String(error) : null; },
     setBrowserRuntimePostError(error) { browserRuntimePostError = error ? String(error) : null; },
     backgroundState() {
@@ -348,6 +356,7 @@ function createHarness({
     setTabResponder(tabId, responder) { tabMessageResponders.set(tabId, responder); },
     reloadBackground() { bootBackground(); },
     runtimeReloads: () => runtimeReloads,
+    optionsPageOpens: () => optionsPageOpens,
     lifecycleEvents,
     ready() { return vm.runInContext('initializeBackgroundRuntime()', backgroundContext); },
     ackPosts,
@@ -798,6 +807,39 @@ test('extension reload does not run until its command can be acknowledged', asyn
   const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
   assert.equal(recovered.ok, true);
   assert.equal(harness.runtimeReloads(), 1);
+});
+
+test('open options command opens the extension options page before acknowledging once', async () => {
+  const harness = createHarness();
+  harness.setControl({ commands: [{ id: 23, command: 'open_options' }], conversationEvents: [] });
+
+  const result = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(harness.lifecycleEvents, ['options', 'ack']);
+  assert.equal(harness.optionsPageOpens(), 1);
+  assert.deepEqual(harness.ackPosts.at(-1), { consumerId: 'playback-id', commandId: 23 });
+
+  await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(harness.optionsPageOpens(), 1);
+});
+
+test('open options command remains unacknowledged and retryable when opening fails', async () => {
+  const harness = createHarness();
+  harness.setControl({ commands: [{ id: 24, command: 'open_options' }], conversationEvents: [] });
+  harness.setOptionsPageError('options unavailable');
+
+  const failed = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+
+  assert.equal(failed.ok, false);
+  assert.equal(harness.optionsPageOpens(), 0);
+  assert.equal(harness.ackPosts.length, 0);
+
+  harness.setOptionsPageError(null);
+  const recovered = await harness.sendAsync({ type: 'external-control-poll' }, 101, 'Tab A');
+  assert.equal(recovered.ok, true);
+  assert.equal(harness.optionsPageOpens(), 1);
+  assert.deepEqual(harness.ackPosts.at(-1), { consumerId: 'playback-id', commandId: 24 });
 });
 
 test('streaming updates preserve the already-read Auto text as the Next boundary', async () => {

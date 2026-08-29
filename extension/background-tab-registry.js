@@ -84,12 +84,22 @@
       return true;
     }
 
+    async function pushMessageToRegisteredTabs(message, timeoutMs = 750) {
+      await Promise.all(Array.from(ctx.tabs.keys()).map(async (tabId) => {
+        await Promise.race([
+          ctx.chrome.tabs.sendMessage(Number(tabId), message).catch(() => null),
+          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+      }));
+    }
+
     return {
       ensureOwner,
       registerTab,
       noteComposerFocused,
       removeTab,
       activateTab,
+      pushMessageToRegisteredTabs,
     };
   }
 
