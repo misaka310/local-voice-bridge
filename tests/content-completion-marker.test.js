@@ -363,3 +363,19 @@ test('17 is the sole owner of ChatGPT tab status and favicon behavior', () => {
   assert.match(design, /読み上げ処理中/);
   assert.match(design, /Auto読み上げ設定から独立/);
 });
+
+test('completion marker contract stays independent of speech preview, Auto, and local API recovery', async () => {
+  const { document, marker } = createMarker();
+  const design = fs.readFileSync(TAB_STATUS_DESIGN, 'utf8');
+  await marker.initialize();
+
+  marker.markResponseCompleted();
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+  assert.match(decodedSvg(statusIcon(document)), /#facc15/);
+
+  assert.match(design, /読み上げ用プレビュー.*依存しません/);
+  assert.match(design, /読み上げ対象が空でも.*黄色いチェック/);
+  assert.match(design, /回復sweep.*Auto読み上げ設定.*ローカルAPIの接続状態から独立/);
+  assert.match(design, /ローカルAPI停止中でも.*完了状態を回復/);
+});
