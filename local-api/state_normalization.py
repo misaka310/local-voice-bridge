@@ -10,6 +10,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "micConversationEnabled": False,
     "sttModel": "small",
     "cancelGraceMs": 700,
+    "liveTtsProfile": "speed",
 }
 
 DEFAULT_CONVERSATION_STATE: dict[str, Any] = {
@@ -31,6 +32,11 @@ DEFAULT_EXTENSION_STATE: dict[str, Any] = {
     "playbackPhase": "idle",
     "replayAvailable": False,
     "tabsCount": 0,
+    "autoScopeTabs": 0,
+    "manualTargetTabId": 0,
+    "manualTargetTitle": "",
+    "playbackSourceTabId": 0,
+    "playbackSourceTitle": "",
     "loadedVersion": "",
     "supportsExtensionReload": False,
     "updatedAt": 0.0,
@@ -80,6 +86,18 @@ def normalize_cancel_grace_ms(value: Any) -> int:
     return min(5000, max(0, number))
 
 
+def normalize_live_tts_profile(value: Any) -> str:
+    normalized = str(value or DEFAULT_SETTINGS["liveTtsProfile"]).strip().lower()
+    return normalized if normalized in {"speed", "balanced", "bridge"} else str(DEFAULT_SETTINGS["liveTtsProfile"])
+
+
+def _normalize_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_settings(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
     reference_voice = normalize_reference_voice(raw.get("referenceVoice", raw.get("voiceId", "")))
@@ -96,6 +114,7 @@ def normalize_settings(value: Any) -> dict[str, Any]:
         "micConversationEnabled": bool(raw.get("micConversationEnabled", DEFAULT_SETTINGS["micConversationEnabled"])),
         "sttModel": normalize_stt_model(raw.get("sttModel")),
         "cancelGraceMs": normalize_cancel_grace_ms(raw.get("cancelGraceMs")),
+        "liveTtsProfile": normalize_live_tts_profile(raw.get("liveTtsProfile")),
     }
 
 
@@ -116,14 +135,9 @@ def normalize_conversation_state(value: Any, *, now: float) -> dict[str, Any]:
 
 def normalize_extension_state(value: Any, *, now: float) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
-    try:
-        queue_size = max(0, int(raw.get("queueSize") or 0))
-    except (TypeError, ValueError):
-        queue_size = 0
-    try:
-        tabs_count = max(0, int(raw.get("tabsCount") or 0))
-    except (TypeError, ValueError):
-        tabs_count = 0
+    queue_size = _normalize_nonnegative_int(raw.get("queueSize"))
+    tabs_count = _normalize_nonnegative_int(raw.get("tabsCount"))
+    auto_scope_tabs = _normalize_nonnegative_int(raw.get("autoScopeTabs", tabs_count))
     return {
         "connected": True,
         "statusText": str(raw.get("statusText") or "Ready"),
@@ -134,6 +148,11 @@ def normalize_extension_state(value: Any, *, now: float) -> dict[str, Any]:
         "playbackPhase": str(raw.get("playbackPhase") or "idle"),
         "replayAvailable": bool(raw.get("replayAvailable")),
         "tabsCount": tabs_count,
+        "autoScopeTabs": auto_scope_tabs,
+        "manualTargetTabId": _normalize_nonnegative_int(raw.get("manualTargetTabId")),
+        "manualTargetTitle": str(raw.get("manualTargetTitle") or "")[:200],
+        "playbackSourceTabId": _normalize_nonnegative_int(raw.get("playbackSourceTabId")),
+        "playbackSourceTitle": str(raw.get("playbackSourceTitle") or "")[:200],
         "loadedVersion": str(raw.get("loadedVersion") or "").strip()[:32],
         "supportsExtensionReload": bool(raw.get("supportsExtensionReload")),
         "updatedAt": float(now),
