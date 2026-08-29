@@ -133,6 +133,7 @@
     const current = sanitizeSettings(currentValue);
     const remote = remoteValue && typeof remoteValue === 'object' ? remoteValue : {};
     const referenceVoice = externalReferenceSelection(remote, current.referenceVoice);
+    const hasRuntimeOwnershipContract = Object.prototype.hasOwnProperty.call(remote, 'liveTtsProfile');
     const next = {
       enabled: Object.prototype.hasOwnProperty.call(remote, 'enabled')
         ? Boolean(remote.enabled)
@@ -145,13 +146,13 @@
       micConversationEnabled: Object.prototype.hasOwnProperty.call(remote, 'micConversationEnabled')
         ? Boolean(remote.micConversationEnabled)
         : Boolean(current.micConversationEnabled),
-      sttModel: Object.prototype.hasOwnProperty.call(remote, 'sttModel')
+      sttModel: hasRuntimeOwnershipContract && Object.prototype.hasOwnProperty.call(remote, 'sttModel')
         ? normalizeSttModel(remote.sttModel)
         : normalizeSttModel(current.sttModel),
-      cancelGraceMs: Object.prototype.hasOwnProperty.call(remote, 'cancelGraceMs')
+      cancelGraceMs: hasRuntimeOwnershipContract && Object.prototype.hasOwnProperty.call(remote, 'cancelGraceMs')
         ? normalizeCancelGraceMs(remote.cancelGraceMs)
         : normalizeCancelGraceMs(current.cancelGraceMs),
-      liveTtsProfile: Object.prototype.hasOwnProperty.call(remote, 'liveTtsProfile')
+      liveTtsProfile: hasRuntimeOwnershipContract
         ? normalizeLiveTtsProfile(remote.liveTtsProfile)
         : normalizeLiveTtsProfile(current.liveTtsProfile),
     };
