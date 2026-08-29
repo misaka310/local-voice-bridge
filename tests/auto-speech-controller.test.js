@@ -151,6 +151,27 @@ test('new completed reply queues exactly one Auto preview and one completion mar
   assert.equal(harness.completionMarks(), 1);
 });
 
+test('completed reply marks completion while Auto is off without queueing speech', () => {
+  const harness = createHarness();
+  const node = {
+    key: 'auto-off-complete',
+    text: 'Autoを無効にしていても回答完了通知は必要です。',
+    dataset: {},
+    complete: true,
+  };
+  harness.nodes.push(node);
+  harness.setAutoEnabled(false);
+
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+
+  assert.equal(harness.completionMarks(), 1);
+  assert.equal(harness.reports.length, 0);
+  assert.equal(node.dataset.sent, undefined);
+  harness.controller.processNode(node);
+  assert.equal(harness.completionMarks(), 1);
+});
+
 test('ordinary generation avoids repeated assistant text extraction before completion', () => {
   const harness = createHarness();
   const node = { key: 'streaming-lightweight', text: '生成途中の返答です。', dataset: {}, complete: false };
