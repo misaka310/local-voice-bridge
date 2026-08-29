@@ -11,7 +11,7 @@ const options = require('../extension/options.js');
 require('../extension/background-message-router.js');
 
 
-test('Local API advanced runtime settings overwrite the browser mirror', () => {
+test('Local API advanced runtime settings overwrite the browser mirror when the server exposes the new ownership contract', () => {
   const current = settingsCore.sanitizeSettings({
     enabled: false,
     micConversationEnabled: false,
@@ -33,6 +33,23 @@ test('Local API advanced runtime settings overwrite the browser mirror', () => {
   assert.equal(plan.effectiveSettings.sttModel, 'medium');
   assert.equal(plan.effectiveSettings.cancelGraceMs, 1200);
   assert.equal(plan.effectiveSettings.liveTtsProfile, 'bridge');
+});
+
+
+test('legacy Local API snapshots do not overwrite browser runtime settings before the ownership migration exists', () => {
+  const current = settingsCore.sanitizeSettings({
+    sttModel: 'small',
+    cancelGraceMs: 700,
+    liveTtsProfile: 'speed',
+  });
+  const plan = settingsCore.planExternalSettings(current, {
+    sttModel: 'medium',
+    cancelGraceMs: 1200,
+  });
+
+  assert.equal(plan.next.sttModel, 'small');
+  assert.equal(plan.next.cancelGraceMs, 700);
+  assert.equal(plan.next.liveTtsProfile, 'speed');
 });
 
 
