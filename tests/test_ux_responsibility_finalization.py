@@ -227,6 +227,41 @@ class UxResponsibilityFinalizationTests(unittest.TestCase):
             restored = ControlStateStore(state_path)
             self.assertEqual(restored.snapshot()["settings"]["liveTtsProfile"], "balanced")
 
+    def test_windows_advanced_settings_owns_runtime_fields_and_links_browser_preview(self) -> None:
+        module_path = LOCAL_API / "advanced_settings_dialog.py"
+        self.assertTrue(module_path.is_file(), "advanced_settings_dialog.py must provide the Windows-owned settings UI")
+        from advanced_settings_dialog import AdvancedSettingsDialog  # noqa: E402
+
+        client = FakeControlClient()
+        browser_settings_calls: list[bool] = []
+        dialog = AdvancedSettingsDialog(
+            client,
+            open_browser_settings=lambda: browser_settings_calls.append(True),
+        )
+        dialog.load_snapshot(client.get_snapshot())
+
+        self.assertEqual(dialog.stt_model_combo.currentData(), "medium")
+        self.assertEqual(dialog.cancel_grace_spin.value(), 0.9)
+        self.assertEqual(dialog.live_profile_combo.currentData(), "bridge")
+        dialog.stt_model_combo.setCurrentIndex(dialog.stt_model_combo.findData("large-v3-turbo"))
+        dialog.cancel_grace_spin.setValue(1.4)
+        dialog.live_profile_combo.setCurrentIndex(dialog.live_profile_combo.findData("balanced"))
+        dialog.save_button.click()
+        self.app.processEvents()
+        self.assertEqual(
+            client.settings_calls[-1],
+            {
+                "sttModel": "large-v3-turbo",
+                "cancelGraceMs": 1400,
+                "liveTtsProfile": "balanced",
+            },
+        )
+
+        dialog.browser_settings_button.click()
+        self.app.processEvents()
+        self.assertEqual(browser_settings_calls, [True])
+        dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()
