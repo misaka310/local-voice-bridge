@@ -11,6 +11,7 @@ const TEST_MODULES = [
   'tests.test_control_state',
   'tests.test_control_panel',
   'tests.test_ux_responsibility_finalization',
+  'tests.test_repair_signal_wiring',
   'tests.test_conversation_controller',
   'tests.test_preflight_versions',
   'tests.test_irodori_cache',
