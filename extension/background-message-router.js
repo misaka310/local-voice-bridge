@@ -98,8 +98,7 @@
       }
 
       if (message.type === 'options-settings-updated') {
-        ctx.getSettings()
-          .then((settings) => ctx.pushOptionSettings(settings))
+        ctx.broadcastOptionSettings()
           .then((payload) => sendResponse({ ok: true, payload }))
           .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
         return true;
