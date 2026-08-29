@@ -361,4 +361,5 @@ test('17 is the sole owner of ChatGPT tab status and favicon behavior', () => {
   assert.match(design, /空の新規会話/);
   assert.match(design, /回答完了・未確認/);
   assert.match(design, /読み上げ処理中/);
+  assert.match(design, /Auto読み上げ設定から独立/);
 });
