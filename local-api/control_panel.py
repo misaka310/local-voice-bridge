@@ -350,7 +350,7 @@ class LocalVoiceControlPanel(QWidget):
             runtime_loading
             or queue_size > 0
             or playback_phase in {"generating", "playing", "stopping"}
-            or conversation_phase not in {"", "idle", "ready", "disabled"}
+            or conversation_phase not in {"", "idle", "ready", "disabled", "off"}
         )
         self._schedule_refresh(ACTIVE_REFRESH_MS if active else IDLE_REFRESH_MS)
 

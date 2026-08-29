@@ -617,6 +617,11 @@ class ControlPanelQtTests(unittest.TestCase):
             panel.apply_snapshot(idle)
             self.app.processEvents()
             self.assertGreaterEqual(panel.refresh_timer.interval(), 5000)
+
+            idle["conversation"] = {"phase": "off", "statusText": ""}
+            panel.apply_snapshot(idle)
+            self.app.processEvents()
+            self.assertGreaterEqual(panel.refresh_timer.interval(), 5000)
             panel.shutdown()
 
 
