@@ -145,8 +145,8 @@ class LocalVoiceControlPanel(QWidget):
         card_layout.addWidget(self.context_label)
 
         ref_row = QHBoxLayout()
-        self.reference_label = QLabel("Voice", card)
-        self.reference_label.setFixedWidth(46)
+        self.reference_label = QLabel("キャラクター", card)
+        self.reference_label.setFixedWidth(72)
         self.reference_label.setToolTip("参照音声を選択します。同じIDのペット素材がある場合はペットも連動します。")
         self.reference_combo = QComboBox(card)
         self.reference_combo.setObjectName("panel-reference")
@@ -157,15 +157,15 @@ class LocalVoiceControlPanel(QWidget):
         card_layout.addLayout(ref_row)
 
         volume_row = QHBoxLayout()
-        volume_label = QLabel("Volume", card)
-        volume_label.setFixedWidth(46)
+        self.volume_label = QLabel("音量", card)
+        self.volume_label.setFixedWidth(72)
         self.volume_slider = QSlider(Qt.Orientation.Horizontal, card)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         self.volume_value = QLabel("60%", card)
         self.volume_value.setFixedWidth(38)
         self.volume_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        volume_row.addWidget(volume_label)
+        volume_row.addWidget(self.volume_label)
         volume_row.addWidget(self.volume_slider, 1)
         volume_row.addWidget(self.volume_value)
         card_layout.addLayout(volume_row)
@@ -182,16 +182,16 @@ class LocalVoiceControlPanel(QWidget):
 
         controls = QHBoxLayout()
         controls.setSpacing(6)
-        self.auto_button = QPushButton("Auto", card)
+        self.auto_button = QPushButton("自動読み上げ", card)
         self.auto_button.setCheckable(True)
         self.auto_button.clicked.connect(self._on_auto_clicked)
-        self.next_button = QPushButton("Next", card)
+        self.next_button = QPushButton("次へ", card)
         self.next_button.clicked.connect(lambda: self._send_command("next"))
-        self.regen_button = QPushButton("Regen", card)
+        self.regen_button = QPushButton("再生成", card)
         self.regen_button.clicked.connect(lambda: self._send_command("regen"))
-        self.stop_button = QPushButton("Stop", card)
+        self.stop_button = QPushButton("停止", card)
         self.stop_button.clicked.connect(lambda: self._send_command("stop"))
-        self.replay_button = QPushButton("Replay", card)
+        self.replay_button = QPushButton("もう一度", card)
         self.replay_button.clicked.connect(lambda: self._send_command("replay"))
         for button in (self.auto_button, self.next_button, self.regen_button, self.stop_button, self.replay_button):
             button.setMinimumHeight(30)
@@ -366,7 +366,7 @@ class LocalVoiceControlPanel(QWidget):
             self._set_current_text(self._current_text_full)
 
     def _sync_reference_voices(self, voices: list[Any], selected: str) -> None:
-        normalized: list[tuple[str, str]] = [("", "none")]
+        normalized: list[tuple[str, str]] = [("", "標準")]
         seen = {""}
         for item in voices:
             if not isinstance(item, dict):
