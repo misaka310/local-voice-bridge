@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Finalized the Windows UX responsibility model: Auto and microphone conversation are independent, Local API owns runtime settings, browser Options own only preview limits, disconnected/update-required recovery states are distinct, runtime repair routes through `LocalVoiceBridge.exe --setup`, and the Windows panel shows all-tab scope, manual target, and playback source context.
 - Hardened every Local API request with loopback `Host` validation, removed user-specific cache paths from `/health`, and added regression coverage for GET/POST/OPTIONS boundary enforcement.
 - Bounded privacy-safe structured runtime event logs with a 2 MiB rotation threshold and two backup generations.
 - Corrected the documented all-tab recovery sweep interval to the implemented 60-second default with a 20-second minimum.
