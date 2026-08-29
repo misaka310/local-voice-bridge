@@ -4,13 +4,14 @@
 
 ## 役割
 
-- `LocalVoiceBridge.exe`: 既存の`local-api/.venv`と`pythonw.exe`を使い、通知領域アプリを起動する小さなランチャー
-- `local-api/tray_controller.py`: Qt通知領域、Windows小窓、デスクトップペット、マイクControllerを組み立てるUI composition層
+- `LocalVoiceBridge.exe`: 既存の`local-api/.venv`と`pythonw.exe`を使い、通知領域アプリを起動する小さなランチャー。`--setup`は通常利用者向けの正式セットアップ/修復入口
+- `local-api/tray_controller.py`: Qt通知領域、Windows小窓、デスクトップペット、マイクControllerを組み立てるUI composition層。小窓の`repair_requested`を既存のsetup-after-exit経路へ接続する
 - `local-api/server_supervisor.py`: API health、CUDA preflight、所有server process、restart/shutdown、controller/server log・生成音声メンテナンスを担当
 - `local-api/windows_integration.py`: Windows自動起動、legacy移行、single-instance mutex、Explorer/MessageBox、再起動・再セットアップ・uninstallのno-window process launchを担当
-- `local-api/control_panel.py`: `Voice`、`Volume`、`マイク会話`、`Auto`、`Next`、`Regen`、`Stop`、`Replay`、`詳細設定`、状態、現在文章、キュー数を表示する常時最前面の小窓
-- `local-api/control_state.py`: 設定、ブラウザ状態、配信outboxを組み合わせて保存する薄い調整層
-- `local-api/state_normalization.py`: 設定・拡張状態・マイク状態の入力境界と既定値
+- `local-api/control_panel.py`: `キャラクター`、`音量`、`マイク会話`、`自動読み上げ`、`次へ`、`再生成`、`停止`、`もう一度`、`詳細設定`、状態、現在文章、キュー数、複数タブcontextを表示する常時最前面の小窓
+- `local-api/advanced_settings_dialog.py`: Local APIが所有するSTTモデル、送信前猶予、Live TTSプロファイルを編集し、ブラウザ固有の読み上げ範囲設定への明示的な遷移を提供するWindows詳細設定UI
+- `local-api/control_state.py`: 設定、ブラウザ状態、配信outboxを組み合わせて保存する薄い調整層。Windows/runtime設定の正本を保持する
+- `local-api/state_normalization.py`: 設定・拡張状態・マイク状態の入力境界と既定値。`liveTtsProfile`を含むruntime設定を正規化する
 - `local-api/browser_runtime_state.py`: タブ・最新返答・キュー・録音開始時送信先の永続スキーマ
 - `local-api/durable_outbox.py`: コマンドと文字起こしイベントの非破壊poll、consumer別ACK、再配信、容量制限、consumerの7日失効・32件上限・旧形式移行
 - `local-api/http_io.py`: JSON入出力と切断済みsocketの扱い
@@ -33,11 +34,12 @@
 - `extension/background-tab-registry.js`: ChatGPTタブ登録、所有タブ、選択タブ、reload・close処理
 - `extension/background-conversation-target.js`: 録音開始時送信先の選択・固定・文字起こし配送
 - `extension/background-playback-queue.js`: 共通ローカル再生、回答元タブへの状態通知、watchdog、Stop / Next / Regen / Replay
-- `extension/background-message-router.js`: runtime messageの検証と専用Controllerへの振り分け
-- `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別を副作用なしで担当
+- `extension/background-message-router.js`: runtime messageの検証と専用Controllerへの振り分け。Options更新時はブラウザ固有設定だけを再取得・配信し、runtime設定をLocal APIへ逆流させない
+- `extension/background-settings-core.js`: Chrome設定の既定値、移行、入力正規化、Refの明示的`none`と旧設定の区別、Local API→Chrome mirror計画を副作用なしで担当。legacy Local API snapshotは新owner契約が存在するまでruntime mirrorを上書きしない
 - `extension/background-runtime-core.js`: Service Worker再起動時の状態シリアライズ・復元・キュー重複排除を副作用なしで担当
 - `extension/background-queue-core.js`: Auto許可判定、streaming時の既読境界維持、Auto重複排除、Next / Regen選択、キュー項目正規化を副作用なしで担当
-- `extension/background-control-sync.js`: 安定consumer ID、control-panel poll / ACK、再配信カーソル、外部設定同期、録音開始時の送信先への文字起こし配送を担当
+- `extension/background-external-state.js`: 既存のtabs、手動対象、current/last playback itemからAuto scope・操作対象・再生元の外部表示contextを副作用なしで導出する
+- `extension/background-control-sync.js`: 安定consumer ID、control-panel poll / ACK、再配信カーソル、Local API→Chrome mirrorの外部設定同期、録音開始時の送信先への文字起こし配送を担当
 - `extension/live-browser-core.js`: assistant基線・一意bind、文境界、prefix整合、429 bounded retryを副作用なしで担当
 - `extension/live-content-controller.js`: `pageInstanceId`、`submissionId`、assistant bind、Liveチャンク送信、入力・送信・Regen・遷移による失効を担当
 - `extension/background-live-client.js`: content scriptから受けたLive要求へ送信元tab IDを上書きし、loopback Live APIへ転送
@@ -53,24 +55,30 @@
 - `local-api/stt_runtime.py`: faster-whisperモデル準備とCUDA文字起こし
 - `local-api/windows_push_to_talk.py`: 右Ctrl＋`＼ / _`のWindows低レベルキーボードフック
 - `local-api/dictation_pause_notifier.py`: YouTube Dictation Pause Controlへの任意状態通知
-- `local-api/control_panel_client.py`: Windows小窓・マイクControllerから使うloopback API client
+- `local-api/control_panel_client.py`: Windows小窓・Windows詳細設定・マイクControllerから使うloopback API client
 - `local-api/panel_window_state.py`: 小窓位置の保存・画面内復元
 
 ## Windows Local Voice小窓
 
 小窓に表示する日常操作は次だけです。
 
-- `Voice`
+- `キャラクター`
+- `音量`
 - `マイク会話`
-- `Volume`
-- `Auto`
-- `Next`
-- `Regen`
-- `Stop`
-- `Replay`
+- `自動読み上げ`
+- `次へ`
+- `再生成`
+- `停止`
+- `もう一度`
 - `詳細設定`
 
-`Voice`は既存の参照音声設定`referenceVoice`の表示名で、同じIDのペット素材がある場合はデスクトップペットも連動します。TTS runtime/modelはIrodori v3 direct固定です。`詳細設定`は設定を小窓へ複製せず、拡張機能が所有する読み上げ範囲・STT・送信猶予・Live profile設定画面を開きます。小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から表示・非表示を切り替えます。×は終了ではなく非表示です。位置は`local-api/runtime/control-panel-window.json`へ保存します。
+`キャラクター`は内部では既存の参照音声設定`referenceVoice`を使い、空IDは`標準`として表示します。同じIDのペット素材がある場合はデスクトップペットも連動します。TTS runtime/modelはIrodori v3 direct固定です。
+
+`自動読み上げ`の永続値`enabled`と`micConversationEnabled`は独立しています。一方のボタン操作で他方を書き換えません。マイク会話中にAutoを一時抑制する場合はruntime phaseで行います。
+
+`詳細設定`は`advanced_settings_dialog.py`を開き、Local APIが正本として持つ`sttModel`、`cancelGraceMs`、`liveTtsProfile`を編集します。ブラウザ固有の`previewMaxLines` / `previewMaxChars`へはWindows詳細設定の`ブラウザの読み上げ範囲設定`から拡張Optionsへ明示的に遷移します。拡張Optionsはruntime設定の正本になりません。
+
+小窓はデスクトップペットのダブルクリック、または通知領域の`Show Local Voice panel`から表示・非表示を切り替えます。×は終了ではなく非表示です。位置は`local-api/runtime/control-panel-window.json`へ保存します。初回オンボーディング未完了時だけ自動表示し、導入→接続→テスト音声成功後に完了を永続化します。通常起動は非表示です。
 
 小窓と拡張機能は次のloopback APIで同期します。
 
@@ -87,11 +95,13 @@ POST /v1/control-panel/state
 
 設定・未処理コマンド・文字起こしイベント・ブラウザ共通キューは永続化されます。pollでは削除せず、安定consumer IDから処理成功後のACKを受けて初めて配信済みになります。ACK失敗やService Worker終了時は同じIDで再配信され、文字起こしは`deliveryId`で二重挿入を防ぎます。
 
+外部state snapshotには表示専用の`autoScopeTabs`、`manualTargetTabId` / `manualTargetTitle`、`playbackSourceTabId` / `playbackSourceTitle`を含めます。これらは既存状態から導出し、新しい高頻度pollや全タブbroadcastを追加しません。
+
 ## 返答検知と全タブAuto
 
 1. 開いている各ChatGPTタブが`background-message-router.js`経由で`background-tab-registry.js`へ登録されます。
 2. `assistant-source-filter.js`が出典UIだけを除外し、`assistant-text-extractor.js`がassistant本文を取り出し、`auto-speech-controller.js`が既存返答を基準として記録します。
-3. 外部小窓で`Auto`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
+3. 外部小窓で`自動読み上げ`をオンにすると、すべての登録済みChatGPTタブが基準を作り直します。
 4. その後で各タブへ新しく表示されたassistant返答をAuto状態機械が検知・安定判定します。
 5. 最大2行・80文字の冒頭プレビューを`background-queue-core.js`が重複排除し、`background-playback-queue.js`が共通キューへ追加します。
 6. `background-playback-queue.js`が`background-local-api-client.js`で音声を生成・ローカル再生し、回答元`tabId`には開始・完了・停止・エラーの状態だけを通知します。
@@ -117,6 +127,8 @@ Autoの対象は、最後に触った1タブだけではありません。開い
 ### 30タブ向け負荷境界
 
 通常検知はDOM・タブイベント駆動です。各タブ5秒heartbeatは使わず、MV3休止対策は全体で60秒に1回のChrome Alarm、サーバー側の接続有効期間は90秒とします。Service Worker起動時の制御同期は全タブ再接続の完了を待たずに開始し、各タブの再接続は2.5秒で打ち切るため、無応答タブ1件で全体接続を止めません。生成中タブだけ30秒の保険確認、全タブ回復sweepは既定60秒・下限20秒、完了候補の短い再確認は対象タブ1個だけに限定します。faviconは静的SVGで、定期描画しません。数値と回帰条件は[タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)に固定します。
+
+Windows trayのConversation/Pet同期も500ms固定pollを使わず、小窓のsnapshot signalを契機にevent-drivenで反映します。architecture gateは固定pollの再導入を禁止します。
 
 ## マイクLive経路
 
@@ -150,15 +162,15 @@ right Ctrl + VK_OEM_102 start/stop
 
 通知は任意連携です。接続失敗やタイムアウトは録音・文字起こし・送信を失敗させません。無効化と正常終了時は、残留activeを避けるため`false`を送信します。
 
-## Voice（referenceVoice）とデスクトップペット
+## キャラクター（referenceVoice）とデスクトップペット
 
-外部小窓で`Voice`を変更すると、保存キー`referenceVoice`の同じIDを次へ送ります。
+外部小窓で`キャラクター`を変更すると、内部保存キー`referenceVoice`の同じIDを次へ送ります。
 
 ```text
 POST http://127.0.0.1:8717/v1/desktop-pet
 ```
 
-空、`none`、旧`qwen`系値、不正なパス形式は`placeholder`として扱います。指定IDの素材がない場合、デスクトップ側が利用可能な既定素材へフォールバックします。
+空IDは通常UIでは`標準`として表示します。内部互換では空、`none`、旧`qwen`系値、不正なパス形式を安全な既定値へ正規化し、指定IDの素材がない場合はデスクトップ側が利用可能な既定素材へフォールバックします。
 
 ペットの操作は次だけです。
 
@@ -169,40 +181,51 @@ POST http://127.0.0.1:8717/v1/desktop-pet
 
 ペットの位置と選択IDは`local-api/runtime/desktop-pet-settings.json`へ保存します。
 
-## 通知領域と起動
+## 通知領域・起動・復旧
 
-通常入口は`LocalVoiceBridge.exe`です。EXEは`pythonw.exe local-api/tray_controller.py`を非表示で起動します。
+通常入口は`LocalVoiceBridge.exe`です。EXEは`pythonw.exe local-api/tray_controller.py`を非表示で起動します。通常利用者向けのセットアップ/修復入口は`LocalVoiceBridge.exe --setup`です。
 
 通知領域は、外部小窓の表示・非表示、状態確認、再起動、フォルダ表示、自動起動、再セットアップ、終了を担当します。ペット専用の表示・種類・位置メニューは持ちません。Windowsログイン時の自動起動もEXEを直接指定します。
 
-## 保存する設定
+拡張機能の`connected=false`と`updateRequired=true`は別状態です。切断中は自己reloadが成功したような文言を表示せず再接続を待ちます。接続済みかつ対応版が更新待ちの場合だけ`reload_extension`を通常の自己reload導線として使用します。runtime修復は小窓の`環境を修復`→`repair_requested`→trayの既存setup-after-exit→`LocalVoiceBridge.exe --setup`で処理し、通常利用者へ内部cmdを露出しません。
 
-Chrome側:
+## 設定所有権と保存
 
-- AutoのON / OFF
-- 127.0.0.1のAPI URLとhealth URL
-- Ref ID
-- 音量
-- プレビュー判定の内部値
+Local APIがWindows/runtime設定の正本です。
 
-Windows側:
+- `referenceVoice`
+- `voiceVolume`
+- `micConversationEnabled`
+- `sttModel`
+- `cancelGraceMs`
+- `liveTtsProfile`
+- `enabled`（AutoのON/OFF。マイク会話のmaster switchではない）
 
-- 外部小窓の設定と位置
+Chrome storageは拡張実行に必要なmirrorを持ちますが、Local API初期化後にruntime設定を逆方向へ上書きする正本にはなりません。初回の未初期化Local APIだけは既存browser runtime値を一度bootstrapできます。legacy Local API snapshotは新owner契約を示す`liveTtsProfile`が存在するまでSTT/cancel/live mirrorを上書きしません。
+
+拡張Optionsが直接所有するブラウザ固有設定は次だけです。
+
+- `previewMaxLines`
+- `previewMaxChars`
+
+Windows側にはさらに次を保存します。
+
+- 外部小窓の位置・初回オンボーディング完了状態
 - ペットの選択IDと位置
 - 拡張機能から受け取った直近状態
 - 登録タブ、選択タブ、最新返答、Auto / Next境界、待機キュー、Replay対象、録音開始時の送信先セッション
 - 未ACKコマンド・文字起こしイベントとconsumer別ACK位置
 
-Voice、Tab、Petの独立選択設定は保存しません。
+`referenceVoice`はキャラクター表示とペット連動で共有しますが、別の独立した`Voice`/`Pet`選択正本は作りません。
 
 ## 変更時の設計ゲート
 
-`npm run check:architecture`は、責務分離に必要なController / routerモジュール、主要import、禁止された重複実装、オーケストレータの行数上限を確認します。`server.py`、`control_panel.py`、`conversation_controller.py`、`content.js`、`background.js`へHTTP routing、録音・STT・Windows hook、設定、DOM監視、メッセージ分岐、再生キューなどの責務を戻す変更や、上限を超える変更はCIで失敗します。
+`npm run check:architecture`は、責務分離に必要なController / routerモジュール、主要import、禁止された重複実装、固定poll再導入、オーケストレータの行数上限を確認します。`server.py`、`control_panel.py`、`conversation_controller.py`、`content.js`、`background.js`へHTTP routing、録音・STT・Windows hook、設定、DOM監視、メッセージ分岐、再生キューなどの責務を戻す変更や、上限を超える変更はCIで失敗します。詳細設定は`advanced_settings_dialog.py`、外部tab context導出は`background-external-state.js`へ分離し、上限を緩めて責務増大を隠しません。
 
 ## テスト
 
-- Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
-- extension単体テスト: assistant本文抽出、Auto状態機械、Composer操作、全タブ共通キュー、Next / Regen境界、外部設定反映、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期
+- Pythonテスト: loopback境界、外部状態ストア、外部Qt小窓、Windows詳細設定、独立Auto/mic、復旧表示、通知領域、ペットのドラッグ・ダブルクリック、ランチャー
+- extension単体テスト: assistant本文抽出、Auto状態機械、Composer操作、全タブ共通キュー、Next / Regen境界、Local API→browser mirror、Optionsのbrowser-only ownership、ACK再配信、Service Worker / API復旧、delivery ID、ローカル再生、Ref・ペット同期、外部tab context
 - mock E2E: Chrome内パネルなし、外部Auto、Next / Regen / Replay、短文、途中状態除外、複数タブ共通キュー、マイク送信前ACK、assistant bind、Liveチャンク、出典UI除外と通常リンク・本文保持のDOMマトリクス
 - Live 17項目ゲート: 入力・送信・Regen・遷移の割り込み、stale排除、再起動失効、通常キュー互換、曖昧bind拒否、STT優先、CPU fallback 0
 - real E2E: 専用loopbackポートでIrodori v3 direct、Next、実参照音声・ペット同期、複数タブ共通キュー
