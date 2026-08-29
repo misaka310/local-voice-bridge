@@ -161,6 +161,15 @@
       }, Boolean(isAuto));
     }
 
+    function finalizeCompletedResponse(node, item, text, chunks, preview) {
+      const autoEnabled = Boolean(isAutoEnabled());
+      item.sent = true;
+      notifyCompleted(item);
+      if (!autoEnabled) return;
+      if (node.dataset) node.dataset[sentFlag] = '1';
+      void reportEntry(node, item, text, chunks, preview, true);
+    }
+
     function pendingDelay(preview, item) {
       if (isResponseGenerating()) return generationRecheckMs;
       const timestamp = now();
@@ -197,10 +206,7 @@
           schedulePendingSend(node, item, pendingPreview);
           return;
         }
-        item.sent = true;
-        if (node.dataset) node.dataset[sentFlag] = '1';
-        void reportEntry(node, item, latest, chunks, pendingPreview, isAutoEnabled());
-        notifyCompleted(item);
+        finalizeCompletedResponse(node, item, latest, chunks, pendingPreview);
       }, delay);
       if (delay <= 5000) void Promise.resolve(requestRecheck(delay)).catch(() => {});
     }
@@ -228,7 +234,6 @@
         initializedElements.add(node);
         item.lastText = text;
         item.lastChangedAt = now();
-        if (!isAutoEnabled()) return true;
       }
       if (text !== item.lastText) {
         item.lastText = text;
@@ -238,10 +243,7 @@
       const { chunks, preview } = previewParts(text);
       if (!preview) return false;
       if (shouldSendNow(node, text, preview, now(), item)) {
-        item.sent = true;
-        if (node.dataset) node.dataset[sentFlag] = '1';
-        void reportEntry(node, item, text, chunks, preview, isAutoEnabled());
-        notifyCompleted(item);
+        finalizeCompletedResponse(node, item, text, chunks, preview);
         return true;
       }
       schedulePendingSend(node, item, preview);
