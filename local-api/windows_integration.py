@@ -274,6 +274,10 @@ def create_activation_event() -> bool:
     return True
 
 
+def activation_event_handle() -> int | None:
+    return _ACTIVATION_EVENT_HANDLE
+
+
 def request_existing_instance_activation() -> bool:
     if not IS_WINDOWS:
         return False
