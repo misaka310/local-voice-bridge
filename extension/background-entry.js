@@ -22,6 +22,7 @@ importScripts(
   'background-playback-queue.js',
   'background-live-client.js',
   'background-message-router.js',
+  'background-action-navigation.js',
   'background.js',
 );
 
