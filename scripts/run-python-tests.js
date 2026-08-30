@@ -31,6 +31,7 @@ const TEST_MODULES = [
   'tests.test_desktop_pet',
   'tests.test_tray_controller',
   'tests.test_tray_controller_processes',
+  'tests.test_launch_discoverability',
   'tests.test_tray_qt_runtime',
   'tests.test_setup_user_flow',
   'tests.test_venv_launcher_integrity',
