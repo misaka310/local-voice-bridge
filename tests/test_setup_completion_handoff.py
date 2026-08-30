@@ -16,7 +16,8 @@ class SetupCompletionHandoffTests(unittest.TestCase):
         self.assertIn('次に「拡張機能の導入手順」で導入または再読み込みし', source)
         self.assertIn('「Local Voice Bridge を開く」', source)
         self.assertIn('小窓で接続を待って「テスト音声」', source)
-        self.assertIn('$closeButton.Text = "Local Voice Bridge を開く"', source)
+        self.assertIn('$startButton.Text = "Local Voice Bridge を開く"', source)
+        self.assertIn('$cancelButton.Visible = $false', source)
         self.assertIn('$script:setupComplete = $true', source)
         self.assertIn('Start-Process -FilePath $launcher', source)
 
