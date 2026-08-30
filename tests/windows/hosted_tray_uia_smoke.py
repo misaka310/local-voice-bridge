@@ -166,6 +166,11 @@ def assert_menu_contract(pid: int) -> None:
             raise AssertionError(f"unexpected disabled menu actions: {disabled}")
     finally:
         smoke.close_popup(popup.hwnd)
+        smoke.wait_until(
+            "tray menu to close",
+            lambda: not smoke.USER32.IsWindow(popup.hwnd),
+            timeout=5,
+        )
 
 
 def click_menu_item(pid: int, title: str) -> None:
