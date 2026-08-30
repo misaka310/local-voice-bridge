@@ -35,6 +35,7 @@ const TEST_MODULES = [
   'tests.test_launch_discoverability',
   'tests.test_tray_qt_runtime',
   'tests.test_setup_user_flow',
+  'tests.test_setup_completion_handoff',
   'tests.test_venv_launcher_integrity',
   'tests.test_windows_gui_smoke_script',
   'tests.test_windows_process_identity',
