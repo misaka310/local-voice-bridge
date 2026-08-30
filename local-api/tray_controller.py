@@ -34,12 +34,16 @@ from windows_integration import (  # noqa: E402
     LAUNCHER_EXE,
     UNINSTALL_SCRIPT,
     acquire_single_instance,
+    consume_activation_request,
+    create_activation_event,
     is_startup_enabled,
     launch_application,
     launch_setup,
     launch_uninstall,
     migrate_legacy_startup,
+    release_activation_event,
     release_single_instance,
+    request_existing_instance_activation,
     set_startup_enabled,
 )
 
@@ -101,6 +105,7 @@ class VoiceBridgeQtRuntime(QObject):
         start_panel_polling: bool = True,
         start_monitor: bool = True,
         show_tray: bool = True,
+        show_panel_on_start: bool = False,
     ) -> None:
         super().__init__()
         self.app = app
@@ -135,52 +140,59 @@ class VoiceBridgeQtRuntime(QObject):
 
         self.tray_icon = QSystemTrayIcon(create_tray_icon(), self)
         self.tray_icon.setToolTip(APP_NAME)
+        self.tray_icon.activated.connect(self._on_tray_activated)
         self.menu = QMenu()
         self._build_menu()
         self.tray_icon.setContextMenu(self.menu)
         self.controller.set_status_callback(self.status_relay.status_changed.emit)
         self._sync_all_actions()
+
+        self.activation_timer = QTimer(self)
+        self.activation_timer.setInterval(250)
+        self.activation_timer.timeout.connect(self._poll_activation_request)
+        self.activation_timer.start()
+
         if show_tray:
             self.tray_icon.show()
-        if show_tray and self.control_panel.needs_onboarding():
-            QTimer.singleShot(0, self.control_panel.show_panel)
+        if show_panel_on_start or (show_tray and self.control_panel.needs_onboarding()):
+            QTimer.singleShot(0, self.show_control_panel)
         if start_monitor:
             QTimer.singleShot(0, self.controller.start_monitor)
 
     def _build_menu(self) -> None:
-        self.status_action = QAction("Status: Starting", self.menu)
+        self.status_action = QAction("状態: 起動中", self.menu)
         self.status_action.setEnabled(False)
         self.menu.addAction(self.status_action)
         self.menu.addSeparator()
 
-        self.panel_action = self.menu.addAction("Show Local Voice panel")
+        self.panel_action = self.menu.addAction("小窓を表示")
         self.panel_action.triggered.connect(self.toggle_control_panel)
-        self.pet_return_action = self.menu.addAction("Bring Desktop Pet Back")
+        self.pet_return_action = self.menu.addAction("デスクトップペットを戻す")
         self.pet_return_action.triggered.connect(self.bring_desktop_pet_back)
         self.menu.addSeparator()
 
-        restart_action = self.menu.addAction("Restart Voice Bridge")
+        restart_action = self.menu.addAction("Local Voice Bridge を再起動")
         restart_action.triggered.connect(self.restart_application)
-        controller_log_action = self.menu.addAction("Open controller log")
+        controller_log_action = self.menu.addAction("コントローラーログを開く")
         controller_log_action.triggered.connect(self.controller.open_controller_log)
-        audio_action = self.menu.addAction("Open generated audio folder")
+        audio_action = self.menu.addAction("生成音声フォルダーを開く")
         audio_action.triggered.connect(self.controller.open_audio_folder)
-        clear_audio_action = self.menu.addAction("Clear generated audio...")
+        clear_audio_action = self.menu.addAction("生成音声を削除...")
         clear_audio_action.triggered.connect(self.clear_generated_audio)
-        reference_action = self.menu.addAction("Open reference voices folder")
+        reference_action = self.menu.addAction("参照音声フォルダーを開く")
         reference_action.triggered.connect(self.controller.open_reference_folder)
 
         self.menu.addSeparator()
-        self.startup_action = QAction("Start with Windows", self.menu)
+        self.startup_action = QAction("Windows起動時に開始", self.menu)
         self.startup_action.setCheckable(True)
         self.startup_action.toggled.connect(self._set_startup_enabled)
         self.menu.addAction(self.startup_action)
-        setup_action = self.menu.addAction("Exit and run environment setup")
+        setup_action = self.menu.addAction("終了して環境を修復")
         setup_action.triggered.connect(self.exit_and_run_setup)
-        uninstall_action = self.menu.addAction("Uninstall Local Voice Bridge...")
+        uninstall_action = self.menu.addAction("Local Voice Bridge をアンインストール...")
         uninstall_action.triggered.connect(self.uninstall_application)
         self.menu.addSeparator()
-        exit_action = self.menu.addAction("Exit")
+        exit_action = self.menu.addAction("終了")
         exit_action.triggered.connect(self.shutdown)
 
     def _sync_all_actions(self) -> None:
@@ -191,11 +203,23 @@ class VoiceBridgeQtRuntime(QObject):
 
     def _sync_panel_action(self, visible: bool) -> None:
         if hasattr(self, "panel_action"):
-            self.panel_action.setText("Hide Local Voice panel" if visible else "Show Local Voice panel")
+            self.panel_action.setText("小窓を隠す" if visible else "小窓を表示")
+
+    def show_control_panel(self, *_: Any) -> None:
+        self.control_panel.show_panel()
+        self._sync_panel_action(True)
 
     def toggle_control_panel(self, *_: Any) -> None:
         self.control_panel.toggle_visibility()
         self._sync_panel_action(self.control_panel.isVisible())
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_control_panel()
+
+    def _poll_activation_request(self) -> None:
+        if consume_activation_request():
+            self.show_control_panel()
 
     def bring_desktop_pet_back(self, *_: Any) -> None:
         self.pet.reset_position()
@@ -203,7 +227,7 @@ class VoiceBridgeQtRuntime(QObject):
 
     def _apply_status(self, status: str) -> None:
         self._voice_bridge_status = str(status or "")
-        self.status_action.setText(f"Status: {status}")
+        self.status_action.setText(f"状態: {status}")
         self.tray_icon.setToolTip(f"{APP_NAME}\n{status}")
         self.pet.set_voice_bridge_status(status)
 
@@ -339,6 +363,7 @@ class VoiceBridgeQtRuntime(QObject):
         if self._shutdown_started:
             return
         self._shutdown_started = True
+        self.activation_timer.stop()
         self.right_ctrl_hook.stop()
         self.voice_conversation.shutdown()
         self.pet.persist_settings()
@@ -360,6 +385,7 @@ class VoiceBridgeQtRuntime(QObject):
 
 def main() -> int:
     configure_logging()
+    background = any(str(arg).lower() == "--background" for arg in sys.argv[1:])
     if IS_WINDOWS:
         try:
             migrate_legacy_startup()
@@ -369,13 +395,19 @@ def main() -> int:
         LOGGER.error("Tray mode is supported only on Windows")
         return 2
     if not acquire_single_instance():
-        LOGGER.info("Tray application is already running; duplicate launch ignored")
+        if not background:
+            if request_existing_instance_activation():
+                LOGGER.info("Existing tray instance activation requested")
+            else:
+                LOGGER.warning("Existing tray instance could not be activated")
         return 0
+    if not create_activation_event():
+        LOGGER.warning("Could not create the existing-instance activation event")
 
     app = create_qt_application(sys.argv)
     runtime: VoiceBridgeQtRuntime | None = None
     try:
-        runtime = VoiceBridgeQtRuntime(app)
+        runtime = VoiceBridgeQtRuntime(app, show_panel_on_start=not background)
         return app.exec()
     except Exception:
         LOGGER.exception("Tray application failed")
@@ -388,6 +420,8 @@ def main() -> int:
     finally:
         if runtime is not None:
             runtime.shutdown()
+        release_activation_event()
+        release_single_instance()
 
 
 if __name__ == "__main__":
