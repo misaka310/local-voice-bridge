@@ -26,6 +26,7 @@ namespace LocalVoiceBridgeLauncher
         {
             bool selfTest = HasArgument(args, "--self-test");
             bool setup = HasArgument(args, "--setup");
+            bool background = HasArgument(args, "--background");
             string root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             string localApi = Path.Combine(root, "local-api");
             string python = Path.Combine(localApi, ".venv", "Scripts", "python.exe");
@@ -58,7 +59,7 @@ namespace LocalVoiceBridgeLauncher
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
                     FileName = pythonw,
-                    Arguments = Quote(controller),
+                    Arguments = Quote(controller) + (background ? " --background" : ""),
                     WorkingDirectory = localApi,
                     UseShellExecute = false,
                     CreateNoWindow = true,
