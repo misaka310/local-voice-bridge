@@ -138,6 +138,14 @@ class OnboardingAndSnapshotSyncTests(unittest.TestCase):
             "self.control_panel.snapshot_applied.connect(self.sync_runtime_from_snapshot)",
             source,
         )
+        self.assertIn(
+            "if show_tray and self.control_panel.needs_onboarding():",
+            source,
+        )
+        self.assertIn(
+            "QTimer.singleShot(0, self.control_panel.show_panel)",
+            source,
+        )
 
 
 if __name__ == "__main__":
