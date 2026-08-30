@@ -50,6 +50,7 @@ for (const file of [
   'local-api/control_panel_async.py',
   'local-api/control_panel_style.py',
   'local-api/panel_window_state.py',
+  'local-api/advanced_settings_dialog.py',
   'local-api/server_supervisor.py',
   'local-api/windows_integration.py',
   'local-api/audio_recorder.py',
@@ -73,6 +74,7 @@ for (const file of [
   'extension/background-settings-core.js',
   'extension/background-runtime-core.js',
   'extension/background-queue-core.js',
+  'extension/background-external-state.js',
   'extension/background-control-poll-policy.js',
   'extension/background-control-sync.js',
   'extension/background-tab-registry.js',
@@ -106,9 +108,11 @@ capLines('local-api/server.py', 450);
 capLines('local-api/api_router.py', 500);
 capLines('local-api/conversation_controller.py', 520);
 capLines('local-api/control_panel.py', 540);
+capLines('local-api/advanced_settings_dialog.py', 220);
 capLines('local-api/tray_controller.py', 650);
 capLines('extension/content.js', 330);
 capLines('extension/background.js', 470);
+capLines('extension/background-external-state.js', 100);
 capLines('extension/background-playback-queue.js', 330);
 capLines('extension/background-message-router.js', 180);
 capLines('extension/content-dom-observer.js', 260);
@@ -118,7 +122,7 @@ capLines('extension/content-message-router.js', 80);
 capLines('extension/assistant-source-filter.js', 200);
 capLines('extension/assistant-text-extractor.js', 150);
 capLines('extension/auto-speech-controller.js', 330);
-capLines('extension/background-settings-core.js', 200);
+capLines('extension/background-settings-core.js', 210);
 capLines('extension/background-runtime-core.js', 190);
 capLines('extension/background-queue-core.js', 260);
 capLines('extension/background-control-sync.js', 330);
@@ -136,6 +140,16 @@ requireText(
   'local-api/control_state.py',
   'self._outbox = DurableOutbox()',
   'ControlStateStore must coordinate the durable outbox instead of reimplementing ACK state',
+);
+requireText(
+  'local-api/control_panel.py',
+  'from advanced_settings_dialog import AdvancedSettingsDialog',
+  'Windows advanced runtime settings must stay in the focused advanced-settings dialog',
+);
+requireText(
+  'local-api/tray_controller.py',
+  'self.control_panel.repair_requested.connect(self.exit_and_run_setup)',
+  'runtime repair must reuse the existing no-console setup route',
 );
 requireText(
   'local-api/server.py',
@@ -164,6 +178,11 @@ requireText(
 );
 requireText(
   'extension/background-entry.js',
+  "'background-external-state.js'",
+  'the service worker must load focused external panel state derivation before background.js',
+);
+requireText(
+  'extension/background-entry.js',
   "'background-control-sync.js'",
   'the service worker must load durable control synchronization before background.js',
 );
@@ -186,6 +205,11 @@ requireText(
   'extension/background.js',
   'BackgroundControlSync.create',
   'external poll, ACK, and transcript routing must use background-control-sync.js',
+);
+requireText(
+  'extension/background.js',
+  'externalState.buildContext',
+  'multi-tab panel context must be derived by background-external-state.js',
 );
 requireText(
   'extension/content-conversation-bridge.js',
@@ -222,6 +246,16 @@ forbidText(
   'local-api/control_state.py',
   'def _normalize_browser_runtime',
   'browser runtime schemas belong in browser_runtime_state.py',
+);
+forbidText(
+  'local-api/control_panel.py',
+  'stt_model_combo',
+  'advanced STT widgets belong in advanced_settings_dialog.py',
+);
+forbidText(
+  'local-api/control_panel.py',
+  'live_profile_combo',
+  'advanced Live TTS widgets belong in advanced_settings_dialog.py',
 );
 forbidText(
   'local-api/server.py',
@@ -292,6 +326,11 @@ forbidText(
   'local-api/tray_controller.py',
   'import ctypes',
   'Windows message-shell APIs belong in windows_integration.py',
+);
+forbidText(
+  'extension/background.js',
+  'function buildContext(',
+  'multi-tab panel context derivation belongs in background-external-state.js',
 );
 forbidText(
   'extension/background.js',
@@ -414,6 +453,7 @@ if (failures.length) {
 
 console.log('ARCHITECTURE CHECK: PASS');
 console.log('- durable state/outbox/browser schemas are separated');
-console.log('- assistant text, Auto lifecycle, and queue rules are isolated from browser coordinators');
+console.log('- Windows advanced settings and repair stay on focused application boundaries');
+console.log('- assistant text, Auto lifecycle, queue rules, and external context are isolated from browser coordinators');
 console.log('- HTTP I/O and voice runtime remain focused modules');
 console.log('- orchestrator growth caps are enforced');

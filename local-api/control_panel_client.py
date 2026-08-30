@@ -18,6 +18,7 @@ class ControlPanelApiClient:
         *,
         method: str = "GET",
         payload: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         data = None
         headers: dict[str, str] = {}
@@ -30,7 +31,8 @@ class ControlPanelApiClient:
             headers=headers,
             method=method,
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        effective_timeout = self.timeout if timeout is None else max(0.1, float(timeout))
+        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
         if not isinstance(body, dict) or body.get("ok") is not True:
             raise RuntimeError(str(body.get("error") if isinstance(body, dict) else "invalid response"))
@@ -54,3 +56,16 @@ class ControlPanelApiClient:
 
     def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("/v1/conversation/state", method="POST", payload=payload)
+
+    def test_speech(self, *, reference_voice: str, voice_volume: float) -> dict[str, Any]:
+        return self._request(
+            "/v1/speak",
+            method="POST",
+            payload={
+                "text": "Local Voice Bridge のテスト音声です。",
+                "playLocal": True,
+                "voiceVolume": min(1.0, max(0.0, float(voice_volume))),
+                "referenceVoice": str(reference_voice or ""),
+            },
+            timeout=180.0,
+        )

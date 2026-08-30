@@ -60,7 +60,7 @@ class TrayControllerContractTests(unittest.TestCase):
 
     def test_startup_command_targets_the_small_exe_launcher(self) -> None:
         launcher = Path(r"C:\Voice Bridge\LocalVoiceBridge.exe")
-        self.assertEqual(windows.startup_command(launcher), f'"{launcher}"')
+        self.assertEqual(windows.startup_command(launcher), f'"{launcher}" --background')
 
     def test_startup_toggle_uses_the_current_user_run_registry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -75,7 +75,7 @@ class TrayControllerContractTests(unittest.TestCase):
                 mock.patch.object(windows, "_delete_startup_command") as delete_startup,
             ):
                 windows.set_startup_enabled(True)
-                write_startup.assert_called_once_with(f'"{launcher}"')
+                write_startup.assert_called_once_with(f'"{launcher}" --background')
                 delete_startup.assert_called_once_with(windows.LEGACY_WINDOWS_RUN_VALUE)
                 self.assertFalse(legacy_entry.exists())
 
@@ -99,7 +99,7 @@ class TrayControllerContractTests(unittest.TestCase):
             ):
                 self.assertTrue(windows.migrate_legacy_startup())
 
-            write_startup.assert_called_once_with(f'"{launcher}"')
+            write_startup.assert_called_once_with(f'"{launcher}" --background')
             self.assertFalse(legacy_entry.exists())
 
     def test_startup_folder_falls_back_when_appdata_is_missing(self) -> None:
@@ -253,19 +253,30 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn("requirements-stt.txt", bundle)
         self.assertNotIn("pystray", core + stt + bundle)
 
-
     def test_public_docs_match_the_windows_control_and_recovery_flow(self) -> None:
-        daily_controls = ("Voice", "Volume", "マイク会話", "Auto", "Next", "Regen", "Stop", "Replay", "詳細設定")
-        for relative_path in ("README.md", "docs/startup.md", "docs/operation.md", "ARCHITECTURE.md"):
+        daily_controls = ("キャラクター", "音量", "マイク会話", "自動読み上げ", "次へ", "再生成", "停止", "もう一度", "詳細設定")
+        for relative_path in ("README.md", "docs/operation.md"):
             source = (ROOT / relative_path).read_text(encoding="utf-8")
             for control in daily_controls:
                 self.assertIn(control, source, f"{relative_path} must document {control}")
 
         architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("server_supervisor.py", architecture)
-        self.assertIn("windows_integration.py", architecture)
-        self.assertIn("referenceVoice", architecture)
-        self.assertIn("ペット", architecture)
+        for required in (
+            "server_supervisor.py",
+            "windows_integration.py",
+            "advanced_settings_dialog.py",
+            "background-external-state.js",
+            "referenceVoice",
+            "liveTtsProfile",
+            "previewMaxLines",
+            "Local API",
+            "ペット",
+        ):
+            self.assertIn(required, architecture, f"ARCHITECTURE.md must document {required}")
+
+        startup = (ROOT / "docs" / "startup.md").read_text(encoding="utf-8")
+        for required in ("環境を修復", "LocalVoiceBridge.exe --setup", "拡張機能を再読み込み", "切断", "更新待ち"):
+            self.assertIn(required, startup, f"docs/startup.md must document {required}")
 
         setup = (ROOT / "docs" / "setup.md").read_text(encoding="utf-8")
         self.assertIn("NVIDIA GPU", setup)
@@ -277,6 +288,8 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn("拡張機能を再読み込み", install)
         self.assertIn("chrome://extensions", install)
         self.assertIn("フォールバック", install)
+        self.assertIn("切断", install)
+        self.assertIn("更新待ち", install)
 
 
 if __name__ == "__main__":

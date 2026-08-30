@@ -12,6 +12,7 @@ const BACKGROUND_CORE_PATH = path.join(ROOT, 'extension', 'background-core.js');
 const BACKGROUND_SETTINGS_CORE_PATH = path.join(ROOT, 'extension', 'background-settings-core.js');
 const BACKGROUND_RUNTIME_CORE_PATH = path.join(ROOT, 'extension', 'background-runtime-core.js');
 const BACKGROUND_QUEUE_CORE_PATH = path.join(ROOT, 'extension', 'background-queue-core.js');
+const BACKGROUND_EXTERNAL_STATE_PATH = path.join(ROOT, 'extension', 'background-external-state.js');
 const BACKGROUND_AUTO_RECHECK_PATH = path.join(ROOT, 'extension', 'background-auto-recheck.js');
 const BACKGROUND_STATE_PUBLISHER_PATH = path.join(ROOT, 'extension', 'background-state-publisher.js');
 const BACKGROUND_CONTROL_POLL_POLICY_PATH = path.join(ROOT, 'extension', 'background-control-poll-policy.js');
@@ -175,6 +176,7 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_SETTINGS_CORE_PATH,
     BACKGROUND_RUNTIME_CORE_PATH,
     BACKGROUND_QUEUE_CORE_PATH,
+    BACKGROUND_EXTERNAL_STATE_PATH,
     BACKGROUND_AUTO_RECHECK_PATH,
     BACKGROUND_STATE_PUBLISHER_PATH,
     BACKGROUND_CONTROL_POLL_POLICY_PATH,

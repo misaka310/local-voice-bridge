@@ -239,7 +239,7 @@ class TrayQtRuntimeTests(unittest.TestCase):
             runtime = self._create_runtime(temp_dir, FakeController("Ready"))
             self.app.processEvents()
 
-            self.assertEqual(runtime.status_action.text(), "Status: Ready")
+            self.assertEqual(runtime.status_action.text(), "状態: Ready")
             self.assertEqual(runtime.pet.current_state, "idle")
             runtime.shutdown()
 
@@ -286,10 +286,10 @@ class TrayQtRuntimeTests(unittest.TestCase):
             runtime = self._create_runtime(temp_dir)
             action_texts = [action.text() for action in runtime.menu.actions()]
 
-            self.assertIn("Show Local Voice panel", action_texts)
-            self.assertIn("Bring Desktop Pet Back", action_texts)
-            self.assertIn("Restart Voice Bridge", action_texts)
-            self.assertIn("Exit", action_texts)
+            self.assertIn("小窓を表示", action_texts)
+            self.assertIn("デスクトップペットを戻す", action_texts)
+            self.assertIn("Local Voice Bridge を再起動", action_texts)
+            self.assertIn("終了", action_texts)
             self.assertNotIn("デスクトップペットを表示", action_texts)
             self.assertNotIn("使用するペット", action_texts)
             self.assertNotIn("ペットを常に手前に表示", action_texts)
@@ -352,17 +352,17 @@ class TrayQtRuntimeTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertFalse(runtime.control_panel.isVisible())
-            self.assertEqual(runtime.panel_action.text(), "Show Local Voice panel")
+            self.assertEqual(runtime.panel_action.text(), "小窓を表示")
 
             runtime.pet.panel_toggle_requested.emit()
             self.app.processEvents()
             self.assertTrue(runtime.control_panel.isVisible())
-            self.assertEqual(runtime.panel_action.text(), "Hide Local Voice panel")
+            self.assertEqual(runtime.panel_action.text(), "小窓を隠す")
 
             runtime.pet.panel_toggle_requested.emit()
             self.app.processEvents()
             self.assertFalse(runtime.control_panel.isVisible())
-            self.assertEqual(runtime.panel_action.text(), "Show Local Voice panel")
+            self.assertEqual(runtime.panel_action.text(), "小窓を表示")
             runtime.shutdown()
 
     def test_monitor_starts_while_pet_stays_visible(self) -> None:

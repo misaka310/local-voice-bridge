@@ -5,7 +5,7 @@
   "scripts": {
     "build:launcher": "node scripts/run-launcher-build.js",
     "check:public": "node scripts/run-public-check.js",
-    "check:architecture": "node scripts/check-architecture.js",
+    "check:architecture": "node scripts/check-architecture.js && node scripts/check-tray-snapshot-sync.js",
     "test:python": "node scripts/run-python-tests.js",
     "test:background-core": "node scripts/run-background-core-tests.js",
     "test:background": "node scripts/run-background-tests.js",

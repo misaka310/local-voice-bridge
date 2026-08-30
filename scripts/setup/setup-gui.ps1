@@ -11,6 +11,7 @@ Add-Type -AssemblyName System.Drawing
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $engine = Join-Path $PSScriptRoot "setup-engine.ps1"
+$launcher = Join-Path $repoRoot "LocalVoiceBridge.exe"
 $runtimeSetup = Join-Path $repoRoot "local-api\runtime\setup"
 $setupLog = Join-Path $runtimeSetup "setup.log"
 $failureJson = Join-Path $runtimeSetup "last-failure.json"
@@ -164,6 +165,7 @@ $script:stdoutCount = 0
 $script:stderrCount = 0
 $script:rowByStage = @{}
 $script:activeProfile = $InitialProfile
+$script:setupComplete = $false
 
 function Get-SelectedProfile {
     if ($null -ne $profileBox.SelectedItem -and $null -ne $profileBox.SelectedItem.Id) {
@@ -319,13 +321,19 @@ function Finish-SetupProcess {
     Process-ProgressLines
     $exitCode = $script:process.ExitCode
     if ($exitCode -eq 0) {
-        $status.Text = "セットアップが完了しました。次に拡張機能を導入または再読み込みしてください。"
+        $status.Text = "セットアップが完了しました。次に「拡張機能の導入手順」で導入または再読み込みし、「Local Voice Bridge を開く」を押してください。小窓で接続を待って「テスト音声」を確認します。"
         $status.ForeColor = [System.Drawing.Color]::DarkGreen
-        $startButton.Text = "再確認・再実行"
+        $script:setupComplete = $true
+        $startButton.Text = "Local Voice Bridge を開く"
+        $startButton.Width = 277
+        $cancelButton.Visible = $false
     } else {
         $status.Text = "セットアップに失敗しました。失敗工程を修正後、再実行すると続きから再開します。"
         $status.ForeColor = [System.Drawing.Color]::DarkRed
+        $script:setupComplete = $false
         $startButton.Text = "失敗工程から再試行"
+        $startButton.Width = 145
+        $cancelButton.Visible = $true
     }
     $startButton.Enabled = $true
     $profileBox.Enabled = $true
@@ -355,6 +363,15 @@ $advancedCheck.Add_CheckedChanged({
 })
 $startButton.Add_Click({
     if ($null -ne $script:process) { return }
+    if ($script:setupComplete) {
+        if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+            [System.Windows.Forms.MessageBox]::Show("LocalVoiceBridge.exe が見つかりません。セットアップを再実行してください。", "Local Voice Bridge", "OK", "Warning") | Out-Null
+            return
+        }
+        Start-Process -FilePath $launcher | Out-Null
+        $form.Close()
+        return
+    }
     $script:activeProfile = Get-SelectedProfile
     $grid.Rows.Clear()
     $script:rowByStage = @{}
@@ -369,6 +386,7 @@ $startButton.Add_Click({
     $profileBox.Enabled = $false
     $advancedCheck.Enabled = $false
     $closeButton.Enabled = $false
+    $cancelButton.Visible = $true
     try {
         $arguments = @(
             "-NoProfile",
@@ -406,9 +424,12 @@ $cancelButton.Add_Click({
         Process-ProgressLines
         $script:process.Dispose()
         $script:process = $null
+        $script:setupComplete = $false
         $status.Text = "セットアップをキャンセルしました。再実行すると完了済み工程を再確認して続きから再開します。"
         $status.ForeColor = [System.Drawing.Color]::DarkGoldenrod
         $startButton.Text = "再確認・再実行"
+        $startButton.Width = 145
+        $cancelButton.Visible = $true
         $startButton.Enabled = $true
         $profileBox.Enabled = $true
         $advancedCheck.Enabled = $true

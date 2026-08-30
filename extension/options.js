@@ -6,12 +6,7 @@
     settingsVersion: SETTINGS_VERSION,
     previewMaxLines: 2,
     previewMaxChars: 80,
-    sttModel: 'small',
-    cancelGraceMs: 700,
-    liveTtsProfile: 'speed',
   });
-  const STT_MODELS = new Set(['small', 'medium', 'large-v3-turbo']);
-  const LIVE_TTS_PROFILES = new Set(['speed', 'balanced', 'bridge']);
 
   function clampInteger(value, fallback, minimum, maximum) {
     if (value === '' || value === null || value === undefined) return fallback;
@@ -21,16 +16,10 @@
   }
 
   function normalizeSettings(raw = {}) {
-    const sttModel = String(raw.sttModel || '').trim();
     return {
       settingsVersion: SETTINGS_VERSION,
       previewMaxLines: clampInteger(raw.previewMaxLines, DEFAULTS.previewMaxLines, 1, 20),
       previewMaxChars: clampInteger(raw.previewMaxChars, DEFAULTS.previewMaxChars, 40, 1000),
-      sttModel: STT_MODELS.has(sttModel) ? sttModel : DEFAULTS.sttModel,
-      cancelGraceMs: clampInteger(raw.cancelGraceMs, DEFAULTS.cancelGraceMs, 0, 5000),
-      liveTtsProfile: LIVE_TTS_PROFILES.has(String(raw.liveTtsProfile || '').trim().toLowerCase())
-        ? String(raw.liveTtsProfile).trim().toLowerCase()
-        : DEFAULTS.liveTtsProfile,
     };
   }
 
@@ -43,9 +32,6 @@
   const form = document.getElementById('settings-form');
   const linesInput = document.getElementById('preview-max-lines');
   const charsInput = document.getElementById('preview-max-chars');
-  const sttModelSelect = document.getElementById('stt-model');
-  const graceInput = document.getElementById('cancel-grace-seconds');
-  const liveTtsProfileSelect = document.getElementById('live-tts-profile');
   const resetButton = document.getElementById('reset-button');
   const status = document.getElementById('save-status');
   let statusTimer = null;
@@ -65,26 +51,20 @@
     const normalized = normalizeSettings(values);
     linesInput.value = String(normalized.previewMaxLines);
     charsInput.value = String(normalized.previewMaxChars);
-    sttModelSelect.value = normalized.sttModel;
-    graceInput.value = (normalized.cancelGraceMs / 1000).toFixed(1);
-    liveTtsProfileSelect.value = normalized.liveTtsProfile;
   }
 
   function readForm() {
     return normalizeSettings({
       previewMaxLines: linesInput.value,
       previewMaxChars: charsInput.value,
-      sttModel: sttModelSelect.value,
-      cancelGraceMs: Number(graceInput.value) * 1000,
-      liveTtsProfile: liveTtsProfileSelect.value,
     });
   }
 
-  async function syncRuntimeSettings() {
+  async function syncBrowserSettings() {
     try {
       await chrome.runtime.sendMessage({ type: 'options-settings-updated' });
     } catch (_error) {
-      // The saved browser settings remain valid even while the local API is stopped.
+      // Browser-local preview settings remain saved even while the service worker restarts.
     }
   }
 
@@ -92,7 +72,7 @@
     const normalized = normalizeSettings(values);
     await chrome.storage.local.set(normalized);
     render(normalized);
-    await syncRuntimeSettings();
+    await syncBrowserSettings();
     setStatus(message);
     return normalized;
   }
@@ -123,10 +103,10 @@
     });
   });
 
-  for (const control of [linesInput, charsInput, sttModelSelect, graceInput, liveTtsProfileSelect]) {
+  for (const control of [linesInput, charsInput]) {
     control.addEventListener('input', () => setStatus(''));
     control.addEventListener('change', () => setStatus(''));
   }
 
-  void load().then(syncRuntimeSettings).catch(() => {});
+  void load().then(syncBrowserSettings).catch(() => {});
 })();

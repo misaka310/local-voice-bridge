@@ -28,6 +28,7 @@ from state_normalization import (
     normalize_cancel_grace_ms,
     normalize_conversation_state,
     normalize_extension_state,
+    normalize_live_tts_profile,
     normalize_reference_voice,
     normalize_settings,
     normalize_stt_model,
@@ -132,6 +133,8 @@ class ControlStateStore:
                 merged["sttModel"] = normalize_stt_model(payload.get("sttModel"))
             if "cancelGraceMs" in payload:
                 merged["cancelGraceMs"] = normalize_cancel_grace_ms(payload.get("cancelGraceMs"))
+            if "liveTtsProfile" in payload:
+                merged["liveTtsProfile"] = normalize_live_tts_profile(payload.get("liveTtsProfile"))
             changed = merged != self._settings
             initialized = self._initialized or bool(payload.get("initialized"))
             if initialized != self._initialized:

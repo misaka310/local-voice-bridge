@@ -102,3 +102,44 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 5. 拡張機能更新時は正式なreload経路を実行し、version一致と再接続を確認する。
 6. Local Voice Bridgeを再起動して設定・接続・再生経路を再確認する。
 7. 最後に通常利用者視点で、処理中・成功・失敗・再試行・復旧方法が理解できることを目視確認する。
+
+## 8. UX・責務最終化契約（2026-08-30）
+
+### 8.1 Autoとマイク会話は独立した利用者設定
+
+- `enabled`はAuto読み上げの有効/無効だけを表す。マイク会話のmaster switchとして扱わない。
+- `micConversationEnabled`はマイク会話だけを表す。
+- `Auto`をOFFにしても`マイク会話`を変更しない。
+- `マイク会話`をON/OFFしても`Auto`を変更しない。
+- マイク会話中に通常Auto読み上げを一時抑制する既存の競合回避はruntime phaseで行い、永続設定を書き換えない。
+
+### 8.2 設定の所有者
+
+- Local APIをWindows/runtime設定の正本とする: `referenceVoice`、`voiceVolume`、`micConversationEnabled`、`sttModel`、`cancelGraceMs`、`liveTtsProfile`。
+- Chrome storageはブラウザ側で必要なmirrorを持ってよいが、Local API初期化後に上記の値を逆方向へ上書きする正本にはしない。
+- 拡張Optionsが直接所有するのはブラウザ固有の読み上げ範囲 `previewMaxLines` / `previewMaxChars`。
+- Windows小窓の`詳細設定`からWindows詳細設定UIを開き、STTモデル・送信前猶予・Live TTS profileを変更できる。
+- ブラウザ固有の読み上げ範囲設定へはWindows詳細設定UIから明示的に遷移できる。
+
+### 8.3 復旧導線
+
+- `extension.connected=false`と`updateRequired=true`は別状態として表示する。
+- 切断中に自己再読み込みが完了したかのような文言や無期限の`再読み込みしています`状態を出さない。
+- 接続済みかつ対応版が更新待ちの場合だけ`reload_extension`を通常の自己再読み込み導線として使う。
+- 音声runtime修復が必要な場合、通常利用者へ`setup-voice-env.cmd`を直接案内せず、Windows小窓の`環境を修復`から`LocalVoiceBridge.exe --setup`へ遷移する。
+
+### 8.4 複数タブ操作対象の可視化
+
+- Autoの対象が全登録ChatGPTタブであることをWindows小窓に表示する。
+- `Next` / `Regen`の手動操作対象となるChatGPTタブ名をWindows小窓に表示する。
+- 再生中または直前再生した音声の回答元タブ名を表示できる場合は表示する。
+- 表示のために新しい高頻度pollや全タブbroadcastを追加しない。既存のexternal state snapshotへ必要最小限の文字列を追加する。
+
+### 8.5 受入条件の追加
+
+- [ ] Auto OFF/ONがマイク会話設定を変更せず、マイク会話OFF/ONがAuto設定を変更しない。
+- [ ] Windows詳細設定からSTTモデル、送信前猶予、Live TTS profileを変更し、Local API永続状態が正本として再接続後も復元される。
+- [ ] 拡張Optionsはブラウザ固有の読み上げ範囲だけを編集し、runtime設定の正本にならない。
+- [ ] 拡張切断と更新待ちが別表示になり、切断状態で自己reload成功を誤表示しない。
+- [ ] runtime修復は小窓の`環境を修復`からコンソールなしで正式setup導線へ移れる。
+- [ ] 小窓でAutoの全タブscopeと手動操作対象タブを確認できる。

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local Voice Bridge 設定</title>
+  <title>Local Voice Bridge 読み上げ範囲</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
       <img class="app-icon" src="assets/icons/icon48.png" alt="">
       <div>
         <p class="eyebrow">Local Voice Bridge</p>
-        <h1>読み上げと文字起こしの設定</h1>
-        <p class="lead">小型パネルには日常操作だけを残し、詳細設定をここで管理します。</p>
+        <h1>ブラウザの読み上げ範囲</h1>
+        <p class="lead">ChatGPT返答をどこまで1チャンクとして読むかだけを設定します。音声・マイク・Live TTSの設定はWindows Local Voice Bridgeが管理します。</p>
       </div>
     </header>
 
@@ -41,47 +41,6 @@
           </label>
         </div>
         <p class="section-note">Autoの冒頭読み上げと、Nextで進む1チャンクの区切りに適用されます。変更後に検出した返答から有効です。</p>
-      </section>
-
-      <section class="settings-section" aria-labelledby="stt-heading">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">文字起こし</p>
-            <h2 id="stt-heading">マイク入力の詳細</h2>
-          </div>
-          <p>マイク会話のオン・オフ操作は、これまでどおり小型パネルに残ります。</p>
-        </div>
-
-        <div class="field-grid">
-          <label class="field" for="stt-model">
-            <span class="field-label">文字起こしモデル</span>
-            <select id="stt-model" name="sttModel">
-              <option value="small">Small — 軽量</option>
-              <option value="medium">Medium — 精度重視</option>
-              <option value="large-v3-turbo">Large v3 Turbo — 高精度・高速</option>
-            </select>
-            <span class="field-help">大きいモデルほどGPUメモリと初回読み込み時間を多く使います。</span>
-          </label>
-
-          <label class="field" for="cancel-grace-seconds">
-            <span class="field-label">送信前の猶予</span>
-            <div class="input-with-unit">
-              <input id="cancel-grace-seconds" name="cancelGraceSeconds" type="number" min="0" max="5" step="0.1" inputmode="decimal">
-              <span>秒</span>
-            </div>
-            <span class="field-help">文字起こし後、Escで送信を取り消せる時間です。</span>
-          </label>
-
-          <label class="field" for="live-tts-profile">
-            <span class="field-label">Live TTSプロファイル</span>
-            <select id="live-tts-profile" name="liveTtsProfile">
-              <option value="speed">Speed — 12 steps・低遅延</option>
-              <option value="balanced">Balanced — 16 steps</option>
-              <option value="bridge">Bridge — 32 steps・品質重視</option>
-            </select>
-            <span class="field-help">マイク会話の逐次読み上げだけに適用されます。通常のAuto・Next・Regen・Replayには影響しません。</span>
-          </label>
-        </div>
       </section>
 
       <footer class="form-actions">

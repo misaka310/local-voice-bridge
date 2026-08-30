@@ -37,6 +37,7 @@ class FakeControlClient:
                 "micConversationEnabled": True,
                 "sttModel": "medium",
                 "cancelGraceMs": 900,
+                "liveTtsProfile": "bridge",
             },
             "referenceVoices": [
                 {"id": "", "label": "none"},
@@ -60,6 +61,11 @@ class FakeControlClient:
                 "playbackPhase": "playing",
                 "replayAvailable": True,
                 "tabsCount": 3,
+                "autoScopeTabs": 3,
+                "manualTargetTabId": 22,
+                "manualTargetTitle": "Tab B",
+                "playbackSourceTabId": 11,
+                "playbackSourceTitle": "Tab A",
             },
         }
 
@@ -114,6 +120,9 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertTrue(panel.current_text_label.text().startswith("全タブから届い"))
             self.assertIn("Queue 2", panel.queue_label.text())
             self.assertIn("3 tabs", panel.queue_label.text())
+            self.assertIn("Auto: 全3タブ", panel.context_label.text())
+            self.assertIn("操作対象: Tab B", panel.context_label.text())
+            self.assertIn("再生元: Tab A", panel.context_label.text())
             self.assertTrue(panel.stop_button.isEnabled())
             self.assertTrue(panel.replay_button.isEnabled())
             panel.shutdown()
@@ -191,6 +200,8 @@ class ControlPanelQtTests(unittest.TestCase):
 
             self.assertEqual(panel.status_label.text(), "音声ランタイムの修復が必要")
             self.assertIn("transformers is required", panel.current_text_label.toolTip())
+            self.assertFalse(panel.repair_button.isHidden())
+            self.assertEqual(panel.repair_button.text(), "環境を修復")
             self.assertFalse(panel.next_button.isEnabled())
             self.assertFalse(panel.regen_button.isEnabled())
             self.assertFalse(panel.stop_button.isEnabled())
@@ -226,7 +237,7 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertEqual(panel.status_label.text(), "Playing chunk 1/2 · Ref asuka")
             panel.shutdown()
 
-    def test_disconnected_extension_requests_extension_reload_not_chatgpt_tab_reload(self) -> None:
+    def test_disconnected_extension_waits_for_connection_without_claiming_self_reload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = FakeControlClient()
             original = client.get_snapshot
@@ -248,10 +259,8 @@ class ControlPanelQtTests(unittest.TestCase):
             panel.refresh_now()
             self.app.processEvents()
 
-            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしてください")
-            self.assertIn("ChatGPTタブの再読み込みは不要", panel.current_text_label.toolTip())
-            self.assertIn("下のボタン", panel.current_text_label.toolTip())
-            self.assertNotIn("Chrome / Braveの拡張機能画面", panel.current_text_label.toolTip())
+            self.assertEqual(panel.status_label.text(), "ChatGPTとの接続待ち")
+            self.assertIn("拡張機能の接続", panel.current_text_label.toolTip())
             for control in (
                 panel.auto_button,
                 panel.mic_button,
@@ -263,21 +272,9 @@ class ControlPanelQtTests(unittest.TestCase):
                 panel.replay_button,
             ):
                 self.assertFalse(control.isEnabled())
-            self.assertFalse(panel.reload_extension_button.isHidden())
-            self.assertTrue(panel.reload_extension_button.isEnabled())
-
-            panel.reload_extension_button.click()
-            self.app.processEvents()
-
-            self.assertEqual(client.commands, ["reload_extension"])
-            self.assertFalse(panel.reload_extension_button.isEnabled())
-            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
-
-            panel.refresh_now()
-            self.app.processEvents()
-
-            self.assertFalse(panel.reload_extension_button.isEnabled())
-            self.assertEqual(panel.status_label.text(), "拡張機能を再読み込みしています")
+            self.assertTrue(panel.details_button.isEnabled())
+            self.assertTrue(panel.reload_extension_button.isHidden())
+            self.assertEqual(client.commands, [])
             panel.shutdown()
 
     def test_volume_debounce_is_single_shot_and_starts_only_after_change(self) -> None:
@@ -307,7 +304,7 @@ class ControlPanelQtTests(unittest.TestCase):
             self.app.processEvents()
 
             panel.auto_button.click()
-            self.assertFalse(panel.mic_button.isChecked())
+            self.assertTrue(panel.mic_button.isChecked())
             panel.volume_slider.setValue(20)
             panel.volume_slider.setValue(25)
             QTest.qWait(180)
@@ -318,10 +315,8 @@ class ControlPanelQtTests(unittest.TestCase):
             panel.replay_button.click()
             self.app.processEvents()
 
-            self.assertIn(
-                {"enabled": False, "micConversationEnabled": False},
-                client.settings_calls,
-            )
+            self.assertIn({"enabled": False}, client.settings_calls)
+            self.assertNotIn({"enabled": False, "micConversationEnabled": False}, client.settings_calls)
             self.assertEqual(
                 [call for call in client.settings_calls if "voiceVolume" in call],
                 [{"voiceVolume": 0.25}],
@@ -342,18 +337,27 @@ class ControlPanelQtTests(unittest.TestCase):
             panel.refresh_now()
             self.app.processEvents()
 
-            self.assertEqual(panel.reference_label.text(), "Voice")
+            self.assertEqual(panel.reference_label.text(), "キャラクター")
+            self.assertEqual(panel.volume_label.text(), "音量")
+            self.assertEqual(panel.reference_combo.itemText(0), "標準")
             self.assertIn("ペット", panel.reference_label.toolTip())
             self.assertIn("ペット", panel.reference_combo.toolTip())
             self.assertEqual(panel.details_button.text(), "詳細設定")
             self.assertTrue(panel.details_button.isEnabled())
-            self.assertEqual(panel.auto_button.text(), "Auto")
-            self.assertEqual(panel.next_button.text(), "Next")
-            self.assertEqual(panel.regen_button.text(), "Regen")
-            self.assertEqual(panel.stop_button.text(), "Stop")
-            self.assertEqual(panel.replay_button.text(), "Replay")
+            self.assertEqual(panel.auto_button.text(), "自動読み上げ")
+            self.assertEqual(panel.next_button.text(), "次へ")
+            self.assertEqual(panel.regen_button.text(), "再生成")
+            self.assertEqual(panel.stop_button.text(), "停止")
+            self.assertEqual(panel.replay_button.text(), "もう一度")
 
             panel.details_button.click()
+            self.app.processEvents()
+            self.assertIsNotNone(panel._advanced_dialog)
+            assert panel._advanced_dialog is not None
+            self.assertTrue(panel._advanced_dialog.isVisible())
+            self.assertEqual(panel._advanced_dialog.stt_model_combo.currentData(), "medium")
+            self.assertEqual(client.commands, [])
+            panel._advanced_dialog.browser_settings_button.click()
             self.app.processEvents()
             self.assertEqual(client.commands, ["open_options"])
             panel.shutdown()
@@ -495,6 +499,7 @@ class ControlPanelQtTests(unittest.TestCase):
             self.assertTrue(panel.reload_extension_button.isHidden())
             self.assertFalse(panel.auto_button.isEnabled())
             self.assertFalse(panel.stop_button.isEnabled())
+            self.assertTrue(panel.details_button.isEnabled())
             panel.shutdown()
 
     def test_supported_old_extension_can_reload_itself_from_the_panel(self) -> None:
@@ -623,7 +628,6 @@ class ControlPanelQtTests(unittest.TestCase):
             self.app.processEvents()
             self.assertGreaterEqual(panel.refresh_timer.interval(), 5000)
             panel.shutdown()
-
 
     def test_show_panel_recovers_a_saved_position_outside_current_screens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
