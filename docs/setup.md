@@ -1,6 +1,6 @@
 # セットアップ
 
-公開導線は Irodori direct / irodori-v3 / Voice=none です。`Voice`は既存の`referenceVoice`設定の画面上の名前で、保存キーは変わりません。
+公開導線は Irodori direct / irodori-v3 / `キャラクター=標準` です。`キャラクター`は内部では既存の`referenceVoice`設定を使い、保存キーは変わりません。
 
 ## 実行
 
@@ -39,9 +39,21 @@
 
 完了表示は、選択したプロファイルに必要な全工程が成功した後にだけ出ます。
 
+## 完了後の初回導線
+
+セットアップ成功後は、その画面から次の順序で初回利用まで進めます。
+
+1. `拡張機能の導入手順`を開き、Chrome / Braveへ`extension`フォルダを読み込むか、更新時は再読み込みする
+2. セットアップ画面へ戻り、`Local Voice Bridge を開く`を押す
+3. Windows Local Voice小窓で拡張機能の接続を待つ
+4. 接続後に`テスト音声`を押し、既存の`/v1/speak`経路で音声が再生されることを確認する
+5. 成功すると初回オンボーディング完了が永続化される
+
+このhandoffのために別の音声APIや別の設定正本は作りません。以後のWindows自動起動は`--background`で静かに常駐します。
+
 ## ブラウザ拡張
 
-セットアップ画面の`拡張機能の導入手順`または[extension/INSTALL.md](../extension/INSTALL.md)を開き、Chrome / Braveへ`extension`フォルダを読み込みます。リポジトリ更新後に旧版が残っている場合は、Windows Local Voice小窓が再読み込みを案内します。
+セットアップ画面の`拡張機能の導入手順`、Windows小窓の初回オンボーディング、または[extension/INSTALL.md](../extension/INSTALL.md)を開き、Chrome / Braveへ`extension`フォルダを読み込みます。リポジトリ更新後に旧版が残っている場合は、Windows Local Voice小窓が再読み込みを案内します。
 
 ## キャッシュ
 
