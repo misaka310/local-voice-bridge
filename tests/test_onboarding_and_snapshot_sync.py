@@ -15,8 +15,7 @@ LOCAL_API = ROOT / "local-api"
 if str(LOCAL_API) not in sys.path:
     sys.path.insert(0, str(LOCAL_API))
 
-from control_panel import LocalVoiceControlPanel  # noqa: E402
-from control_panel_onboarding import OnboardingStateStore  # noqa: E402
+from control_panel_onboarding import FirstRunControlPanel, OnboardingStateStore  # noqa: E402
 
 
 class FakeControlClient:
@@ -92,7 +91,7 @@ class OnboardingAndSnapshotSyncTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = Path(temp_dir) / "panel-window.json"
             client = FakeControlClient()
-            panel = LocalVoiceControlPanel(
+            panel = FirstRunControlPanel(
                 client,
                 state_path=state_path,
                 start_polling=False,
@@ -120,7 +119,7 @@ class OnboardingAndSnapshotSyncTests(unittest.TestCase):
             self.assertTrue(panel.onboarding_widget.isHidden())
             panel.shutdown()
 
-            restored = LocalVoiceControlPanel(
+            restored = FirstRunControlPanel(
                 client,
                 state_path=state_path,
                 start_polling=False,
