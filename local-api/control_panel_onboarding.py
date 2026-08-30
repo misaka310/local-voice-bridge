@@ -5,10 +5,12 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from control_panel import LocalVoiceControlPanel
+
+BACKGROUND_REFRESH_MS = 1000
 
 
 class OnboardingStateStore:
@@ -147,7 +149,7 @@ class OnboardingTestRunner(QObject):
 
 
 class FirstRunControlPanel(LocalVoiceControlPanel):
-    """Adds one-time onboarding and a snapshot event without growing the base panel."""
+    """Adds one-time onboarding and one shared snapshot stream for visible and hidden states."""
 
     snapshot_applied = Signal(object)
 
@@ -167,6 +169,13 @@ class FirstRunControlPanel(LocalVoiceControlPanel):
             async_requests=async_requests,
             parent=parent,
         )
+        self._background_sync_enabled = bool(start_polling)
+        self.background_refresh_timer = QTimer(self)
+        self.background_refresh_timer.setInterval(BACKGROUND_REFRESH_MS)
+        self.background_refresh_timer.timeout.connect(self._refresh_while_hidden)
+        if self._background_sync_enabled:
+            self.background_refresh_timer.start()
+
         self.onboarding_store = OnboardingStateStore(
             Path(state_path).with_name("control-panel-onboarding.json")
         )
@@ -188,6 +197,19 @@ class FirstRunControlPanel(LocalVoiceControlPanel):
 
     def needs_onboarding(self) -> bool:
         return not self.onboarding_store.is_complete()
+
+    def _refresh_while_hidden(self) -> None:
+        if self._background_sync_enabled and not self.isVisible():
+            self.refresh_now()
+
+    def show_panel(self) -> None:
+        self.background_refresh_timer.stop()
+        super().show_panel()
+
+    def hide_panel(self) -> None:
+        super().hide_panel()
+        if self._background_sync_enabled and not self._shutting_down:
+            self.background_refresh_timer.start()
 
     def apply_snapshot(self, snapshot: dict[str, Any]) -> None:
         super().apply_snapshot(snapshot)
@@ -227,5 +249,6 @@ class FirstRunControlPanel(LocalVoiceControlPanel):
         self.onboarding_widget.hide()
 
     def shutdown(self) -> None:
+        self.background_refresh_timer.stop()
         self._onboarding_runner.shutdown()
         super().shutdown()
