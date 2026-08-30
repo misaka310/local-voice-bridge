@@ -9,6 +9,7 @@ const node = process.execPath;
 const steps = [
   [node, ['scripts/run-public-check.js']],
   [node, ['scripts/check-architecture.js']],
+  [node, ['scripts/check-tray-snapshot-sync.js']],
   [node, ['scripts/run-python-tests.js']],
   [node, ['scripts/run-background-tests.js']],
   [node, ['scripts/run-mock-e2e.js']],
