@@ -20,7 +20,8 @@ except ImportError as exc:
     show_message("Local Voice Bridge", message, error=True)
     raise SystemExit(2) from exc
 
-from control_panel import ControlPanelApiClient, LocalVoiceControlPanel  # noqa: E402
+from control_panel import ControlPanelApiClient  # noqa: E402
+from control_panel_onboarding import FirstRunControlPanel  # noqa: E402
 from conversation_controller import GlobalRightCtrlHook, VoiceConversationController  # noqa: E402
 from desktop_pet import DesktopPetWindow  # noqa: E402
 from desktop_pet_config import DesktopPetSettingsStore  # noqa: E402
@@ -114,7 +115,7 @@ class VoiceBridgeQtRuntime(QObject):
 
         self.pet = DesktopPetWindow(pet_root, DesktopPetSettingsStore(settings_path))
         self.control_panel_client = control_panel_client or ControlPanelApiClient()
-        self.control_panel = LocalVoiceControlPanel(
+        self.control_panel = FirstRunControlPanel(
             self.control_panel_client,
             state_path=panel_state_path,
             start_polling=start_panel_polling,
@@ -124,19 +125,13 @@ class VoiceBridgeQtRuntime(QObject):
             event_logger=RuntimeEventLogger(default_event_log_path(APP_ROOT)),
         )
         self.right_ctrl_hook = keyboard_hook or GlobalRightCtrlHook(self.voice_conversation.handle_key_event)
-        self.conversation_settings_timer = QTimer(self)
-        self.conversation_settings_timer.setInterval(500)
-        self.conversation_settings_timer.timeout.connect(self.sync_conversation_settings)
-        self.conversation_settings_timer.start()
+        self.control_panel.snapshot_applied.connect(self.sync_runtime_from_snapshot)
+        self.sync_pet_settings_from_disk()
         self.sync_conversation_settings()
         self.right_ctrl_hook.start()
         self.pet.panel_toggle_requested.connect(self.toggle_control_panel)
         self.control_panel.visibility_changed.connect(self._sync_panel_action)
         self.control_panel.repair_requested.connect(self.exit_and_run_setup)
-        self.pet_settings_timer = QTimer(self)
-        self.pet_settings_timer.setInterval(500)
-        self.pet_settings_timer.timeout.connect(self.sync_pet_settings_from_disk)
-        self.pet_settings_timer.start()
 
         self.tray_icon = QSystemTrayIcon(create_tray_icon(), self)
         self.tray_icon.setToolTip(APP_NAME)
@@ -147,6 +142,8 @@ class VoiceBridgeQtRuntime(QObject):
         self._sync_all_actions()
         if show_tray:
             self.tray_icon.show()
+        if self.control_panel.needs_onboarding():
+            QTimer.singleShot(0, self.control_panel.show_panel)
         if start_monitor:
             QTimer.singleShot(0, self.controller.start_monitor)
 
@@ -237,24 +234,24 @@ class VoiceBridgeQtRuntime(QObject):
         if self.pet.current_state != state:
             self.pet.set_state(state)
 
+    def sync_runtime_from_snapshot(self, snapshot: Any) -> None:
+        data = snapshot if isinstance(snapshot, dict) else {}
+        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+        conversation = data.get("conversation") if isinstance(data.get("conversation"), dict) else {}
+        self.voice_conversation.configure(
+            enabled=bool(settings.get("micConversationEnabled")),
+            stt_model=str(settings.get("sttModel") or "small"),
+            cancel_grace_ms=int(settings.get("cancelGraceMs", 700)),
+        )
+        reconcile = getattr(self.voice_conversation, "reconcile_reported_state", None)
+        if callable(reconcile):
+            reconcile(conversation)
+        self.sync_pet_settings_from_disk()
+        self._sync_pet_playback_state(data)
+
     def sync_conversation_settings(self) -> None:
         try:
-            snapshot = self.control_panel_client.get_snapshot()
-            settings = snapshot.get("settings") if isinstance(snapshot, dict) else {}
-            conversation = snapshot.get("conversation") if isinstance(snapshot, dict) else {}
-            if not isinstance(settings, dict):
-                settings = {}
-            if not isinstance(conversation, dict):
-                conversation = {}
-            self.voice_conversation.configure(
-                enabled=bool(settings.get("micConversationEnabled")),
-                stt_model=str(settings.get("sttModel") or "small"),
-                cancel_grace_ms=int(settings.get("cancelGraceMs", 700)),
-            )
-            reconcile = getattr(self.voice_conversation, "reconcile_reported_state", None)
-            if callable(reconcile):
-                reconcile(conversation)
-            self._sync_pet_playback_state(snapshot)
+            self.sync_runtime_from_snapshot(self.control_panel_client.get_snapshot())
         except (OSError, RuntimeError, ValueError, TypeError, urllib.error.URLError):
             return
 
@@ -342,10 +339,8 @@ class VoiceBridgeQtRuntime(QObject):
         if self._shutdown_started:
             return
         self._shutdown_started = True
-        self.conversation_settings_timer.stop()
         self.right_ctrl_hook.stop()
         self.voice_conversation.shutdown()
-        self.pet_settings_timer.stop()
         self.pet.persist_settings()
         self.controller.shutdown()
         self.control_panel.shutdown()
