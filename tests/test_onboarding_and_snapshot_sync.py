@@ -139,11 +139,11 @@ class OnboardingAndSnapshotSyncTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            "if show_tray and self.control_panel.needs_onboarding():",
+            "if show_panel_on_start or (show_tray and self.control_panel.needs_onboarding()):",
             source,
         )
         self.assertIn(
-            "QTimer.singleShot(0, self.control_panel.show_panel)",
+            "QTimer.singleShot(0, self.show_control_panel)",
             source,
         )
 
