@@ -60,7 +60,7 @@ class TrayControllerContractTests(unittest.TestCase):
 
     def test_startup_command_targets_the_small_exe_launcher(self) -> None:
         launcher = Path(r"C:\Voice Bridge\LocalVoiceBridge.exe")
-        self.assertEqual(windows.startup_command(launcher), f'"{launcher}"')
+        self.assertEqual(windows.startup_command(launcher), f'"{launcher}" --background')
 
     def test_startup_toggle_uses_the_current_user_run_registry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -75,7 +75,7 @@ class TrayControllerContractTests(unittest.TestCase):
                 mock.patch.object(windows, "_delete_startup_command") as delete_startup,
             ):
                 windows.set_startup_enabled(True)
-                write_startup.assert_called_once_with(f'"{launcher}"')
+                write_startup.assert_called_once_with(f'"{launcher}" --background')
                 delete_startup.assert_called_once_with(windows.LEGACY_WINDOWS_RUN_VALUE)
                 self.assertFalse(legacy_entry.exists())
 
@@ -99,7 +99,7 @@ class TrayControllerContractTests(unittest.TestCase):
             ):
                 self.assertTrue(windows.migrate_legacy_startup())
 
-            write_startup.assert_called_once_with(f'"{launcher}"')
+            write_startup.assert_called_once_with(f'"{launcher}" --background')
             self.assertFalse(legacy_entry.exists())
 
     def test_startup_folder_falls_back_when_appdata_is_missing(self) -> None:
