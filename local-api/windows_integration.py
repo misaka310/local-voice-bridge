@@ -26,10 +26,15 @@ LEGACY_WINDOWS_RUN_VALUE = LEGACY_APP_NAME
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 MUTEX_NAME = "Local\\ChatGPTLocalVoiceBridgeTray"
+ACTIVATION_EVENT_NAME = "Local\\ChatGPTLocalVoiceBridgeActivate"
 ERROR_ALREADY_EXISTS = 183
+EVENT_MODIFY_STATE = 0x0002
+SYNCHRONIZE = 0x00100000
+WAIT_OBJECT_0 = 0x00000000
 IS_WINDOWS = os.name == "nt"
 LOGGER = logging.getLogger("local-voice-bridge-tray")
 _MUTEX_HANDLE: int | None = None
+_ACTIVATION_EVENT_HANDLE: int | None = None
 
 
 def startup_folder() -> Path:
@@ -53,9 +58,13 @@ def legacy_startup_entry_path() -> Path:
     return legacy_startup_entry_paths()[0]
 
 
-def startup_command(launcher: Path | None = None) -> str:
+def legacy_startup_command(launcher: Path | None = None) -> str:
     target = launcher if launcher is not None else LAUNCHER_EXE
     return f'"{target}"'
+
+
+def startup_command(launcher: Path | None = None) -> str:
+    return f"{legacy_startup_command(launcher)} --background"
 
 
 def _require_winreg() -> Any:
@@ -101,10 +110,16 @@ def _remove_legacy_startup_entry() -> None:
 
 def is_startup_enabled() -> bool:
     try:
-        if _read_startup_command() == startup_command():
+        current_command = _read_startup_command()
+        if current_command in {startup_command(), legacy_startup_command()}:
             return True
         legacy_command = _read_startup_command(LEGACY_WINDOWS_RUN_VALUE)
-        if legacy_command in {startup_command(), startup_command(LEGACY_LAUNCHER_EXE)}:
+        if legacy_command in {
+            startup_command(),
+            legacy_startup_command(),
+            startup_command(LEGACY_LAUNCHER_EXE),
+            legacy_startup_command(LEGACY_LAUNCHER_EXE),
+        }:
             return True
         return any(entry.is_file() for entry in legacy_startup_entry_paths())
     except RuntimeError:
@@ -122,7 +137,11 @@ def migrate_legacy_startup() -> bool:
         return False
     needs_migration = (
         any(entry.is_file() for entry in entries)
-        or current_command == startup_command(LEGACY_LAUNCHER_EXE)
+        or current_command in {
+            legacy_startup_command(),
+            startup_command(LEGACY_LAUNCHER_EXE),
+            legacy_startup_command(LEGACY_LAUNCHER_EXE),
+        }
         or legacy_command is not None
     )
     if not needs_migration:
@@ -137,7 +156,7 @@ def migrate_legacy_startup() -> bool:
 def set_startup_enabled(enabled: bool) -> None:
     if enabled:
         if not LAUNCHER_EXE.is_file():
-            raise RuntimeError("LocalVoiceBridge.exe が見つかりません。setup-voice-env.cmd を再実行してください。")
+            raise RuntimeError("LocalVoiceBridge.exe が見つかりません。アプリの環境修復を実行してください。")
         _write_startup_command(startup_command())
         _delete_startup_command(LEGACY_WINDOWS_RUN_VALUE)
         _remove_legacy_startup_entry()
@@ -178,6 +197,40 @@ def _open_named_mutex(name: str) -> tuple[int, int]:
     return int(handle or 0), int(ctypes.get_last_error())
 
 
+def _create_named_event(name: str) -> int:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_event = kernel32.CreateEventW
+    create_event.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_bool, ctypes.c_wchar_p]
+    create_event.restype = ctypes.c_void_p
+    handle = create_event(None, False, False, name)
+    return int(handle or 0)
+
+
+def _open_named_event(name: str, access: int) -> int:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_event = kernel32.OpenEventW
+    open_event.argtypes = [ctypes.c_uint32, ctypes.c_bool, ctypes.c_wchar_p]
+    open_event.restype = ctypes.c_void_p
+    handle = open_event(access, False, name)
+    return int(handle or 0)
+
+
+def _set_windows_event(handle: int) -> bool:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    set_event = kernel32.SetEvent
+    set_event.argtypes = [ctypes.c_void_p]
+    set_event.restype = ctypes.c_bool
+    return bool(set_event(ctypes.c_void_p(handle)))
+
+
+def _wait_windows_event(handle: int, timeout_ms: int = 0) -> int:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    wait_for_single = kernel32.WaitForSingleObject
+    wait_for_single.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    wait_for_single.restype = ctypes.c_uint32
+    return int(wait_for_single(ctypes.c_void_p(handle), max(0, int(timeout_ms))))
+
+
 def _close_windows_handle(handle: int) -> None:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     close_handle = kernel32.CloseHandle
@@ -204,6 +257,46 @@ def release_single_instance() -> None:
     global _MUTEX_HANDLE
     handle = _MUTEX_HANDLE
     _MUTEX_HANDLE = None
+    if IS_WINDOWS and handle:
+        _close_windows_handle(handle)
+
+
+def create_activation_event() -> bool:
+    global _ACTIVATION_EVENT_HANDLE
+    if not IS_WINDOWS:
+        return True
+    if _ACTIVATION_EVENT_HANDLE:
+        return True
+    handle = _create_named_event(ACTIVATION_EVENT_NAME)
+    if not handle:
+        return False
+    _ACTIVATION_EVENT_HANDLE = handle
+    return True
+
+
+def request_existing_instance_activation() -> bool:
+    if not IS_WINDOWS:
+        return False
+    handle = _open_named_event(ACTIVATION_EVENT_NAME, EVENT_MODIFY_STATE)
+    if not handle:
+        return False
+    try:
+        return _set_windows_event(handle)
+    finally:
+        _close_windows_handle(handle)
+
+
+def consume_activation_request() -> bool:
+    handle = _ACTIVATION_EVENT_HANDLE
+    if not IS_WINDOWS or not handle:
+        return False
+    return _wait_windows_event(handle, 0) == WAIT_OBJECT_0
+
+
+def release_activation_event() -> None:
+    global _ACTIVATION_EVENT_HANDLE
+    handle = _ACTIVATION_EVENT_HANDLE
+    _ACTIVATION_EVENT_HANDLE = None
     if IS_WINDOWS and handle:
         _close_windows_handle(handle)
 
