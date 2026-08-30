@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 
 from pywinauto import Desktop
@@ -8,8 +9,12 @@ from pywinauto import Desktop
 import tray_uia_smoke as smoke
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 EXPECTED_ACTIONS = (
-    "小窓を表示",
     "デスクトップペットを戻す",
     "Local Voice Bridge を再起動",
     "コントローラーログを開く",
@@ -21,6 +26,7 @@ EXPECTED_ACTIONS = (
     "Local Voice Bridge をアンインストール...",
     "終了",
 )
+PANEL_ACTIONS = ("小窓を表示", "小窓を隠す")
 
 ACTION_TRANSLATIONS = {
     "Show Local Voice panel": "小窓を表示",
@@ -149,7 +155,13 @@ def assert_menu_contract(pid: int) -> None:
         missing = [title for title in EXPECTED_ACTIONS if title not in items]
         if missing:
             raise AssertionError(f"missing menu actions: {missing}; actual={sorted(items)}")
-        disabled = [title for title in EXPECTED_ACTIONS if not items[title].is_enabled()]
+        present_panel_actions = [title for title in PANEL_ACTIONS if title in items]
+        if len(present_panel_actions) != 1:
+            raise AssertionError(
+                f"expected exactly one panel visibility action, got {present_panel_actions}; actual={sorted(items)}"
+            )
+        enabled_actions = (*EXPECTED_ACTIONS, present_panel_actions[0])
+        disabled = [title for title in enabled_actions if not items[title].is_enabled()]
         if disabled:
             raise AssertionError(f"unexpected disabled menu actions: {disabled}")
     finally:
@@ -211,7 +223,6 @@ def assert_single_instance(original_pid: int) -> None:
 
 
 def main() -> int:
-    smoke.EXPECTED_ACTIONS = EXPECTED_ACTIONS
     smoke.find_qt_popup = find_qt_popup
     smoke.panel_window = panel_window
     smoke.pet_window = pet_window
