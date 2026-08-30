@@ -63,12 +63,14 @@ npm run demo:check
 
 開始時にNVIDIA GPU/ドライバーを軽量確認してから大きな依存関係の導入へ進みます。工程ごとの成功・失敗・失敗コードを画面に表示し、実行中は`キャンセル`で安全に停止できます。完了済み工程は`local-api/runtime/setup/state.json`へ記録されるため、途中失敗やキャンセル後の再実行は完了済み工程を再確認して続きから再開します。詳細ログは`local-api/runtime/setup/setup.log`です。
 
+セットアップ成功後は、同じ画面の`拡張機能の導入手順`からChrome / Braveへ拡張機能を導入または再読み込みし、`Local Voice Bridge を開く`を押します。初回だけWindows小窓が接続を待ち、`テスト音声`で既存の`/v1/speak`経路を確認します。成功すると初回完了を永続化し、以後のWindows自動起動は`--background`で静かに常駐します。
+
 ## Usage / 起動と操作
 
 1. Windows検索で`Local Voice Bridge`を開くか、リポジトリ直下の`LocalVoiceBridge.exe`を実行します。
 2. [拡張機能の導入・更新手順](extension/INSTALL.md)に従い、Chrome / Braveへ`extension/`を読み込みます。
 3. Chrome / BraveでChatGPTを開き、Windows Local Voice小窓が接続状態になることを確認します。
-4. Windows Local Voice小窓でAutoをオンにし、ChatGPTへ新しいメッセージを送ります。返答完了後に先頭プレビューが一度だけ再生されれば準備完了です。
+4. Windows Local Voice小窓で`自動読み上げ`をオンにし、ChatGPTへ新しいメッセージを送ります。返答完了後に先頭プレビューが一度だけ再生されれば準備完了です。
 
 日常操作はWindows小窓の`キャラクター`、`音量`、`マイク会話`、`自動読み上げ`、`次へ`、`再生成`、`停止`、`もう一度`、`詳細設定`で行います。`キャラクター`は内部では既存の参照音声設定`referenceVoice`を使い、空IDは`標準`として表示します。同じIDのペット素材があればデスクトップペットも連動します。
 
