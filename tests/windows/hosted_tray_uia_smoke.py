@@ -227,6 +227,23 @@ def assert_single_instance(original_pid: int) -> None:
     )
 
 
+def verify_panel_toggle(pid: int) -> None:
+    if panel_window(pid) is not None:
+        raise AssertionError("background launch unexpectedly showed the Local Voice panel")
+
+    smoke.find_tray_button().click_input(button="left", double=True)
+    panel = smoke.wait_until("Local Voice panel", lambda: panel_window(pid), timeout=25)
+    smoke.wait_until(
+        "Local Voice panel responsiveness",
+        lambda: smoke.window_is_responsive(panel.hwnd, timeout_ms=500),
+        timeout=10,
+        interval=0.2,
+    )
+
+    smoke.USER32.PostMessageW(panel.hwnd, smoke.WM_CLOSE, 0, 0)
+    smoke.wait_until("Local Voice panel to hide", lambda: panel_window(pid) is None, timeout=15)
+
+
 def main() -> int:
     smoke.find_qt_popup = find_qt_popup
     smoke.panel_window = panel_window
@@ -236,6 +253,7 @@ def main() -> int:
     smoke.assert_menu_contract = assert_menu_contract
     smoke.click_menu_item = click_menu_item
     smoke.assert_single_instance = assert_single_instance
+    smoke.verify_panel_toggle = verify_panel_toggle
     return smoke.main()
 
 
