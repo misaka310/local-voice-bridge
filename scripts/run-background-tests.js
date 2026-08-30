@@ -65,6 +65,7 @@ if (status === 0) {
     'tests/delivery-id-core.test.js',
     'tests/options-page.test.js',
     'tests/options-settings.test.js',
+    'tests/extension-action.test.js',
     'tests/ux-responsibility-finalization.test.js',
     'tests/prompt-input-core.test.js',
     'tests/live-browser-core.test.js',
