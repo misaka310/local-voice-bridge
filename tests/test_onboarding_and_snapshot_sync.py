@@ -21,8 +21,10 @@ from control_panel_onboarding import FirstRunControlPanel, OnboardingStateStore 
 class FakeControlClient:
     def __init__(self) -> None:
         self.test_speech_calls: list[dict[str, object]] = []
+        self.get_snapshot_calls = 0
 
     def get_snapshot(self) -> dict[str, object]:
+        self.get_snapshot_calls += 1
         return self.snapshot(connected=False)
 
     def update_settings(self, payload: dict[str, object]) -> dict[str, object]:
@@ -128,6 +130,31 @@ class OnboardingAndSnapshotSyncTests(unittest.TestCase):
             self.assertFalse(restored.needs_onboarding())
             self.assertTrue(restored.onboarding_widget.isHidden())
             restored.shutdown()
+
+    def test_hidden_panel_keeps_the_same_snapshot_pipeline_alive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "panel-window.json"
+            client = FakeControlClient()
+            panel = FirstRunControlPanel(
+                client,
+                state_path=state_path,
+                start_polling=True,
+                async_requests=False,
+            )
+            panel.onboarding_store.mark_complete()
+            panel.onboarding_widget.hide()
+            panel.hide_panel()
+
+            self.assertFalse(panel.refresh_timer.isActive())
+            self.assertTrue(panel.background_refresh_timer.isActive())
+            before = client.get_snapshot_calls
+            panel._refresh_while_hidden()
+            self.assertEqual(client.get_snapshot_calls, before + 1)
+            self.assertTrue(panel.background_refresh_timer.isActive())
+
+            panel.show_panel()
+            self.assertFalse(panel.background_refresh_timer.isActive())
+            panel.shutdown()
 
     def test_tray_uses_panel_snapshot_signal_instead_of_fixed_500ms_sync_timers(self) -> None:
         source = (LOCAL_API / "tray_controller.py").read_text(encoding="utf-8")
