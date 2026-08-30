@@ -107,6 +107,15 @@ try {
     }
 
     Invoke-Process -FilePath $launcher -Arguments @('--self-test') -FailureMessage 'LocalVoiceBridge.exe self-test failed.'
+
+    # The hosted GUI smoke verifies the normal post-onboarding tray contract.
+    # First-run onboarding has its own focused Qt regression test and is verified on the real Windows machine.
+    $runtimeDir = Join-Path $repoRoot 'local-api\runtime'
+    New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    $onboardingState = Join-Path $runtimeDir 'control-panel-onboarding.json'
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($onboardingState, '{"completed":true}', $utf8NoBom)
+
     $smoke = Start-Process -FilePath $python -ArgumentList @($smokeScript) -WorkingDirectory $repoRoot -Wait -PassThru -NoNewWindow
     exit $smoke.ExitCode
 }
