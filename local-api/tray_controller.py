@@ -142,7 +142,7 @@ class VoiceBridgeQtRuntime(QObject):
         self._sync_all_actions()
         if show_tray:
             self.tray_icon.show()
-        if self.control_panel.needs_onboarding():
+        if show_tray and self.control_panel.needs_onboarding():
             QTimer.singleShot(0, self.control_panel.show_panel)
         if start_monitor:
             QTimer.singleShot(0, self.controller.start_monitor)
