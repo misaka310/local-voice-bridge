@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 - Windows小窓にAutoの対象タブ数、手動操作対象タブ、再生元タブを表示
 - API、生成音声、任意の参照音声を同じPC内で管理し、通常利用ではターミナルを表示しない
 - 任意のマイク会話モードでは、キーを押している間だけ録音し、ローカルfaster-whisperでChatGPT入力欄へ送信
-- 対応するYouTube Dictation Pause Controlと連携し、録音中だけYouTubeを停止・再開
+- 対応する[YouTube Dictation Pause Control](https://github.com/misaka310/youtube-dictation-pause-control)と連携し、録音中だけYouTubeを停止・再開
 - 実モデルやChatGPTログイン不要のデモとCIで、拡張機能・キュー・再生境界を確認可能
 
 細かなキュー制御、入力先固定、キャンセル猶予、割り込み条件、デスクトップペットの操作は[操作と検証](docs/operation.md)にまとめています。faviconの優先順位と30タブ向けの低負荷設計は[タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)を参照してください。
