@@ -1,7 +1,7 @@
 {
   "name": "local-voice-bridge",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.3",
   "scripts": {
     "build:launcher": "node scripts/run-launcher-build.js",
     "check:public": "node scripts/run-public-check.js",

@@ -107,7 +107,7 @@ Optionsが所有するのは`previewMaxLines` / `previewMaxChars`などブラウ
 9. 送信前に`submissionId`、タブ、ページ、会話、assistant基線をLocal APIへ記録し、ACK後だけ送信します。
 10. assistant返答が一意にbindされた後は確定文だけを先読みしてローカル再生し、通常Autoの共通キューとは二重再生しません。
 
-対応版のYouTube Dictation Pause Controlが起動している場合、録音中だけ`http://127.0.0.1:17654/state`へ`source=local-voice-bridge`のactive状態を通知します。通知先が停止中でも録音処理は中断しません。通知先はloopback `http`と`/state`に限定します。
+対応版の[YouTube Dictation Pause Control](https://github.com/misaka310/youtube-dictation-pause-control)が起動している場合、録音中だけ`http://127.0.0.1:17654/state`へ`source=local-voice-bridge`のactive状態を通知します。通知先が停止中でも録音処理は中断しません。通知先はloopback `http`と`/state`に限定します。
 
 ### 状態表示
 

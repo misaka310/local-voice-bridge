@@ -66,7 +66,7 @@ Autoをオンにする前から表示されていた返答は読みません。`
 
 ## マイク会話中にYouTubeが停止しない
 
-この連携には、入力元ごとの状態を扱う対応版YouTube Dictation Pause Controlが必要です。
+この連携には、入力元ごとの状態を扱う対応版[YouTube Dictation Pause Control](https://github.com/misaka310/youtube-dictation-pause-control)が必要です。
 
 1. `http://127.0.0.1:17654/health`が`ok=true`を返すことを確認する
 2. YouTube Dictation Pause Controlの`logs/control.log`に`source=local-voice-bridge active=true`が記録されるか確認する
