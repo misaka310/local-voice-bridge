@@ -64,17 +64,6 @@ Autoをオンにする前から表示されていた返答は読みません。`
 
 `Ref=none`、空、または同じIDの素材がない場合は既定ペットが表示されます。
 
-## マイク会話中にYouTubeが停止しない
-
-この連携には、入力元ごとの状態を扱う対応版[YouTube Dictation Pause Control](https://github.com/misaka310/youtube-dictation-pause-control)が必要です。
-
-1. `http://127.0.0.1:17654/health`が`ok=true`を返すことを確認する
-2. YouTube Dictation Pause Controlの`logs/control.log`に`source=local-voice-bridge active=true`が記録されるか確認する
-3. 記録がなければ、両アプリが今回の連携対応ブランチで起動しているか確認する
-4. ポートを変更している場合は、`YOUTUBE_DICTATION_PAUSE_STATE_URL`を実際の`/state` URLへ設定する
-
-通知先が不在でもLocal Voice Bridgeの録音は継続します。そのため、録音できることだけではYouTube連携の成功確認になりません。
-
 ## 生成音声やログでディスク使用量が増える
 
 生成音声は初期値で最新1,000件・合計1GB・14日以内に自動制限され、ログは各2MB・バックアップ2世代までです。上限導入前から大量のファイルがある場合も、`Restart Voice Bridge`または次回起動時に自動整理されます。すぐ削除する場合は通知領域の`Clear generated audio...`を使用してください。参照音声と設定は残ります。

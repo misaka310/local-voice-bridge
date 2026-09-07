@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Removed the previously added YouTube Dictation Pause Control recording-state integration so Local Voice Bridge no longer starts, monitors, or notifies a separate product/runtime; added an explicit approval boundary and CI gate for future cross-repository runtime, process, or localhost-service dependencies.
 - Finalized the Windows UX responsibility model: Auto and microphone conversation are independent, Local API owns runtime settings, browser Options own only preview limits, disconnected/update-required recovery states are distinct, runtime repair routes through `LocalVoiceBridge.exe --setup`, and the Windows panel shows all-tab scope, manual target, and playback source context.
 - Hardened every Local API request with loopback `Host` validation, removed user-specific cache paths from `/health`, and added regression coverage for GET/POST/OPTIONS boundary enforcement.
 - Bounded privacy-safe structured runtime event logs with a 2 MiB rotation threshold and two backup generations.

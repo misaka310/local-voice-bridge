@@ -56,7 +56,6 @@ for (const file of [
   'local-api/audio_recorder.py',
   'local-api/stt_runtime.py',
   'local-api/windows_push_to_talk.py',
-  'local-api/dictation_pause_notifier.py',
   'local-api/runtime_readiness.py',
   'local-api/installation_identity.py',
   'local-api/gpu_arbiter.py',

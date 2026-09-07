@@ -61,6 +61,9 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 拡張機能更新は`browser-extension-update-delivery`の契約を守る。
 - 設定、キュー、再生状態、Ref、Autoなど既存UXを内部都合で削除・置換しない。
 - 通常利用者へ内部APIや複数の起動経路を選ばせない。
+- Local Voice Bridgeの通常runtimeまたはセットアップへ、別リポジトリのアプリ／runtime、別常駐プロセス／アプリ、新しいlocalhostサービス／ポート、新しいインストール・起動・監視手順、外部runtime依存、または本プロジェクトの目的外の利用者機能を追加する場合は、実装開始前に利用者の明示承認を必須とする。承認なしでは実装しない。
+- 「既存ツールを再利用できる」「責務分離がきれいになる」「別ツールの不具合を直せる」は、前項の承認を省略する理由にならない。通常利用者が管理するものが増える変更は内部変更として扱わない。
+- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とし、追加ポートは明示承認済みの仕様変更がない限り導入しない。
 - ローカルAPIはloopback専用を維持し、全HTTPリクエストで`Host`をloopback名またはloopback IPへ限定する。POSTはJSONだけを受け付け、通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。
 - Local APIのレスポンスへユーザー名を含む絶対ファイルパスやローカルキャッシュの実パスを返さない。診断上のパスはローカルログまたは明示的な開発者向け経路だけで扱う。
 - マイク録音の生音声と文字起こし履歴は保存しない。一方、再接続・Service Worker復旧・未配送イベントの再配信に必要なassistant返答チャンク、読み上げキュー、未ACKの文字起こしイベントはローカルruntime状態へ限定的に保存してよい。privacy-safeなstructured runtime event logはサイズ上限と有限世代でローテーションし、無制限に増加させない。
@@ -72,6 +75,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 
 - ChatGPTそのものの実装やモデル選択。
 - `73_chatgpt-tab-memo`が所有するページ内メモ機能。
+- YouTubeなど他サービスの再生停止・再開をLocal Voice Bridgeの責務として持つこと。
 - OpenAI公式機能として振る舞うこと。
 - 通常利用者へ開発者向けCLI、内部API、`chrome://extensions`操作を必須にすること。
 - TTSエンジン単体のベンチマーク成功を最終成果とすること。
@@ -91,12 +95,13 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - [ ] 非loopback `Host`のGET/POST/OPTIONSは拒否され、通常WebページからLocal APIのPOST系変更操作を実行できず、拡張機能とWindows小窓の正常通信は維持される。
 - [ ] Local APIレスポンスにユーザー固有の絶対ファイルパスが露出せず、structured runtime event logは有限サイズでローテーションされる。
 - [ ] 30タブ想定で、アイドル中にsub-second全タブpollや同一タブ操作起点の全タブbroadcastが発生せず、通常生成中のAuto監視がassistant本文の全DOM cloneを繰り返さない。
+- [ ] 通常runtimeに承認のない別リポジトリ依存、別常駐プロセス、追加localhostサービス／ポート、目的外機能が存在せず、`scripts/check-runtime-boundaries.js`がPASSする。
 - [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。
 
 ## 7. 検証方法
 
 1. 変更に近いunit/integration testを実行する。
-2. 公開ツリー、architecture、background、mock E2Eを含む既存CI相当を通す。
+2. 公開ツリー、architecture、runtime boundary、background、mock E2Eを含む既存CI相当を通す。
 3. 隔離ブラウザまたは専用プロファイルでChatGPTの実ユーザー経路を確認する。
 4. Auto読み上げ、Replay、Regen、Next、Stopを実操作する。
 5. 拡張機能更新時は正式なreload経路を実行し、version一致と再接続を確認する。

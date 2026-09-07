@@ -11,7 +11,6 @@ from typing import Any, Callable, Protocol
 import numpy as np
 
 from audio_recorder import SoundDeviceRecorder
-from dictation_pause_notifier import YouTubePauseNotifier
 from gpu_arbiter import GpuArbiter
 from stt_runtime import FasterWhisperTranscriber
 from windows_push_to_talk import GlobalRightCtrlHook, VK_LCONTROL, VK_OEM_102, VK_RCONTROL
@@ -28,10 +27,6 @@ class ConversationApiClient(Protocol):
     def update_conversation_state(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
-class DictationPauseNotifier(Protocol):
-    def set_active(self, active: bool) -> bool: ...
-
-
 class VoiceConversationController:
     MIN_DURATION_SECONDS = 0.20
     MIN_RMS = 0.0005
@@ -46,8 +41,6 @@ class VoiceConversationController:
         event_logger: Any | None = None,
         executor: Any | None = None,
         control_executor: Any | None = None,
-        pause_notifier: DictationPauseNotifier | Any | None = None,
-        pause_executor: Any | None = None,
         sleep: Callable[[float], None] = time.sleep,
         stop_poll_interval_seconds: float = 0.02,
         stop_wait_seconds: float = 1.5,
@@ -64,10 +57,6 @@ class VoiceConversationController:
         self.control_executor = control_executor or ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="local-voice-control"
         )
-        self.pause_notifier = pause_notifier or YouTubePauseNotifier()
-        self.pause_executor = pause_executor or ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="local-voice-youtube-pause"
-        )
         self.sleep = sleep
         self.stop_poll_interval_seconds = max(0.005, float(stop_poll_interval_seconds))
         self.stop_wait_seconds = max(self.stop_poll_interval_seconds, float(stop_wait_seconds))
@@ -80,7 +69,6 @@ class VoiceConversationController:
         self._right_ctrl_down = False
         self._trigger_down = False
         self._recording = False
-        self._pause_source_active = False
         self._session_id = 0
         self._model_ready_for = ""
         self._model_device = ""
@@ -90,23 +78,6 @@ class VoiceConversationController:
         self._shutdown = False
         self._phase = "off"
         self._stt_cancel_event = threading.Event()
-
-    def _send_pause_source(self, active: bool) -> None:
-        try:
-            self.pause_notifier.set_active(bool(active))
-        except Exception:
-            pass
-
-    def _set_pause_source(self, active: bool) -> None:
-        normalized = bool(active)
-        with self._lock:
-            if self._pause_source_active == normalized:
-                return
-            self._pause_source_active = normalized
-        try:
-            self.pause_executor.submit(self._send_pause_source, normalized)
-        except Exception:
-            pass
 
     def configure(self, *, enabled: bool, stt_model: str, cancel_grace_ms: int) -> None:
         normalized_model = stt_model if stt_model in {"small", "medium", "large-v3-turbo"} else "small"
@@ -141,8 +112,6 @@ class VoiceConversationController:
             )
             if should_prepare:
                 self._model_preparing_for = normalized_model
-        if previous_enabled and not self._enabled:
-            self._set_pause_source(False)
         if was_recording:
             self.recorder.discard()
         if not self._enabled:
@@ -241,10 +210,8 @@ class VoiceConversationController:
                 session_id = self._session_id
             suppress_trigger = key == VK_OEM_102 and (was_pressed or chord_down)
         if action == "start":
-            self._set_pause_source(True)
             self.control_executor.submit(self._begin_recording, session_id)
         elif action == "stop":
-            self._set_pause_source(False)
             self.control_executor.submit(self._finish_recording, session_id)
         return suppress_trigger
 
@@ -480,20 +447,12 @@ class VoiceConversationController:
             self._session_id += 1
             self._stt_cancel_event.set()
             was_recording = self._recording
-            pause_was_active = self._pause_source_active
-            self._pause_source_active = False
             self._recording = False
             self._pressed = False
             self._right_ctrl_down = False
             self._trigger_down = False
         if was_recording:
             self.recorder.discard()
-        try:
-            self.pause_executor.shutdown(wait=True, cancel_futures=True)
-        except TypeError:
-            self.pause_executor.shutdown(wait=True)
-        if pause_was_active:
-            self._send_pause_source(False)
         for executor in (self.control_executor, self.executor):
             try:
                 executor.shutdown(wait=False, cancel_futures=True)
