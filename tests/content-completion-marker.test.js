@@ -350,13 +350,13 @@ test('blank conversation detection is event driven and does not poll each tab', 
   assert.doesNotMatch(content, /addEventListener\(['"]scroll/);
 });
 
-test('17 is the sole owner of ChatGPT tab status and favicon behavior', () => {
+test('repository-local policy owns ChatGPT tab status and favicon behavior', () => {
   const agents = fs.readFileSync(AGENTS, 'utf8');
   const design = fs.readFileSync(TAB_STATUS_DESIGN, 'utf8');
 
-  assert.match(agents, /タブ状態とfaviconの所有権/);
-  assert.match(agents, /唯一の所有者/);
-  assert.match(agents, /73_chatgpt-tab-memo.*作業メモだけ/);
+  assert.match(agents, /責務境界/);
+  assert.match(agents, /このリポジトリは.*faviconを所有/);
+  assert.match(agents, /別プロジェクトの名称・番号・内部運用契約/);
   assert.match(design, /faviconの状態/);
   assert.match(design, /空の新規会話/);
   assert.match(design, /回答完了・未確認/);
