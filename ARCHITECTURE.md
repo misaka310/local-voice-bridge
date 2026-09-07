@@ -170,7 +170,7 @@ Windows詳細設定の`ブラウザの読み上げ範囲設定`からOptionsへ�
 
 `scripts/check-tray-snapshot-sync.js`は、tray独自の固定500ms API pollingを戻さず、`FirstRunControlPanel`の`snapshot_applied`を共通state streamとして使うことを検証します。
 
-`scripts/check-runtime-boundaries.js`は通常runtimeの追加loopbackポートと、撤去済みの外部YouTube連携マーカーの再導入を検出します。明示承認を経た仕様変更が必要な場合は、この検査だけを弱めず、先に`docs/SPEC.md`と利用者導線を更新します。
+`scripts/check-runtime-boundaries.js`は通常runtimeにLocal Voice Bridge所有外のloopbackサービスが追加されないことを検出します。明示承認を経た仕様変更が必要な場合は、この検査だけを弱めず、先に`docs/SPEC.md`と利用者導線を更新します。
 
 この分離を保ったまま、利用者の導線は次の1本にします。
 

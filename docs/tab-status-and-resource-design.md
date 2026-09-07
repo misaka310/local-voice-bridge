@@ -6,7 +6,7 @@ Local Voice Bridgeは、ChatGPTタブを30個以上開き、各タブで1時間�
 
 ## 責務の所有者
 
-ChatGPTタブの回答生成中、回答完了未確認、確認済み、読み上げ中、ChatGPTテキスト回答の生成エラーと、それらを示すfaviconはLocal Voice Bridgeだけが管理します。`73_chatgpt-tab-memo`はページ内の作業メモだけを担当し、タブ状態の検出、確認判定、回答指紋保存、favicon書き換えを実装しません。
+ChatGPTタブの回答生成中、回答完了未確認、確認済み、読み上げ中、ChatGPTテキスト回答の生成エラーと、それらを示すfaviconはLocal Voice Bridgeだけが管理します。ページ内メモなど本製品と無関係なブラウザ機能は責務外とし、別プロジェクトの名称・番号・内部運用契約をこの設計へ持ち込みません。
 
 ## faviconの状態
 

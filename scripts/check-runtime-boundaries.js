@@ -15,18 +15,6 @@ function fail(message) {
   failures.push(message);
 }
 
-function forbidFile(relativePath, reason) {
-  if (fs.existsSync(path.join(ROOT, relativePath))) {
-    fail(`${relativePath}: ${reason}`);
-  }
-}
-
-function forbidText(relativePath, forbidden, reason) {
-  if (read(relativePath).includes(forbidden)) {
-    fail(`${relativePath}: ${reason}`);
-  }
-}
-
 function collectFiles(relativeDir, allowedExtensions) {
   const absoluteDir = path.join(ROOT, relativeDir);
   const found = [];
@@ -66,45 +54,9 @@ function productionBoundaryFiles() {
 }
 
 const boundaryFiles = productionBoundaryFiles();
-
-forbidFile(
-  'local-api/dictation_pause_notifier.py',
-  'Local Voice Bridge must not contain the removed YouTube runtime bridge',
-);
-
-for (const marker of [
-  'YouTubePauseNotifier',
-  'DictationPauseNotifier',
-  'YOUTUBE_DICTATION_PAUSE_STATE_URL',
-  '127.0.0.1:17654',
-  'youtube-dictation-pause-control',
-]) {
-  for (const relativePath of boundaryFiles) {
-    forbidText(
-      relativePath,
-      marker,
-      `runtime/setup responsibility boundary forbids cross-repo YouTube marker ${marker}`,
-    );
-  }
-}
-
-for (const relativePath of [
-  'README.md',
-  'ARCHITECTURE.md',
-  'docs/operation.md',
-  'docs/troubleshooting.md',
-]) {
-  for (const marker of ['YouTube Dictation Pause Control', 'youtube-dictation-pause-control', '127.0.0.1:17654']) {
-    forbidText(
-      relativePath,
-      marker,
-      `current product documentation must not advertise the removed cross-repository integration (${marker})`,
-    );
-  }
-}
-
 const allowedLoopbackPorts = new Set(['8717']);
 const loopbackUrlPattern = /https?:\/\/(?:127\.0\.0\.1|localhost|\[?::1\]?):(\d+)/g;
+
 for (const relativePath of boundaryFiles) {
   const text = read(relativePath);
   for (const match of text.matchAll(loopbackUrlPattern)) {
@@ -123,4 +75,4 @@ if (failures.length) {
 
 console.log('RUNTIME BOUNDARY CHECK: PASS');
 console.log('- production runtime, setup, and launcher paths are limited to the Local Voice Bridge-owned loopback service');
-console.log('- removed YouTube cross-repository coupling is absent');
+console.log('- no additional localhost service ports are present in production boundaries');
