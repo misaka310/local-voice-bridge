@@ -28,7 +28,6 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 - Windows小窓にAutoの対象タブ数、手動操作対象タブ、再生元タブを表示
 - API、生成音声、任意の参照音声を同じPC内で管理し、通常利用ではターミナルを表示しない
 - 任意のマイク会話モードでは、キーを押している間だけ録音し、ローカルfaster-whisperでChatGPT入力欄へ送信
-- 対応する[YouTube Dictation Pause Control](https://github.com/misaka310/youtube-dictation-pause-control)と連携し、録音中だけYouTubeを停止・再開
 - 実モデルやChatGPTログイン不要のデモとCIで、拡張機能・キュー・再生境界を確認可能
 
 細かなキュー制御、入力先固定、キャンセル猶予、割り込み条件、デスクトップペットの操作は[操作と検証](docs/operation.md)にまとめています。faviconの優先順位と30タブ向けの低負荷設計は[タブ状態と30タブ向け低負荷設計](docs/tab-status-and-resource-design.md)を参照してください。
@@ -86,7 +85,7 @@ Windows小窓の`詳細設定`では、STTモデル、送信前猶予、Live TTS
 
 マイク会話を使う場合はセットアップで追加機能を導入し、送信先の入力欄へフォーカスして指定キーを押している間だけ録音します。
 
-詳細な操作、YouTube連携、音声・ログの自動整理、アンインストール、診断方法は[操作と検証](docs/operation.md)、[参照音声](docs/reference-audio.md)、[起動とヘルス確認](docs/startup.md)を参照してください。
+詳細な操作、音声・ログの自動整理、アンインストール、診断方法は[操作と検証](docs/operation.md)、[参照音声](docs/reference-audio.md)、[起動とヘルス確認](docs/startup.md)を参照してください。
 
 ## Requirements / 対応環境
 
