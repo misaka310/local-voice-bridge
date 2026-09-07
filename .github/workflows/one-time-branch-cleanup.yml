@@ -1,0 +1,41 @@
+name: One-time stale branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-stale-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete fix/public-repo-boundary-cleanup-20260907
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          status="$({
+            curl --silent --show-error --location \
+              --output /tmp/delete-ref-response \
+              --write-out '%{http_code}' \
+              --request DELETE \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GH_REPO}/git/refs/heads/fix/public-repo-boundary-cleanup-20260907"
+          } || true)"
+
+          if [[ "${status}" == "204" ]]; then
+            echo "Deleted fix/public-repo-boundary-cleanup-20260907"
+          elif [[ "${status}" == "422" || "${status}" == "404" ]]; then
+            echo "fix/public-repo-boundary-cleanup-20260907 is already absent"
+          else
+            echo "Failed to delete fix/public-repo-boundary-cleanup-20260907: HTTP ${status}" >&2
+            cat /tmp/delete-ref-response >&2 || true
+            exit 1
+          fi
