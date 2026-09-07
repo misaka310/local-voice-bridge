@@ -33,7 +33,6 @@ Local Voice Bridgeは、ChatGPTの返答検知を担当するChrome / Brave拡�
 - `local-api/audio_recorder.py`: sounddevice録音とメモリ内音声バッファ
 - `local-api/stt_runtime.py`: faster-whisper CUDA runtime
 - `local-api/windows_push_to_talk.py`: 右Ctrl＋`＼ / _`のWindows低レベルフック
-- `local-api/dictation_pause_notifier.py`: YouTube Dictation Pause Controlへの任意loopback通知
 
 ### 起動導線
 
@@ -159,11 +158,19 @@ Windows詳細設定の`ブラウザの読み上げ範囲設定`からOptionsへ�
 
 通常runtimeエラーから`setup-voice-env.cmd`など内部scriptを利用者へ直接案内しません。
 
+## Runtime責務境界
+
+通常runtimeはLocal Voice Bridge自身のWindowsアプリ、ChatGPTアダプター拡張、既定`127.0.0.1:8717`のLocal APIで完結させます。別リポジトリのアプリ／runtime、別常駐プロセス、新しいlocalhostサービス／ポート、外部runtime依存、または本製品目的外の利用者機能を追加する場合は、実装前に利用者の明示承認が必要です。
+
+他製品の不具合を解決するためにLocal Voice Bridgeへ状態通知や制御責務を持ち込むことはしません。既存コードの再利用や内部責務分離の都合より、通常利用者が管理するものを増やさないことを優先します。
+
 ## Architecture Gate
 
 `scripts/check-architecture.js`は大きなorchestratorへの責務逆流を防ぎます。`tray_controller.py`へserver health/process/registry/mutex詳細、`background.js`へqueue/settings/delivery core logic、`content.js`へDOM/audio/Auto core logicを戻さないことをCIで検証します。
 
 `scripts/check-tray-snapshot-sync.js`は、tray独自の固定500ms API pollingを戻さず、`FirstRunControlPanel`の`snapshot_applied`を共通state streamとして使うことを検証します。
+
+`scripts/check-runtime-boundaries.js`は通常runtimeの追加loopbackポートと、撤去済みの外部YouTube連携マーカーの再導入を検出します。明示承認を経た仕様変更が必要な場合は、この検査だけを弱めず、先に`docs/SPEC.md`と利用者導線を更新します。
 
 この分離を保ったまま、利用者の導線は次の1本にします。
 
