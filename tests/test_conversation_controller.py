@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
 import unittest
@@ -19,7 +18,6 @@ from conversation_controller import (  # noqa: E402
     VK_RCONTROL,
     FasterWhisperTranscriber,
     VoiceConversationController,
-    YouTubePauseNotifier,
 )
 
 
@@ -127,43 +125,6 @@ class FakeTranscriber:
         return self.text, "cuda"
 
 
-class FakeHttpResponse:
-    status = 200
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def getcode(self):
-        return self.status
-
-
-class CapturingOpener:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls: list[tuple[object, float]] = []
-
-    def __call__(self, request, *, timeout):
-        self.calls.append((request, float(timeout)))
-        if self.fail:
-            raise OSError("unavailable")
-        return FakeHttpResponse()
-
-
-class FakePauseNotifier:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls: list[bool] = []
-
-    def set_active(self, active: bool) -> bool:
-        self.calls.append(bool(active))
-        if self.fail:
-            raise RuntimeError("pause bridge unavailable")
-        return True
-
-
 class FailingPrepareTranscriber(FakeTranscriber):
     def prepare(self, model_name):
         self.prepared.append(str(model_name))
@@ -221,52 +182,6 @@ class FasterWhisperTranscriberTests(unittest.TestCase):
             )
 
 
-class YouTubePauseNotifierTests(unittest.TestCase):
-    def test_posts_local_voice_bridge_source_state(self):
-        opener = CapturingOpener()
-        notifier = YouTubePauseNotifier(
-            state_url="http://127.0.0.1:17654/state",
-            timeout_seconds=0.25,
-            opener=opener,
-        )
-
-        self.assertTrue(notifier.set_active(True))
-        request, timeout = opener.calls[0]
-        self.assertEqual(request.full_url, "http://127.0.0.1:17654/state")
-        self.assertEqual(timeout, 0.25)
-        self.assertEqual(
-            json.loads(request.data.decode("utf-8")),
-            {"active": True, "source": "local-voice-bridge"},
-        )
-
-    def test_returns_false_when_pause_service_is_unavailable(self):
-        notifier = YouTubePauseNotifier(opener=CapturingOpener(fail=True))
-        self.assertFalse(notifier.set_active(True))
-
-    def test_normalizes_documented_loopback_hosts(self):
-        for url in (
-            "http://127.0.0.1:27654/state",
-            "http://localhost:27654/state",
-            "http://[::1]:27654/state",
-        ):
-            with self.subTest(url=url):
-                notifier = YouTubePauseNotifier(state_url=url)
-                self.assertEqual(notifier.state_url, "http://127.0.0.1:27654/state")
-
-    def test_rejects_non_loopback_or_malformed_state_urls(self):
-        for url in (
-            "https://127.0.0.1:17654/state",
-            "http://192.168.1.20:17654/state",
-            "http://example.com:17654/state",
-            "http://127.0.0.1:17654/reset",
-            "http://127.0.0.1:17654/state?token=value",
-            "not-a-url",
-        ):
-            with self.subTest(url=url):
-                notifier = YouTubePauseNotifier(state_url=url)
-                self.assertEqual(notifier.state_url, YouTubePauseNotifier.DEFAULT_STATE_URL)
-
-
 class VoiceConversationControllerTests(unittest.TestCase):
     def make_controller(
         self,
@@ -275,8 +190,6 @@ class VoiceConversationControllerTests(unittest.TestCase):
         text="日本語のテストです",
         control_executor=None,
         stt_executor=None,
-        pause_notifier=None,
-        pause_executor=None,
     ):
         client = FakeClient()
         recorder = FakeRecorder(samples)
@@ -288,8 +201,6 @@ class VoiceConversationControllerTests(unittest.TestCase):
             gpu_arbiter=FakeGpuArbiter(),
             control_executor=control_executor or InlineExecutor(),
             executor=stt_executor or InlineExecutor(),
-            pause_notifier=pause_notifier or FakePauseNotifier(),
-            pause_executor=pause_executor or InlineExecutor(),
             sleep=lambda _seconds: None,
         )
         controller.configure(enabled=True, stt_model="small", cancel_grace_ms=700)
@@ -486,69 +397,6 @@ class VoiceConversationControllerTests(unittest.TestCase):
         delayed.run_all()
         self.assertEqual(client.commands, ["stop"])
         self.assertEqual(recorder.started, 1)
-
-    def test_hold_chord_notifies_youtube_source_active_then_inactive(self):
-        notifier = FakePauseNotifier()
-        controller, _client, _recorder, _transcriber = self.make_controller(pause_notifier=notifier)
-        self.press_chord(controller)
-        self.assertEqual(notifier.calls, [True])
-        self.release_chord(controller)
-        self.assertEqual(notifier.calls, [True, False])
-
-    def test_pause_notification_runs_off_hook_callback_thread(self):
-        notifier = FakePauseNotifier()
-        delayed = DelayedExecutor()
-        controller, _client, _recorder, _transcriber = self.make_controller(
-            pause_notifier=notifier,
-            pause_executor=delayed,
-        )
-        self.press_chord(controller)
-        self.assertEqual(notifier.calls, [])
-        delayed.run_all()
-        self.assertEqual(notifier.calls, [True])
-        self.release_chord(controller)
-        self.assertEqual(notifier.calls, [True])
-        delayed.run_all()
-        self.assertEqual(notifier.calls, [True, False])
-
-    def test_pause_notification_failure_does_not_block_recording(self):
-        notifier = FakePauseNotifier(fail=True)
-        controller, _client, recorder, _transcriber = self.make_controller(pause_notifier=notifier)
-        self.press_chord(controller)
-        self.assertEqual(notifier.calls, [True])
-        self.assertEqual(recorder.started, 1)
-
-    def test_disabling_mode_releases_youtube_source(self):
-        notifier = FakePauseNotifier()
-        controller, _client, _recorder, _transcriber = self.make_controller(pause_notifier=notifier)
-        self.press_chord(controller)
-        controller.configure(enabled=False, stt_model="small", cancel_grace_ms=700)
-        self.assertEqual(notifier.calls, [True, False])
-
-    def test_shutdown_cancels_queued_start_before_sending_final_inactive(self):
-        notifier = FakePauseNotifier()
-        delayed = DelayedExecutor()
-        controller, _client, _recorder, _transcriber = self.make_controller(
-            pause_notifier=notifier,
-            pause_executor=delayed,
-        )
-        self.press_chord(controller)
-        self.assertEqual(notifier.calls, [])
-        controller.shutdown()
-        self.assertEqual(notifier.calls, [False])
-
-    def test_shutdown_releases_youtube_source_before_executor_cleanup(self):
-        notifier = FakePauseNotifier()
-        delayed = DelayedExecutor()
-        controller, _client, _recorder, _transcriber = self.make_controller(
-            pause_notifier=notifier,
-            pause_executor=delayed,
-        )
-        self.press_chord(controller)
-        delayed.run_all()
-        self.assertEqual(notifier.calls, [True])
-        controller.shutdown()
-        self.assertEqual(notifier.calls, [True, False])
 
 
 if __name__ == "__main__":
