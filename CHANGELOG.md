@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Removed the previously added YouTube Dictation Pause Control recording-state integration so Local Voice Bridge no longer starts, monitors, or notifies a separate product/runtime; added an explicit approval boundary and CI gate for future cross-repository runtime, process, or localhost-service dependencies.
+- Removed a previously added cross-repository recording-state integration so Local Voice Bridge no longer starts, monitors, or notifies a separate product/runtime; added an explicit approval boundary and CI gate for future cross-repository runtime, process, or localhost-service dependencies.
 - Finalized the Windows UX responsibility model: Auto and microphone conversation are independent, Local API owns runtime settings, browser Options own only preview limits, disconnected/update-required recovery states are distinct, runtime repair routes through `LocalVoiceBridge.exe --setup`, and the Windows panel shows all-tab scope, manual target, and playback source context.
 - Hardened every Local API request with loopback `Host` validation, removed user-specific cache paths from `/health`, and added regression coverage for GET/POST/OPTIONS boundary enforcement.
 - Bounded privacy-safe structured runtime event logs with a 2 MiB rotation threshold and two backup generations.
@@ -61,7 +61,7 @@
 - Added desktop-pet double-click and tray actions to show or hide the Windows Local Voice panel.
 - Added optional local microphone conversation mode with model preparation before recording, Esc cancellation, and memory-only audio capture.
 - Changed push-to-talk from right Ctrl alone to right Ctrl plus the `＼ / _` key left of right Shift, without stealing right Ctrl by itself.
-- Added optional direct recording-state notifications to source-aware YouTube Dictation Pause Control instances, without making YouTube availability a requirement for microphone recording.
+- Added an optional recording-state notification integration for another local runtime; this was later removed because it crossed the repository responsibility boundary.
 - Fixed microphone transcripts to stay on the ChatGPT composer focused when recording began and prevented unrelated tab replies from interrupting active transcription.
 - Fixed `Next` so it follows the completed streaming reply instead of reusing the short Auto preview captured at the beginning.
 - Excluded image-analysis progress text such as `画像を分析しています` from speech.
