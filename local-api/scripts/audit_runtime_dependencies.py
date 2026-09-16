@@ -14,7 +14,7 @@ EXPECTED_VCS_COMMITS = {
     "silentcipher": "d46d7d0893a583d8968ab3a6626e2289faec9152",
 }
 EXPECTED_EXACT_VERSIONS = {
-    "transformers": "5.5.0",
+    "transformers": "5.10.0",
     "huggingface-hub": "1.23.0",
     "hf-xet": "1.5.1",
     "sentencepiece": "0.2.1",

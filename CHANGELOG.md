@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Updated `transformers` to 5.10.0, the first version containing the current `save_pretrained` path-traversal fix, and kept `sentencepiece` at the security-fixed 0.2.1 baseline.
+- Added weekly Dependabot checks for the Python and Node.js manifests.
+- Documented that the supported Irodori direct runtime is self-contained and does not depend on a separate `local-tts-service` process.
 - Removed a previously added cross-repository recording-state integration so Local Voice Bridge no longer starts, monitors, or notifies a separate product/runtime; added an explicit approval boundary and CI gate for future cross-repository runtime, process, or localhost-service dependencies.
 - Finalized the Windows UX responsibility model: Auto and microphone conversation are independent, Local API owns runtime settings, browser Options own only preview limits, disconnected/update-required recovery states are distinct, runtime repair routes through `LocalVoiceBridge.exe --setup`, and the Windows panel shows all-tab scope, manual target, and playback source context.
 - Hardened every Local API request with loopback `Host` validation, removed user-specific cache paths from `/health`, and added regression coverage for GET/POST/OPTIONS boundary enforcement.
@@ -38,7 +41,7 @@
 
 - Added the standard Chrome / Brave options page for configurable reading limits, STT model, and pre-send cancellation grace, while keeping microphone enablement and playback controls in the compact Windows panel.
 - Changed `Restart Voice Bridge` to restart the tray application itself, so updated panel code is reloaded instead of leaving the old single-instance process in memory.
-- Pinned `transformers` to the security-fixed 5.5.0 release, pinned `huggingface-hub` to the verified 1.23.0 release, and pinned the verified Irodori source commit.
+- Pinned `transformers` to the verified 5.10.0 security baseline, pinned `huggingface-hub` to the verified 1.23.0 release, and pinned the verified Irodori source commit.
 - Made Irodori v3 direct the supported local TTS path while preserving the preview-only Auto UX.
 - Kept Auto from reading replies that were already visible before it was enabled.
 - Preserved the `Next`, `Regen`, and `Replay` controls and added mock E2E coverage for their network behavior.

@@ -33,7 +33,7 @@ audit = load_module("runtime_dependency_audit_for_test", AUDIT_PATH)
 class SecurityBaselineTests(unittest.TestCase):
     def test_accepts_patched_security_baseline(self):
         installed = {
-            "transformers": "5.5.0",
+            "transformers": "5.10.0",
             "huggingface-hub": "1.5.0",
             "sentencepiece": "0.2.1",
         }
@@ -51,7 +51,7 @@ class SecurityBaselineTests(unittest.TestCase):
 
     def test_rejects_vulnerable_sentencepiece(self):
         installed = {
-            "transformers": "5.5.0",
+            "transformers": "5.10.0",
             "huggingface-hub": "1.5.0",
             "sentencepiece": "0.1.99",
         }

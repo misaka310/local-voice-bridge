@@ -19,7 +19,7 @@ from scripts.audit_runtime_dependencies import audit_pip_check, audit_versions
 DEFAULT_MODEL = "Aratako/Irodori-TTS-500M-v3"
 DEFAULT_CODEC = "Aratako/Semantic-DACVAE-Japanese-32dim"
 SECURITY_BASELINES = {
-    "transformers": (Version("5.5.0"), Version("6")),
+    "transformers": (Version("5.10.0"), Version("6")),
     "huggingface-hub": (Version("1.5.0"), Version("2")),
     "sentencepiece": (Version("0.2.1"), Version("0.3")),
 }
