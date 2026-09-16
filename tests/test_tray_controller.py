@@ -260,6 +260,10 @@ class TrayControllerContractTests(unittest.TestCase):
             for control in daily_controls:
                 self.assertIn(control, source, f"{relative_path} must document {control}")
 
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("local-tts-service", readme)
+        self.assertIn("依存しません", readme)
+
         architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
         for required in (
             "server_supervisor.py",
@@ -271,6 +275,8 @@ class TrayControllerContractTests(unittest.TestCase):
             "previewMaxLines",
             "Local API",
             "ペット",
+            "irodori_direct",
+            "local-tts-service",
         ):
             self.assertIn(required, architecture, f"ARCHITECTURE.md must document {required}")
 

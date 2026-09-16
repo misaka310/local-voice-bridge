@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-Local Voice Bridgeは、ChatGPTの返答検知を担当するChrome / Brave拡張と、音声生成・再生・設定・Windows UIを担当するWindows常駐アプリで構成します。通信は127.0.0.1のLocal APIだけを使用します。
+Local Voice Bridgeは、ChatGPTの返答検知を担当するChrome / Brave拡張と、音声生成・再生・設定・Windows UIを担当するWindows常駐アプリで構成します。通信は127.0.0.1のLocal APIだけを使用します。音声生成は`irodori_direct`としてこのリポジトリ内で完結し、別アプリの`local-tts-service`を起動・監視・呼び出しません。
 
 設計上の中心原則は、**利用者からは1つのWindowsアプリに見せ、ブラウザ拡張はChatGPTとのアダプターへ限定すること**です。
 
