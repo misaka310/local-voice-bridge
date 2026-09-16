@@ -4,7 +4,7 @@ soundfile==0.14.0
 sounddevice>=0.5.1,<0.6
 descript-audiotools==0.7.2
 transformers==5.10.0
-sentencepiece==0.2.1
+sentencepiece==0.2.2
 safetensors==0.8.0
 pyyaml==6.0.3
 tqdm==4.68.3
