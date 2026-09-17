@@ -1,4 +1,4 @@
-huggingface-hub==1.23.0
+huggingface-hub==1.31.0
 hf-xet==1.5.1
 soundfile==0.14.0
 sounddevice>=0.5.6,<0.6
