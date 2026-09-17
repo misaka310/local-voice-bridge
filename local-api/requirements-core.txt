@@ -12,7 +12,7 @@ datasets==5.0.0
 dill==0.4.1
 multiprocess==0.70.19
 pyarrow==25.0.0
-xxhash==3.8.1
+xxhash==4.0.1
 numpy==2.4.6
 numba==0.67.0
 llvmlite==0.47.0
