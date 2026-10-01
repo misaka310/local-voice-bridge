@@ -223,11 +223,7 @@ class DesktopPetWindow(QWidget):
         self.current_pet = pet
         self._sprite_sheet = load_sprite_sheet(pet)
         self._frames = []
-        transform = (
-            Qt.TransformationMode.SmoothTransformation
-            if pet.spritesheet_path.suffix.lower() == ".svg"
-            else Qt.TransformationMode.FastTransformation
-        )
+        transform = Qt.TransformationMode.SmoothTransformation
         for frame_id in range(pet.total_frames):
             column = frame_id % pet.columns
             row = frame_id // pet.columns
@@ -444,6 +440,8 @@ class DesktopPetWindow(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         del event
         painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         frame = getattr(self, "_paint_frame", None)
         if isinstance(frame, QPixmap) and not frame.isNull():
