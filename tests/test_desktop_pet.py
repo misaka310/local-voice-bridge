@@ -134,6 +134,45 @@ class DesktopPetQtTests(unittest.TestCase):
             self.assertEqual(svg_image.pixelColor(0, 0).alpha(), 0)
             self.assertGreater(svg_image.pixelColor(3, 3).alpha(), 0)
 
+    def test_raster_frames_use_smooth_scaling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = QImage(4, 4, QImage.Format.Format_ARGB32)
+            for y in range(4):
+                for x in range(4):
+                    image.setPixelColor(
+                        x,
+                        y,
+                        QColor(255, 0, 0, 255) if (x + y) % 2 == 0 else QColor(0, 255, 0, 255),
+                    )
+            sheet = root / "spritesheet.png"
+            self.assertTrue(image.save(str(sheet), "PNG"))
+            config = root / "pet.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "id": "smooth-raster",
+                        "displayName": "Smooth Raster",
+                        "spritesheetPath": "spritesheet.png",
+                        "columns": 1,
+                        "rows": 1,
+                        "frameWidth": 4,
+                        "frameHeight": 4,
+                        "displayScale": 0.25,
+                        "animations": {"idle": {"frames": [0], "speed": 1000}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            window = DesktopPetWindow(root, DesktopPetSettingsStore(root / "settings.json"))
+            pixel = window._frames[0].toImage().pixelColor(0, 0)
+
+            self.assertEqual(window._frames[0].size().toTuple(), (1, 1))
+            self.assertGreater(pixel.red(), 0)
+            self.assertGreater(pixel.green(), 0)
+            window.shutdown()
+
     def test_window_is_frameless_tool_translucent_and_not_normal_app_window(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = self._create_pet_root(temp_dir)
