@@ -10,14 +10,13 @@ const script = path.join(ROOT, 'scripts', 'build-launcher.ps1');
 const output = path.join(ROOT, 'LocalVoiceBridge.exe');
 const candidates = [
   process.env.POWERSHELL,
-  process.platform === 'win32' ? 'powershell.exe' : '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
   'powershell.exe',
   'powershell',
   'pwsh',
 ].filter(Boolean);
 
 function toWindowsPath(value) {
-  const match = /^\/mnt\/([a-zA-Z])\/(.*)$/.exec(value);
+  const match = value.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
   if (!match) return value;
   return `${match[1].toUpperCase()}:\\${match[2].replaceAll('/', '\\')}`;
 }
@@ -33,6 +32,7 @@ for (const command of candidates) {
   const scriptArg = usesWindowsPowerShell(command) ? toWindowsPath(script) : script;
   const result = spawnSync(command, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptArg], {
     cwd: ROOT,
+    windowsHide: true,
     stdio: 'inherit',
     shell: false,
   });
