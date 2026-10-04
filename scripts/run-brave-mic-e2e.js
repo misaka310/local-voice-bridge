@@ -9,8 +9,14 @@ const ROOT = path.resolve(__dirname, '..');
 const playwrightCli = require.resolve('@playwright/test/cli');
 const config = path.join('scripts', 'playwright-mock.config.js');
 const profile = path.resolve(ROOT, '..', '_runtime', 'localvoice-brave-test-profile');
+const programFiles = process.env.PROGRAMFILES || process.env.ProgramFiles;
 const brave = process.env.LOCAL_VOICE_BROWSER_EXECUTABLE
-  || path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe');
+  || (programFiles && path.join(programFiles, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'));
+
+if (!brave) {
+  console.error('Set LOCAL_VOICE_BROWSER_EXECUTABLE to the Brave executable path.');
+  process.exit(1);
+}
 
 if (!fs.existsSync(brave)) {
   console.error(`Brave executable not found: ${brave}`);

@@ -14,10 +14,11 @@ EXPECTED_VCS_COMMITS = {
     "silentcipher": "d46d7d0893a583d8968ab3a6626e2289faec9152",
 }
 EXPECTED_EXACT_VERSIONS = {
-    "transformers": "5.10.0",
-    "huggingface-hub": "1.23.0",
-    "hf-xet": "1.5.1",
-    "sentencepiece": "0.2.1",
+    "transformers": "5.18.0",
+    "datasets": "5.0.1",
+    "huggingface-hub": "1.31.0",
+    "hf-xet": "1.6.0",
+    "sentencepiece": "0.2.2",
     "PySide6": "6.11.2",
     "torchcodec": "0.14.0",
 }
@@ -95,7 +96,7 @@ def main() -> int:
         for error in errors:
             print(f"[ng] dependency audit: {error}", file=sys.stderr)
         return 1
-    print("[ok] dependency audit complete; only documented Irodori metadata overrides remain")
+    print("[ok] dependency audit complete; no unapproved dependency conflicts found")
     return 0
 
 

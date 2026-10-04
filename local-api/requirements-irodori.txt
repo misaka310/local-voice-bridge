@@ -1,4 +1,4 @@
-# Installed separately with --no-deps because the upstream package metadata still
-# declares transformers<5 and huggingface-hub<1, while this repository verifies
-# the patched security baseline with transformers==5.10.0 and huggingface-hub==1.23.0.
+# Installed separately with --no-deps because upstream metadata declares older
+# upper bounds; this repository audits transformers==5.18.0,
+# huggingface-hub==1.31.0, sentencepiece==0.2.2, and torchcodec==0.14.0.
 irodori-tts @ git+https://github.com/Aratako/Irodori-TTS.git@eaf74d6a19138f743acb5b71a445fd25a57db987

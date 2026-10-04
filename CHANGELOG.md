@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Updated the Irodori runtime to Transformers 5.18.0, Datasets 5.0.1, Hugging Face Hub 1.31.0, hf-xet 1.6.0, and SentencePiece 0.2.2; the Datasets update fixes GHSA-379c-qx7v-6h59.
 - Updated `transformers` to 5.10.0, the first version containing the current `save_pretrained` path-traversal fix, and kept `sentencepiece` at the security-fixed 0.2.1 baseline.
 - Added weekly Dependabot checks for the Python and Node.js manifests.
 - Documented that the supported Irodori direct runtime is self-contained and does not depend on a separate `local-tts-service` process.
