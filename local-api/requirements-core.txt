@@ -21,6 +21,6 @@ gradio==6.17.3
 wandb==0.28.0
 flask==3.1.3
 pyaml==26.7.0
-PySide6==6.11.1
+PySide6==6.11.2
 dacvae @ git+https://github.com/facebookresearch/dacvae.git@414c20785fc3a28373073ea8ef7a1316eeeaca6e
 silentcipher @ git+https://github.com/SesameAILabs/silentcipher.git@d46d7d0893a583d8968ab3a6626e2289faec9152
