@@ -1,5 +1,5 @@
-huggingface-hub==1.23.0
-hf-xet==1.5.1
+huggingface-hub==1.31.0
+hf-xet==1.6.0
 soundfile==0.14.0
 sounddevice>=0.5.6,<0.6
 descript-audiotools==0.7.2
@@ -8,7 +8,7 @@ sentencepiece==0.2.2
 safetensors==0.8.0
 pyyaml==6.0.3
 tqdm==4.68.3
-datasets==5.0.0
+datasets==5.0.1
 dill==0.4.1
 multiprocess==0.70.19
 pyarrow==25.0.1

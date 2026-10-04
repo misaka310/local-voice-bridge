@@ -33,7 +33,7 @@ audit = load_module("runtime_dependency_audit_for_test", AUDIT_PATH)
 class SecurityBaselineTests(unittest.TestCase):
     def test_accepts_patched_security_baseline(self):
         installed = {
-            "transformers": "5.10.0",
+            "transformers": "5.18.0",
             "huggingface-hub": "1.5.0",
             "sentencepiece": "0.2.1",
         }
@@ -94,6 +94,24 @@ class DependencyAuditTests(unittest.TestCase):
         ):
             self.assertIn("missing package: hf-xet", audit.audit_versions())
 
+    def test_rejects_vulnerable_datasets_in_standalone_audit(self):
+        installed = dict(audit.EXPECTED_EXACT_VERSIONS)
+        installed["datasets"] = "5.0.0"
+        for package_name, (minimum, _maximum) in audit.EXPECTED_VERSION_RANGES.items():
+            installed[package_name] = str(minimum)
+        with (
+            patch.object(audit, "version", side_effect=installed.__getitem__),
+            patch.object(
+                audit,
+                "direct_url_commit",
+                side_effect=audit.EXPECTED_VCS_COMMITS.__getitem__,
+            ),
+        ):
+            self.assertIn(
+                "datasets=5.0.0; expected 5.0.1",
+                audit.audit_versions(),
+            )
+
     def test_rejects_vulnerable_sentencepiece_in_standalone_audit(self):
         installed = dict(audit.EXPECTED_EXACT_VERSIONS)
         installed["sentencepiece"] = "0.1.99"
@@ -108,7 +126,7 @@ class DependencyAuditTests(unittest.TestCase):
             ),
         ):
             self.assertIn(
-                "sentencepiece=0.1.99; expected 0.2.1",
+                "sentencepiece=0.1.99; expected 0.2.2",
                 audit.audit_versions(),
             )
 
