@@ -33,7 +33,7 @@ jobs:
             node --version
             python --version
             npm ci
-            python -m pip install --disable-pip-version-check packaging numpy PySide6==6.11.1
+            python -m pip install --disable-pip-version-check packaging numpy PySide6==6.11.2
             npx playwright install chromium
 
             $env:PYTHON = (Get-Command python.exe -ErrorAction Stop).Source
