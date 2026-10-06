@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from audio_quality import inspect_wav_dict
 from gpu_arbiter import GpuArbiter
@@ -18,6 +22,117 @@ TEXT_FILES = ("voice.txt", "text.txt", "transcript.txt")
 
 class VoiceServiceError(ValueError):
     pass
+
+
+def remote_tts_settings(config: dict[str, Any]) -> dict[str, Any] | None:
+    raw = config.get("remoteTts")
+    if not isinstance(raw, dict) or not bool(raw.get("enabled")):
+        return None
+    base_url = str(raw.get("baseUrl") or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise VoiceServiceError("remoteTts.baseUrl must be an http(s) URL")
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise VoiceServiceError("remoteTts.baseUrl must use a loopback host")
+    return {
+        "baseUrl": base_url,
+        "healthPath": str(raw.get("healthPath") or "/health"),
+        "speakPath": str(raw.get("speakPath") or "/v1/speak"),
+        "model": str(raw.get("model") or "irodori_v3_low_latency"),
+        "timeoutSeconds": max(5.0, float(raw.get("timeoutSeconds") or 180.0)),
+    }
+
+
+def _remote_url(base_url: str, path: str) -> str:
+    return urljoin(base_url.rstrip("/") + "/", str(path or "").lstrip("/"))
+
+
+def _read_json_response(request: Request | str, *, timeout: float) -> dict[str, Any]:
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise VoiceServiceError("remote TTS returned a non-object JSON response")
+    return payload
+
+
+def prepare_remote_tts(config: dict[str, Any]) -> dict[str, Any]:
+    remote = remote_tts_settings(config)
+    if remote is None:
+        raise VoiceServiceError("remoteTts is not enabled")
+    payload = _read_json_response(
+        _remote_url(remote["baseUrl"], remote["healthPath"]),
+        timeout=min(15.0, float(remote["timeoutSeconds"])),
+    )
+    if payload.get("ok") is not True:
+        raise VoiceServiceError(f"remote TTS worker is not ready: {payload!r}")
+    return {
+        "runtime": "remote_worker",
+        "baseUrl": remote["baseUrl"],
+        "model": remote["model"],
+        "health": payload,
+    }
+
+
+def synthesize_remote_tts(
+    *,
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    reference_voice: str,
+    profile_name: str,
+) -> tuple[Path, str]:
+    remote = remote_tts_settings(config)
+    if remote is None:
+        raise VoiceServiceError("remoteTts is not enabled")
+    text = sanitize_text(payload.get("text"))
+    request_id = str(payload.get("requestId") or "").strip()
+    body = {
+        "requestId": request_id,
+        "text": text,
+        "model": remote["model"],
+        "voiceId": reference_voice,
+        "referenceVoice": reference_voice,
+        "ttsProfile": profile_name,
+        "speedScale": float(payload.get("speedScale") or 1.0),
+        "voiceVolume": float(payload.get("voiceVolume") or 1.0),
+        "playLocal": False,
+    }
+    if payload.get("seed") is not None:
+        body["seed"] = payload.get("seed")
+    request = Request(
+        _remote_url(remote["baseUrl"], remote["speakPath"]),
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    response = _read_json_response(request, timeout=float(remote["timeoutSeconds"]))
+    result = response.get("result") if isinstance(response.get("result"), dict) else response
+    if response.get("ok") is False or result.get("ok") is False:
+        raise VoiceServiceError(
+            str(result.get("errorMessage") or result.get("error") or response.get("error") or "remote TTS generation failed")
+        )
+    audio_url = str(result.get("audioUrl") or "").strip()
+    if not audio_url:
+        raise VoiceServiceError(f"remote TTS response has no audioUrl: {response!r}")
+
+    parsed_audio = urlparse(audio_url)
+    if parsed_audio.hostname in {"127.0.0.1", "localhost", "::1"} and parsed_audio.path.startswith("/audio/"):
+        audio_url = _remote_url(
+            remote["baseUrl"],
+            parsed_audio.path + (f"?{parsed_audio.query}" if parsed_audio.query else ""),
+        )
+    else:
+        audio_url = urljoin(remote["baseUrl"].rstrip("/") + "/", audio_url)
+
+    output = output_dir(config)
+    output.mkdir(parents=True, exist_ok=True)
+    token = hashlib.sha256(f"{request_id}\n{text}".encode("utf-8")).hexdigest()[:20]
+    target = output / f"remote-{token}.wav"
+    with urlopen(audio_url, timeout=min(60.0, float(remote["timeoutSeconds"]))) as audio_response:
+        target.write_bytes(audio_response.read())
+    if not target.is_file() or target.stat().st_size < 256:
+        target.unlink(missing_ok=True)
+        raise VoiceServiceError("remote TTS returned an unexpectedly small audio file")
+    return target, reference_voice
 
 
 def resolve_path(value: Any) -> Path:
@@ -121,8 +236,11 @@ def build_voice_runtime(
     runtime_config = copy.deepcopy(config)
     runtime_config["referenceVoices"] = scan_reference_voices(config)
     selected_model = "irodori-v3"
+    remote = remote_tts_settings(runtime_config)
 
     def prepare() -> dict[str, Any]:
+        if remote is not None:
+            return prepare_remote_tts(runtime_config)
         return prepare_irodori_direct(
             raw_config=runtime_config,
             model_config=model_config(config, selected_model),
@@ -140,17 +258,25 @@ def build_voice_runtime(
             legacy_settings=runtime_config.get("irodori"),
         )
         payload["resolvedTtsProfile"] = profile.name
-        source_file, used_reference_audio = synthesize_irodori_direct(
-            raw_config=runtime_config,
-            model_config=model_config(config, selected_model),
-            output_dir=output_dir(config),
-            text=sanitize_text(payload.get("text")),
-            request_id=str(payload.get("requestId") or "") or None,
-            reference_voice=reference_voice or None,
-            voice_prompt=str(payload.get("voicePrompt") or payload.get("instruct") or "").strip(),
-            profile_name=profile.name,
-            live=live,
-        )
+        if remote is not None:
+            source_file, used_reference_audio = synthesize_remote_tts(
+                config=runtime_config,
+                payload=payload,
+                reference_voice=reference_voice,
+                profile_name=profile.name,
+            )
+        else:
+            source_file, used_reference_audio = synthesize_irodori_direct(
+                raw_config=runtime_config,
+                model_config=model_config(config, selected_model),
+                output_dir=output_dir(config),
+                text=sanitize_text(payload.get("text")),
+                request_id=str(payload.get("requestId") or "") or None,
+                reference_voice=reference_voice or None,
+                voice_prompt=str(payload.get("voicePrompt") or payload.get("instruct") or "").strip(),
+                profile_name=profile.name,
+                live=live,
+            )
         cleanup = prune_audio(config, preserve=(source_file,))
         if cleanup.deleted_files:
             print(
@@ -162,7 +288,7 @@ def build_voice_runtime(
     return VoiceRuntime(
         prepare_fn=prepare,
         synthesize_fn=synthesize,
-        gpu_arbiter=GpuArbiter(instance_id, event_logger=event_logger),
+        gpu_arbiter=None if remote is not None else GpuArbiter(instance_id, event_logger=event_logger),
         quality_check_fn=lambda path: inspect_wav_dict(path, config.get("audioQuality")),
         event_logger=event_logger,
     )

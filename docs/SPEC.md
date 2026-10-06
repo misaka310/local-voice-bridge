@@ -15,6 +15,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 拡張機能更新時はWindows Local Voice小窓またはリポジトリ内の正式な再読み込み経路から更新でき、通常利用で`chrome://extensions`の手動操作を要求しない。
 - 通常利用ではターミナルを表示しない。
 - 再起動、拡張機能再接続、TTS再生失敗などから利用者が状態を理解して復旧できる。
+- 明示的な2台構成では、フロントPCがLocal Voice Bridge本体・設定・キャラクターUI・拡張機能・favicon・再生・`127.0.0.1:8717`を所有したまま、音声生成だけを別PCのTTS workerへ委譲できる。
 
 ### 完成扱いにしないもの
 
@@ -62,8 +63,11 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 設定、キュー、再生状態、Ref、Autoなど既存UXを内部都合で削除・置換しない。
 - 通常利用者へ内部APIや複数の起動経路を選ばせない。
 - Local Voice Bridgeの通常runtimeまたはセットアップへ、別リポジトリのアプリ／runtime、別常駐プロセス／アプリ、新しいlocalhostサービス／ポート、新しいインストール・起動・監視手順、外部runtime依存、または本プロジェクトの目的外の利用者機能を追加する場合は、実装開始前に利用者の明示承認を必須とする。承認なしでは実装しない。
+- 利用者が明示承認した`remoteTts`構成では、外部worker依存を音声生成だけに限定する。ChatGPTタブ状態、favicon、設定、キュー、再生制御、Windows小窓、キャラクターUIをworkerへ移さない。
+- `remoteTts`構成でもLocal Voice Bridgeの`127.0.0.1:8717`はフロントPC自身が所有し、8717全体をworkerへ転送しない。workerへの経路は別のloopbackトンネルまたは同等のローカル専用経路に限定する。
+- フロントPCには参照音声IDと表示ラベルだけを保持でき、実際の参照WAVとCUDAモデルはworker側だけに保持してよい。
 - 「既存ツールを再利用できる」「責務分離がきれいになる」「別ツールの不具合を直せる」は、前項の承認を省略する理由にならない。通常利用者が管理するものが増える変更は内部変更として扱わない。
-- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とし、追加ポートは明示承認済みの仕様変更がない限り導入しない。
+- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とする。明示承認された`remoteTts`構成では、worker専用トンネルのloopbackポートだけを追加できる。
 - ローカルAPIはloopback専用を維持し、全HTTPリクエストで`Host`をloopback名またはloopback IPへ限定する。POSTはJSONだけを受け付け、通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。
 - Local APIのレスポンスへユーザー名を含む絶対ファイルパスやローカルキャッシュの実パスを返さない。診断上のパスはローカルログまたは明示的な開発者向け経路だけで扱う。
 - マイク録音の生音声と文字起こし履歴は保存しない。一方、再接続・Service Worker復旧・未配送イベントの再配信に必要なassistant返答チャンク、読み上げキュー、未ACKの文字起こしイベントはローカルruntime状態へ限定的に保存してよい。privacy-safeなstructured runtime event logはサイズ上限と有限世代でローテーションし、無制限に増加させない。
@@ -96,6 +100,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - [ ] Local APIレスポンスにユーザー固有の絶対ファイルパスが露出せず、structured runtime event logは有限サイズでローテーションされる。
 - [ ] 30タブ想定で、アイドル中にsub-second全タブpollや同一タブ操作起点の全タブbroadcastが発生せず、通常生成中のAuto監視がassistant本文の全DOM cloneを繰り返さない。
 - [ ] 通常runtimeに承認のない別リポジトリ依存、別常駐プロセス、追加localhostサービス／ポート、目的外機能が存在せず、`scripts/check-runtime-boundaries.js`がPASSする。
+- [ ] `remoteTts`構成ではworker停止時もフロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御が維持され、worker復旧後はLocal Voice Bridge本体をworker側へ移さず音声生成だけ復旧できる。
 - [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。
 
 ## 7. 検証方法

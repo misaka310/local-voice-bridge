@@ -69,6 +69,18 @@ class TrayControllerProcessTests(unittest.TestCase):
 
         show_message.assert_not_called()
 
+    def test_remote_tts_mode_skips_local_cuda_preflight(self) -> None:
+        controller = supervisor.VoiceBridgeController()
+
+        with (
+            mock.patch.object(supervisor, "remote_tts_enabled", return_value=True),
+            mock.patch.object(supervisor.subprocess, "Popen") as popen,
+        ):
+            self.assertTrue(controller._run_preflight())
+
+        self.assertEqual(controller.status, "Checking remote worker")
+        popen.assert_not_called()
+
     def test_compatible_existing_server_is_not_owned_or_terminated(self) -> None:
         controller = supervisor.VoiceBridgeController()
         with (

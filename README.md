@@ -17,7 +17,9 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 
 再生ボタンから、ChatGPTの新しい返答を自動で読み上げる流れを映像と音声で確認できます。
 
-映像は実ChatGPTアカウントではなく、安全なローカルフィクスチャで実際の拡張機能コードを動かしています。ローカル音声生成エンジンにはIrodori v3を使用しています。音声生成はこのリポジトリ内のIrodori direct runtimeで完結し、別アプリの`local-tts-service`には依存しません。
+映像は実ChatGPTアカウントではなく、安全なローカルフィクスチャで実際の拡張機能コードを動かしています。ローカル音声生成エンジンにはIrodori v3を使用しています。既定の1台構成では、このリポジトリ内のIrodori direct runtimeで音声生成まで完結し、別アプリの`local-tts-service`には依存しません。
+
+明示的に`remoteTts.enabled=true`を設定した2台構成では、Local Voice Bridge本体、Windows小窓、キャラクター選択、設定、拡張機能、favicon、再生制御、loopback API `127.0.0.1:8717`はフロントPCに残し、音声生成だけを別PCのTTS workerへ委譲できます。workerには`local-tts-service`など互換TTS APIを使え、worker側へLocal Voice Bridgeのtray、小窓、拡張機能、キャラクターUIを移しません。詳細は[起動とヘルス確認](docs/startup.md)を参照してください。
 
 ## 主な機能
 
@@ -93,6 +95,7 @@ Windows小窓の`詳細設定`では、STTモデル、送信前猶予、Live TTS
 | --- | --- | --- | --- |
 | 軽量デモ / mock CI | Node.js 22、Chromium | Windows 11のPlaywright Chromium | Firefox、macOSの実行は未検証 |
 | 実音声 | Windows、Python、NVIDIA GPU、CUDA、Irodori v3 | Windows 11、Windows外部小窓、Playwright Chromium、NVIDIA CUDA環境 | CPUのみ、macOS、Linux、Firefox、Edgeは未検証または未対応 |
+| 2台構成のフロントPC | Windows、Local Voice Bridge本体、loopbackのTTS workerトンネル | `remoteTts`経由で別PCのNVIDIA/CUDA workerへ音声生成を委譲 | フロントPC単体でのIrodori生成は行わない |
 
 GPU、VRAM、ブラウザごとの扱いは[動作環境](docs/hardware.md)にまとめています。未検証の環境を対応済みとはしていません。
 

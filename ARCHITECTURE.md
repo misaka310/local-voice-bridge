@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-Local Voice Bridgeは、ChatGPTの返答検知を担当するChrome / Brave拡張と、音声生成・再生・設定・Windows UIを担当するWindows常駐アプリで構成します。通信は127.0.0.1のLocal APIだけを使用します。音声生成は`irodori_direct`としてこのリポジトリ内で完結し、別アプリの`local-tts-service`を起動・監視・呼び出しません。
+Local Voice Bridgeは、ChatGPTの返答検知を担当するChrome / Brave拡張と、音声生成・再生・設定・Windows UIを担当するWindows常駐アプリで構成します。通信は127.0.0.1のLocal APIだけを使用します。既定の1台構成では音声生成は`irodori_direct`としてこのリポジトリ内で完結し、`local-tts-service`へ依存しません。明示承認された`remoteTts`構成では、フロントPCのLocal API・Windows UI・設定・キャラクター選択・拡張・favicon・再生を維持したまま、音声生成だけをloopbackトンネル経由の`local-tts-service`など互換TTS workerへ委譲できます。
 
 設計上の中心原則は、**利用者からは1つのWindowsアプリに見せ、ブラウザ拡張はChatGPTとのアダプターへ限定すること**です。
 
@@ -160,7 +160,7 @@ Windows詳細設定の`ブラウザの読み上げ範囲設定`からOptionsへ�
 
 ## Runtime責務境界
 
-通常runtimeはLocal Voice Bridge自身のWindowsアプリ、ChatGPTアダプター拡張、既定`127.0.0.1:8717`のLocal APIで完結させます。別リポジトリのアプリ／runtime、別常駐プロセス、新しいlocalhostサービス／ポート、外部runtime依存、または本製品目的外の利用者機能を追加する場合は、実装前に利用者の明示承認が必要です。
+通常runtimeはLocal Voice Bridge自身のWindowsアプリ、ChatGPTアダプター拡張、既定`127.0.0.1:8717`のLocal APIで完結させます。別リポジトリのアプリ／runtime、別常駐プロセス、新しいlocalhostサービス／ポート、外部runtime依存、または本製品目的外の利用者機能を追加する場合は、実装前に利用者の明示承認が必要です。明示承認された`remoteTts`構成だけは例外としてworker専用loopbackトンネルを持てますが、8717の所有権とブラウザ・UI・設定責務はフロントPCから移しません。
 
 他製品の不具合を解決するためにLocal Voice Bridgeへ状態通知や制御責務を持ち込むことはしません。既存コードの再利用や内部責務分離の都合より、通常利用者が管理するものを増やさないことを優先します。
 

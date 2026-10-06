@@ -15,6 +15,37 @@
 
 `.venv`、`pythonw.exe`、`PySide6`、`QtWidgets`、`QtSvg`などが不足している場合は、EXEから正式なセットアップ/修復画面へ進めます。通常利用者へ内部セットアップスクリプトを直接案内しません。
 
+## 2台構成: フロントPC + TTS worker
+
+`remoteTts.enabled=true`を明示した場合だけ、音声生成を別PCへ委譲できます。責務は次のように固定します。
+
+- **フロントPC**: `LocalVoiceBridge.exe`、通知領域、小窓、キャラクター選択、設定、Chrome / Brave拡張、ChatGPTタブ状態、favicon、音声再生、`127.0.0.1:8717`
+- **TTS worker PC**: Irodoriモデル、CUDA、生成に必要な参照音声、音声生成APIだけ
+- worker側ではLocal Voice Bridgeの通知領域、小窓、デスクトップペット、Chrome拡張、favicon制御を起動しない
+- `8717`全体をworker PCへ転送しない。フロントPCのLocal Voice Bridge APIは必ずフロントPC自身が所有する
+
+worker APIはLANへ直接公開せず、フロントPC上のloopbackトンネルを経由します。標準例はフロントPCの`127.0.0.1:18730`をworkerの`127.0.0.1:8730`へ転送し、`config.local.json`へ次を設定します。
+
+```json
+{
+  "remoteTts": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:18730",
+    "healthPath": "/health",
+    "speakPath": "/v1/speak",
+    "model": "irodori_v3_low_latency",
+    "timeoutSeconds": 180
+  },
+  "referenceVoices": {
+    "sakura_01": { "label": "sakura_01" },
+    "asuka": { "label": "asuka" },
+    "suguha": { "label": "suguha" }
+  }
+}
+```
+
+`referenceVoices`のフロントPC側エントリはキャラクター選択用のメタデータだけでよく、参照WAVはworker側だけに置けます。生成要求では選択したIDをworkerへ渡し、生成されたWAVだけをフロントPCへ戻して再生します。workerが停止しても、フロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御はworkerと独立して維持します。
+
 ## 通知領域メニュー
 
 表示言語はWindows小窓と同じ日本語です。
