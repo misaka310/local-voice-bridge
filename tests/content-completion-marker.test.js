@@ -122,6 +122,7 @@ test('generating, complete, playing, and text-response error use distinct static
   let icon = statusIcon(document);
   assert.equal(marker.displayedStatus(), 'generating');
   assert.equal(icon.getAttribute('data-local-voice-status'), 'generating');
+  assert.equal(icon.getAttribute('sizes'), 'any');
   assert.match(decodedSvg(icon), /#2563eb/);
   assert.match(decodedSvg(icon), /<circle/);
 
@@ -260,27 +261,49 @@ test('ChatGPT cannot restore its own favicon while a status remains active', asy
   assert.equal(rewritten.rel, 'icon');
 });
 
-test('repeated ChatGPT favicon rewrites do not reinsert the active status favicon', async () => {
-  const { document, marker } = createMarker();
+test('competing ChatGPT favicon rewrites refresh the active href without reinserting it', async () => {
+  const { document, marker, markerApi } = createMarker();
   await marker.initialize();
   marker.markResponseGenerating();
 
   const icon = statusIcon(document);
   const initialIndex = document.head.children.indexOf(icon);
+  let previousHref = icon.href;
 
   for (let index = 0; index < 3; index += 1) {
     const rewritten = document.createElement('link');
     rewritten.rel = 'icon';
-    rewritten.href = `https://chatgpt.com/favicon-${index}.ico`;
+    rewritten.href = 'https://chatgpt.com/favicon-' + index + '.ico';
     document.head.appendChild(rewritten);
+    const mutations = [{
+      type: 'childList',
+      target: document.head,
+      addedNodes: [rewritten],
+      removedNodes: [],
+    }];
 
-    marker.sync();
+    assert.equal(markerApi.headMutationNeedsFaviconRefresh(mutations), true);
+    marker.sync({ refreshFavicon: markerApi.headMutationNeedsFaviconRefresh(mutations) });
 
     assert.equal(document.head.children.indexOf(icon), initialIndex);
     assert.equal(rewritten.hasAttribute('rel'), false);
+    assert.notEqual(icon.href, previousHref);
+    previousHref = icon.href;
   }
 
   assert.deepEqual(activeIcons(document), [icon]);
+});
+
+test('re-entering the same status uses a fresh favicon URL', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseGenerating();
+  const firstHref = statusIcon(document).href;
+
+  marker.markResponseGenerationEnded();
+  marker.markResponseGenerating();
+
+  assert.notEqual(statusIcon(document).href, firstHref);
 });
 
 test('head mutation filter ignores unrelated churn and reacts to favicon changes', () => {
@@ -299,16 +322,33 @@ test('head mutation filter ignores unrelated churn and reacts to favicon changes
     addedNodes: [unrelated],
     removedNodes: [],
   }]), false);
-  assert.equal(markerApi.headMutationNeedsSync([{
+  const addedIconMutation = [{
     type: 'childList',
     target: document.head,
     addedNodes: [icon],
     removedNodes: [],
-  }]), true);
+  }];
+  assert.equal(markerApi.headMutationNeedsSync(addedIconMutation), true);
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh(addedIconMutation), true);
   assert.equal(markerApi.headMutationNeedsSync([{
     type: 'attributes',
     target: icon,
   }]), true);
+
+  const statusIconNode = document.createElement('link');
+  statusIconNode.id = 'local-voice-completion-favicon';
+  statusIconNode.rel = 'icon';
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh([{
+    type: 'attributes',
+    target: statusIconNode,
+  }]), false);
+
+  icon.setAttribute('data-local-voice-original-rel', 'icon');
+  icon.removeAttribute('rel');
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh([{
+    type: 'attributes',
+    target: icon,
+  }]), false);
 });
 
 test('blank new conversation uses a static plus and yields to active states', async () => {

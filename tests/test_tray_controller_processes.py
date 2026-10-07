@@ -95,6 +95,42 @@ class TrayControllerProcessTests(unittest.TestCase):
         process.terminate.assert_called_once_with()
         process.wait.assert_called_once_with(timeout=5)
 
+    def test_brief_health_probe_failures_do_not_restart_a_live_owned_server(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = None
+        controller = supervisor.VoiceBridgeController()
+        controller._process = process
+        wait_results = iter([False, False, True])
+
+        with (
+            mock.patch.object(controller, "_ensure_running"),
+            mock.patch.object(controller._stop_event, "wait", side_effect=lambda _seconds: next(wait_results)),
+            mock.patch.object(supervisor, "probe_health", return_value=(False, None)),
+            mock.patch.object(controller, "_restart_owned_server") as restart,
+        ):
+            controller._monitor_loop()
+
+        restart.assert_not_called()
+        self.assertEqual(controller.status, "Unhealthy")
+
+    def test_sustained_health_probe_failures_restart_once_after_grace(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = None
+        controller = supervisor.VoiceBridgeController()
+        controller._process = process
+        wait_results = iter([False, False, False, True])
+
+        with (
+            mock.patch.object(controller, "_ensure_running"),
+            mock.patch.object(controller._stop_event, "wait", side_effect=lambda _seconds: next(wait_results)),
+            mock.patch.object(supervisor, "probe_health", return_value=(False, None)),
+            mock.patch.object(supervisor.time, "monotonic", side_effect=[100.0, 120.0, 146.0]),
+            mock.patch.object(controller, "_restart_owned_server") as restart,
+        ):
+            controller._monitor_loop()
+
+        restart.assert_called_once_with()
+
     def test_restart_stops_only_a_same_installation_existing_server(self) -> None:
         controller = supervisor.VoiceBridgeController()
         payload = {"ok": True, "instanceId": supervisor.INSTALLATION_ID}
