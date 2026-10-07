@@ -59,6 +59,19 @@ class RuntimeReadinessTests(unittest.TestCase):
         self.assertEqual(result["voiceRuntime"]["readiness"], "ready")
         self.assertTrue(result["readiness"]["ready"])
 
+    def test_generation_error_does_not_make_frontend_process_unready(self) -> None:
+        runtime = runtime_snapshot(FakeRuntime())
+        runtime["error"] = "Remote generation backend unavailable"
+        runtime["phase"] = "error"
+        runtime["lastOperation"] = "synthesize:failed"
+        result = enrich_snapshot(
+            {"extension": {"connected": True, "tabsCount": 1}},
+            runtime,
+        )
+        self.assertTrue(result["readiness"]["ready"])
+        self.assertEqual(result["voiceRuntime"]["error"], "Remote generation backend unavailable")
+        self.assertEqual(result["readiness"]["lastOperation"], "synthesize:failed")
+
     def test_invalid_tab_count_degrades_to_waiting_instead_of_crashing(self) -> None:
         result = structured_readiness({"connected": True, "tabsCount": "bad"}, runtime_snapshot(FakeRuntime()))
         self.assertFalse(result["ready"])

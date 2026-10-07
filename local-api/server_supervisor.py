@@ -23,6 +23,7 @@ VENV_SCRIPTS = LOCAL_API_DIR / ".venv" / "Scripts"
 SERVER_PYTHON = VENV_SCRIPTS / "python.exe"
 SERVER_SCRIPT = LOCAL_API_DIR / "server.py"
 PREFLIGHT_SCRIPT = LOCAL_API_DIR / "scripts" / "preflight_irodori.py"
+PREFLIGHT_FRONTEND_SCRIPT = LOCAL_API_DIR / "scripts" / "preflight_frontend.py"
 RUNTIME_DIR = LOCAL_API_DIR / "runtime"
 LOG_DIR = LOCAL_API_DIR / "logs"
 CONTROLLER_LOG = LOG_DIR / "controller.log"
@@ -132,8 +133,24 @@ def server_command(python_executable: Path = SERVER_PYTHON) -> list[str]:
     return [str(python_executable), str(SERVER_SCRIPT)]
 
 
-def preflight_command(python_executable: Path = SERVER_PYTHON) -> list[str]:
-    return [str(python_executable), str(PREFLIGHT_SCRIPT), "--strict-cuda", "--quick"]
+def configured_generation_backend(config_dir: Path = LOCAL_API_DIR) -> str:
+    backend = "local"
+    for name in ("config.example.json", "config.json", "config.local.json"):
+        path = config_dir / name
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict) and "generationBackend" in payload:
+            backend = str(payload.get("generationBackend") or "local").strip().lower()
+    return backend
+
+
+def preflight_command(generation_backend: str | None = None, python_executable: Path = SERVER_PYTHON) -> list[str]:
+    backend = str(generation_backend or configured_generation_backend()).strip().lower()
+    if backend == "local":
+        return [str(python_executable), str(PREFLIGHT_SCRIPT), "--strict-cuda", "--quick"]
+    return [str(python_executable), str(PREFLIGHT_FRONTEND_SCRIPT)]
 
 
 class VoiceBridgeController:

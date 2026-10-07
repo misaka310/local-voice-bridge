@@ -72,6 +72,12 @@ AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
 TEXT_FILES = ("voice.txt", "text.txt", "transcript.txt")
 DEFAULT_CONFIG: dict[str, Any] = {
     "engine": "irodori_direct",
+    "generationBackend": "local",
+    "remoteGeneration": {
+        "sshAlias": "",
+        "remoteRepoRoot": "",
+        "connectTimeoutSeconds": 7.0,
+    },
     "host": "127.0.0.1",
     "port": 8717,
     "publicBaseUrl": "",
@@ -180,6 +186,27 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
         if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
             raise BridgeError("このAPIはローカル専用です。publicBaseUrl に path、query、fragment は指定できません")
         config["publicBaseUrl"] = f"http://127.0.0.1:{parsed.port or config.get('port', 8717)}"
+    generation_backend = str(config.get("generationBackend") or "local").strip().lower()
+    if generation_backend not in {"local", "remote_ssh"}:
+        raise BridgeError("generationBackend must be local or remote_ssh")
+    remote_generation = config.get("remoteGeneration") if isinstance(config.get("remoteGeneration"), dict) else {}
+    if generation_backend == "remote_ssh":
+        ssh_alias = str(remote_generation.get("sshAlias") or "").strip()
+        remote_repo_root = str(remote_generation.get("remoteRepoRoot") or "").strip()
+        if not ssh_alias or not remote_repo_root:
+            raise BridgeError("remoteGeneration.sshAlias and remoteGeneration.remoteRepoRoot are required for remote_ssh")
+        try:
+            connect_timeout = max(1.0, float(remote_generation.get("connectTimeoutSeconds", 7.0)))
+        except (TypeError, ValueError) as exc:
+            raise BridgeError("remoteGeneration.connectTimeoutSeconds must be a number") from exc
+        remote_generation = {
+            **remote_generation,
+            "sshAlias": ssh_alias,
+            "remoteRepoRoot": remote_repo_root,
+            "connectTimeoutSeconds": connect_timeout,
+        }
+    config["generationBackend"] = generation_backend
+    config["remoteGeneration"] = remote_generation
     config["engine"] = "irodori_direct"
     existing = config.get("models") if isinstance(config.get("models"), dict) else {}
     irodori_model = copy.deepcopy(DEFAULT_CONFIG["models"]["irodori-v3"])

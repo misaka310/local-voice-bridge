@@ -58,6 +58,12 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn("--quick", command)
         self.assertEqual(command[0], str(supervisor.SERVER_PYTHON))
 
+    def test_remote_generation_preflight_does_not_require_cuda(self) -> None:
+        command = supervisor.preflight_command("remote_ssh")
+        self.assertEqual(command[0], str(supervisor.SERVER_PYTHON))
+        self.assertIn("preflight_frontend.py", " ".join(command))
+        self.assertNotIn("--strict-cuda", command)
+
     def test_startup_command_targets_the_small_exe_launcher(self) -> None:
         launcher = Path(r"C:\Voice Bridge\LocalVoiceBridge.exe")
         self.assertEqual(windows.startup_command(launcher), f'"{launcher}" --background')
