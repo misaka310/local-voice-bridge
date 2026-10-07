@@ -48,6 +48,21 @@ test('recognizes a bare external host label but preserves descriptive link text'
   assert.equal(assistantText.isBareHostLabel(googleOne, 'Google Oneを確認'), false);
 });
 
+test('assistant node discovery supports current data-conversation-role markup', () => {
+  const assistant = { id: 'current-assistant' };
+  const seenSelectors = [];
+  const documentObject = {
+    querySelectorAll(selector) {
+      seenSelectors.push(selector);
+      if (selector.includes('[data-conversation-role="assistant"]')) return [assistant];
+      return [];
+    },
+  };
+
+  assert.deepEqual(assistantText.getAssistantNodes(documentObject), [assistant]);
+  assert.match(seenSelectors[0], /data-conversation-role="assistant"/);
+});
+
 test('stable key prefers message id then turn id and finally a generated node id', () => {
   const byMessage = {
     dataset: { messageId: 'message-1' },

@@ -39,7 +39,9 @@ faviconはすべて静的SVGです。回転アニメーションや一定間隔�
 
 - 回答状態はChatGPT DOMの`MutationObserver`とChromeのタブイベントで更新します。
 - 空の新規会話は`/`のURLとメッセージ要素の有無から判定し、初期化・関連DOM追加・SPAのURL遷移時だけ再確認します。定期pollは追加しません。
-- 文字列の1文字ごとの`characterData`監視は行わず、DOM要素の追加・削除を主な起点にします。
+- 文字列の1文字ごとの`characterData`監視は行わず、DOM要素の追加・削除を主な起点にします。現在のChatGPTのように同じcomposerボタンが`Send`から`Stop`へ変わる場合を拾うため、`aria-label` / `title` / `data-testid`とassistant役割属性だけは属性変更も監視します。
+- assistant要素は従来の`data-message-author-role="assistant"`に加えて`data-conversation-role="assistant"`も認識します。
+- 完了操作領域は従来のcopy操作に加えて`.turn-action-controls`も完了証拠として扱います。
 - `body`全体の通知を受けても、assistant返答・生成停止ボタン・完了操作に無関係な変更は、回答要素の再検索や本文抽出へ進めません。
 - `head`監視はfaviconの追加・削除・`rel` / `href`変更だけを再同期対象とし、title・style・scriptなどの変化ではfavicon走査を行いません。
 - 以前の各タブ5秒間隔の`register-tab`送信は行いません。登録は起動、再接続、フォーカス、ユーザー操作などの実イベントで更新します。
@@ -91,3 +93,4 @@ faviconはすべて静的SVGです。回転アニメーションや一定間隔�
 - Replayもローカル共通再生を使い、回答元タブには状態通知だけを送る。
 - 30タブの全タブ回復確認が既定60秒未満では再実行されない。
 - 長時間生成の保険確認が30秒のタブローカルタイマーとなり、全タブpollを要求しない。
+- 同一composerボタンの`Send`→`Stop`属性変更、`data-conversation-role="assistant"`、`.turn-action-controls`を現行ChatGPT DOM契約として回帰テストで固定する。
