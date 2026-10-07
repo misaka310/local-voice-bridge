@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet("reading", "stt", "dev")]
+    [ValidateSet("reading", "stt", "dev", "frontend")]
     [string]$InitialProfile = "reading"
 )
 
@@ -39,6 +39,12 @@ $profiles = [ordered]@{
         Summary = "アプリのソースコードを修正・テストする人向けです。読み上げ・STTに加え、npm、Playwright Chromium、GUIスモーク依存を導入します。"
         Download = "推定ダウンロード: 約9〜19 GB"
         Disk = "必要な空き容量: 約20〜33 GB"
+    }
+    frontend = [pscustomobject]@{
+        Title = "リモート生成フロントエンド"
+        Summary = "Windows小窓、ローカル再生、SSH生成接続を導入します。CUDA・IrodoriモデルはこのPCへ導入しません。"
+        Download = "推定ダウンロード: 約0.3〜0.6 GB"
+        Disk = "必要な空き容量: 約1〜2 GB"
     }
 }
 
@@ -180,7 +186,7 @@ function Refresh-ProfileItems {
     if ([string]::IsNullOrWhiteSpace($PreferredProfile)) {
         $PreferredProfile = Get-SelectedProfile
     }
-    $visibleProfileKeys = @("reading", "stt")
+    $visibleProfileKeys = @("reading", "stt", "frontend")
     if ($advancedCheck.Checked) {
         $visibleProfileKeys += "dev"
     }

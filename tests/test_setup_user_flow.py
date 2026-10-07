@@ -132,6 +132,38 @@ exit 42
             self.assertNotIn('"id":"torch"', events)
             self.assertFalse((root / "local-api" / ".venv").exists())
 
+    def test_frontend_profile_skips_local_generation_stack(self) -> None:
+        source = SETUP_ENGINE.read_text(encoding="utf-8-sig")
+        self.assertIn('[ValidateSet("reading", "stt", "dev", "frontend")]', source)
+        self.assertIn('frontend = @{', source)
+        self.assertIn('requirements-frontend.txt', source)
+        self.assertIn('$Profile -ne "frontend" -and -not (Test-EarlyNvidiaCapability)', source)
+        heavy_guard = source.index('if ($Profile -ne "frontend") {')
+        frontend_stage = source.index('Invoke-SetupStage -Id "frontend-dependencies"')
+        runtime_folders = source.index('Invoke-SetupStage -Id "runtime-folders"')
+        for stage in (
+            'Invoke-SetupStage -Id "torch"',
+            'Invoke-SetupStage -Id "torchcodec"',
+            'Invoke-SetupStage -Id "ffmpeg"',
+            'Invoke-SetupStage -Id "venv-bootstrap"',
+            'Invoke-SetupStage -Id "core-dependencies"',
+            'Invoke-SetupStage -Id "irodori"',
+            'Invoke-SetupStage -Id "dependency-audit"',
+            'Invoke-SetupStage -Id "runtime-check"',
+            'Invoke-SetupStage -Id "model-cache"',
+        ):
+            self.assertGreater(source.index(stage), heavy_guard, stage)
+            self.assertLess(source.index(stage), frontend_stage, stage)
+        self.assertLess(frontend_stage, runtime_folders)
+
+    def test_setup_gui_exposes_generic_frontend_profile(self) -> None:
+        source = SETUP_GUI.read_text(encoding="utf-8-sig")
+        self.assertIn('[ValidateSet("reading", "stt", "dev", "frontend")]', source)
+        self.assertIn('frontend = [pscustomobject]@{', source)
+        self.assertIn('@("reading", "stt", "frontend")', source)
+        self.assertIn('リモート生成フロントエンド', source)
+        self.assertNotIn('DESK2', source)
+
     def test_setup_cancel_stops_the_setup_process_tree(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             temp = Path(temp_dir)
