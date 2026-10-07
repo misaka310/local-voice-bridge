@@ -5,16 +5,34 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LocalVoiceContentMutationFilter = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, () => {
-  const ASSISTANT_SELECTOR = '[data-message-author-role="assistant"]';
+  const ASSISTANT_SELECTOR = [
+    '[data-message-author-role="assistant"]',
+    '[data-conversation-role="assistant"]',
+  ].join(',');
+  const OBSERVER_OPTIONS = Object.freeze({
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: Object.freeze([
+      'aria-label',
+      'title',
+      'data-testid',
+      'data-message-author-role',
+      'data-conversation-role',
+    ]),
+  });
   const RESPONSE_GENERATING_SELECTOR = [
     '[data-testid="stop-button"]',
+    'button[aria-label="Stop"]',
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop streaming"]',
+    'button[title="Stop"]',
     'button[aria-label="生成を停止"]',
     'button[aria-label="応答を停止"]',
     'button[aria-label="ストリーミングを停止"]',
   ].join(',');
   const RESPONSE_COMPLETE_SELECTOR = [
+    '.turn-action-controls',
     'button[data-testid="copy-turn-action-button"]',
     'button[aria-label="Copy"]',
     'button[aria-label="コピー"]',
@@ -128,6 +146,7 @@
 
   return Object.freeze({
     ASSISTANT_SELECTOR,
+    OBSERVER_OPTIONS,
     RESPONSE_GENERATING_SELECTOR,
     RESPONSE_COMPLETE_SELECTOR,
     RESPONSE_ERROR_SELECTOR,
