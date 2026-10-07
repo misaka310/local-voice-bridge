@@ -2,7 +2,7 @@
 
 (function initContentDomObserver(global) {
   const AUTO_SENT_FLAG = 'localVoiceSent';
-  const MESSAGE_SELECTOR = '[data-message-author-role="user"], [data-message-author-role="assistant"]';
+  const MESSAGE_SELECTOR = '[data-message-author-role="user"], [data-message-author-role="assistant"], [data-conversation-role="user"], [data-conversation-role="assistant"]';
   const mutationFilter = global.LocalVoiceContentMutationFilter;
   if (!mutationFilter) throw new Error('content-mutation-filter.js must load before content-dom-observer.js');
   const { RESPONSE_GENERATING_SELECTOR, RESPONSE_COMPLETE_SELECTOR } = mutationFilter;
@@ -28,9 +28,10 @@
       if (!node) return false;
       const element = node.nodeType === 1 ? node : node.parentElement || node.parentNode;
       if (!element || element.nodeType !== 1) return false;
-      if (element.matches?.('[data-message-author-role]')) return true;
-      if (element.closest?.('[data-message-author-role]')) return true;
-      return Boolean(element.querySelector?.('[data-message-author-role]'));
+      const roleSelector = '[data-message-author-role], [data-conversation-role]';
+      if (element.matches?.(roleSelector)) return true;
+      if (element.closest?.(roleSelector)) return true;
+      return Boolean(element.querySelector?.(roleSelector));
     }
 
     function newConversationMutationNeedsRefresh(mutations = []) {
@@ -66,7 +67,7 @@
 
     function responseTurnForNode(node) {
       if (!node || typeof node.closest !== 'function') return null;
-      return node.closest('[data-testid^="conversation-turn-"]') || node;
+      return node.closest('[data-testid^="conversation-turn-"], [data-conversation-role="assistant"], article') || node;
     }
 
     function hasResponseCompletionControl(node) {

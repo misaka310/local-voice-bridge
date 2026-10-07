@@ -1054,18 +1054,16 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
       await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
-          const stopButton = document.createElement('button');
-          stopButton.dataset.testid = 'stop-button';
-          stopButton.textContent = 'Stop generating';
-          document.body.append(stopButton);
+          const composerButton = document.createElement('button');
+          composerButton.id = 'fixture-composer-action';
+          composerButton.setAttribute('aria-label', 'Send prompt');
+          document.body.append(composerButton);
+          composerButton.setAttribute('aria-label', 'Stop');
 
           const turn = document.createElement('article');
-          turn.dataset.testid = 'conversation-turn-assistant-completion-marker';
-          const reply = document.createElement('div');
-          reply.dataset.messageAuthorRole = 'assistant';
-          reply.dataset.messageId = 'completion-marker-reply';
-          reply.textContent = 'バックグラウンドタブでは生成中に読み上げず、返答完了後に一度だけ通知します。';
-          turn.append(reply);
+          turn.dataset.conversationRole = 'assistant';
+          turn.dataset.messageId = 'completion-marker-reply';
+          turn.textContent = 'バックグラウンドタブでは生成中に読み上げず、返答完了後に一度だけ通知します。';
           document.querySelector('#chat').append(turn);
         },
       });
@@ -1100,12 +1098,11 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
       await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
-          document.querySelector('[data-testid="stop-button"]')?.remove();
-          const turn = document.querySelector('[data-testid="conversation-turn-assistant-completion-marker"]');
-          const copy = document.createElement('button');
-          copy.dataset.testid = 'copy-turn-action-button';
-          copy.setAttribute('aria-label', 'Copy');
-          turn.append(copy);
+          document.querySelector('#fixture-composer-action')?.setAttribute('aria-label', 'Send prompt');
+          const turn = document.querySelector('[data-conversation-role="assistant"]');
+          const actions = document.createElement('div');
+          actions.className = 'turn-action-controls';
+          turn.append(actions);
         },
       });
     }, backgroundTabId);

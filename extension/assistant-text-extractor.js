@@ -87,7 +87,7 @@
 
   function getAssistantNodes(documentObject) {
     if (!documentObject || typeof documentObject.querySelectorAll !== 'function') return [];
-    const primary = Array.from(documentObject.querySelectorAll('[data-message-author-role="assistant"]'));
+    const primary = Array.from(documentObject.querySelectorAll('[data-message-author-role="assistant"], [data-conversation-role="assistant"]'));
     if (primary.length > 0) return primary;
     return Array.from(documentObject.querySelectorAll('article')).filter((node) => {
       const label = `${node.getAttribute('aria-label') || ''} ${node.textContent || ''}`.toLowerCase();

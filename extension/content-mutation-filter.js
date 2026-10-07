@@ -27,6 +27,7 @@
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop streaming"]',
     'button[title="Stop"]',
+    'button[aria-label="停止"]',
     'button[aria-label="生成を停止"]',
     'button[aria-label="応答を停止"]',
     'button[aria-label="ストリーミングを停止"]',

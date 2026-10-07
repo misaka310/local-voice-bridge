@@ -103,7 +103,7 @@ test('blank new conversation status is derived from route and message DOM withou
 
   hasMessage = true;
   const userMessage = element();
-  userMessage.matches = (selector) => selector === '[data-message-author-role]';
+  userMessage.matches = (selector) => selector.includes('[data-message-author-role]');
   assert.equal(controller.scheduleInspect([mutation(element(), { addedNodes: [userMessage] })]), false);
   assert.deepEqual(statusChanges, [true, false]);
 
