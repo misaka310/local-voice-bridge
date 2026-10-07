@@ -272,7 +272,7 @@
     await initializeCompletionMarker();
     markExistingMessagesAsSeen();
     observer = new MutationObserver(scheduleInspect);
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, globalThis.LocalVoiceContentMutationFilter.OBSERVER_OPTIONS);
     try { await registerCurrentTab({ includeLatest: true }); } catch (_error) {}
     scheduleInspect();
     const live = ensureLiveController();

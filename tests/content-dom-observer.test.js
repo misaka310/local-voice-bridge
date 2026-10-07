@@ -6,7 +6,14 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const { isRelevantMutationBatch, isResponseError } = require('../extension/content-mutation-filter.js');
+const {
+  ASSISTANT_SELECTOR,
+  OBSERVER_OPTIONS,
+  RESPONSE_GENERATING_SELECTOR,
+  RESPONSE_COMPLETE_SELECTOR,
+  isRelevantMutationBatch,
+  isResponseError,
+} = require('../extension/content-mutation-filter.js');
 
 function element(options = {}) {
   const {
@@ -25,7 +32,7 @@ function element(options = {}) {
       return name === 'aria-label' && articleAssistant ? 'assistant' : null;
     },
     matches(selector) {
-      if (selector === '[data-message-author-role="assistant"]') return assistant;
+      if (selector.includes('[data-message-author-role="assistant"]')) return assistant;
       if (selector === 'article') return articleAssistant;
       if (selector.includes('stop-button')) return generationControl;
       if (selector.includes('copy-turn-action-button')) return completionControl;
@@ -33,7 +40,7 @@ function element(options = {}) {
       return false;
     },
     closest(selector) {
-      if (selector === '[data-message-author-role="assistant"]' && assistantAncestor) return {};
+      if (selector.includes('[data-message-author-role="assistant"]') && assistantAncestor) return {};
       if (selector === 'article' && articleAssistant) return this;
       if (selector.includes('stop-button') && generationControl) return this;
       if (selector.includes('copy-turn-action-button') && completionControl) return this;
@@ -124,6 +131,19 @@ test('assistant subtree and response controls remain relevant', () => {
     mutation(element(), { addedNodes: [element({ errorControl: true })] }),
   ]), true);
   assert.equal(isRelevantMutationBatch([]), true);
+});
+
+test('current ChatGPT generation DOM is covered by selectors and attribute observation', () => {
+  assert.match(ASSISTANT_SELECTOR, /data-conversation-role="assistant"/);
+  assert.match(RESPONSE_GENERATING_SELECTOR, /aria-label="Stop"/);
+  assert.match(RESPONSE_COMPLETE_SELECTOR, /\.turn-action-controls/);
+  assert.equal(OBSERVER_OPTIONS.attributes, true);
+  assert.equal(OBSERVER_OPTIONS.childList, true);
+  assert.equal(OBSERVER_OPTIONS.subtree, true);
+  assert.deepEqual(
+    Array.from(OBSERVER_OPTIONS.attributeFilter),
+    ['aria-label', 'title', 'data-testid', 'data-message-author-role', 'data-conversation-role'],
+  );
 });
 
 test('ordinary completed prose mentioning an error is not treated as a ChatGPT failure', () => {
