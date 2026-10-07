@@ -92,11 +92,11 @@ DESK2 Local Voice Bridge
 
 実機確認済みのネットワーク境界をそのまま使用する。
 
-- DESK LAN: `192.168.0.66/24`
-- DESK2 Wi-Fi: `192.168.0.12/24`
+- DESK LAN: router-reserved LAN address
+- DESK2: router-reserved LAN address
 - DESK OpenSSH: TCP/22
-- DESK Windows Firewall `OpenSSH-Server-In-TCP`: remote address `192.168.0.12` only
-- DESK sshd listenerは現在 `0.0.0.0:22` だが、FirewallでDESK2以外を遮断している
+- DESK Windows Firewall `OpenSSH-Server-In-TCP`: remote address is restricted to DESK2 only
+- DESK sshd listenerは全interfaceで待受するが、FirewallでDESK2以外を遮断する
 
 生成用の新しいLAN公開ポート、HTTP listener、Tailscale listenerを追加しない。既存SSH許可ルールを広げない。
 
@@ -209,7 +209,7 @@ DESKログイン時にLocal Voice Bridge GUI/trayを勝手に起動しない。
 - Reconnecting DESK does not require extension reload.
 - Existing favicon/Auto/queue tests remain green.
 - Architecture/runtime-boundary checks remain green; no new listening port is introduced.
-- DESK firewall remains restricted to SSH from DESK2 `192.168.0.12`; no broader inbound allow rule is added.
+- DESK firewall remains restricted to SSH from DESK2's reserved LAN address; no broader inbound allow rule is added.
 - Existing single-PC local generation mode remains functional.
 
 ## Non-goals
