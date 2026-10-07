@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,13 @@ TEXT_FILES = ("voice.txt", "text.txt", "transcript.txt")
 
 class VoiceServiceError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ReferenceAsset:
+    voice_id: str
+    audio_path: Path
+    reference_text: str = ""
 
 
 def resolve_path(value: Any) -> Path:
@@ -112,12 +120,96 @@ def normalize_reference_id(value: Any) -> str:
     return voice_id
 
 
+def resolve_reference_asset(config: dict[str, Any], reference_voice: Any) -> ReferenceAsset | None:
+    voice_id = normalize_reference_id(reference_voice)
+    if not voice_id:
+        return None
+    item = scan_reference_voices(config).get(voice_id)
+    if not isinstance(item, dict):
+        raise VoiceServiceError(f"reference voice not found: {voice_id}")
+    audio_value = str(item.get("referenceAudioPath") or "").strip()
+    if not audio_value:
+        raise VoiceServiceError(f"reference voice has no reference audio: {voice_id}")
+    audio_path = resolve_path(audio_value)
+    if not audio_path.is_file():
+        raise VoiceServiceError(f"reference voice audio file not found: {voice_id}")
+    text_value = str(item.get("referenceTextPath") or "").strip()
+    reference_text = ""
+    if text_value:
+        text_path = resolve_path(text_value)
+        if text_path.is_file():
+            try:
+                reference_text = text_path.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeError) as exc:
+                raise VoiceServiceError(f"reference voice text could not be read: {voice_id}") from exc
+    return ReferenceAsset(voice_id=voice_id, audio_path=audio_path, reference_text=reference_text)
+
+
+def _build_remote_voice_runtime(
+    config: dict[str, Any],
+    *,
+    event_logger: Any | None = None,
+) -> VoiceRuntime:
+    from remote_generation import RemoteGenerationClient, RemoteGenerationConfig
+
+    remote = config.get("remoteGeneration") if isinstance(config.get("remoteGeneration"), dict) else {}
+    client = RemoteGenerationClient(
+        RemoteGenerationConfig(
+            ssh_alias=str(remote.get("sshAlias") or ""),
+            remote_repo_root=str(remote.get("remoteRepoRoot") or ""),
+            connect_timeout_seconds=float(remote.get("connectTimeoutSeconds", 7.0)),
+        ),
+        output_dir=output_dir(config),
+    )
+
+    def prepare() -> dict[str, Any]:
+        return client.prepare()
+
+    def synthesize(payload: dict[str, Any]) -> tuple[Path, str]:
+        reference_voice = normalize_reference_id(
+            payload.get("voiceId") or payload.get("referenceVoice") or ""
+        )
+        live = bool(payload.get("live"))
+        profile = profile_from_payload(
+            payload,
+            live=live,
+            use_reference=bool(reference_voice),
+            legacy_settings=config.get("irodori"),
+        )
+        outbound = dict(payload)
+        outbound["text"] = sanitize_text(payload.get("text"))
+        outbound["resolvedTtsProfile"] = profile.name
+        outbound["referenceVoice"] = reference_voice
+        asset = resolve_reference_asset(config, reference_voice)
+        source_file, used_reference_audio = client.synthesize(
+            outbound,
+            reference_audio=asset.audio_path if asset is not None else None,
+            reference_text=asset.reference_text if asset is not None else "",
+        )
+        cleanup = prune_audio(config, preserve=(source_file,))
+        if cleanup.deleted_files:
+            print(
+                f"[maintenance] removed {cleanup.deleted_files} generated audio files "
+                f"({cleanup.deleted_bytes} bytes); remaining={cleanup.remaining_files} files/{cleanup.remaining_bytes} bytes"
+            )
+        return source_file, used_reference_audio
+
+    return VoiceRuntime(
+        prepare_fn=prepare,
+        synthesize_fn=synthesize,
+        quality_check_fn=lambda path: inspect_wav_dict(path, config.get("audioQuality")),
+        event_logger=event_logger,
+    )
+
+
 def build_voice_runtime(
     config: dict[str, Any],
     *,
     instance_id: str,
     event_logger: Any | None = None,
 ) -> VoiceRuntime:
+    if str(config.get("generationBackend") or "local").strip().lower() == "remote_ssh":
+        return _build_remote_voice_runtime(config, event_logger=event_logger)
     runtime_config = copy.deepcopy(config)
     runtime_config["referenceVoices"] = scan_reference_voices(config)
     selected_model = "irodori-v3"

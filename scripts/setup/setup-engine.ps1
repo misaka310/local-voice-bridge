@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet("reading", "stt", "dev")]
+    [ValidateSet("reading", "stt", "dev", "frontend")]
     [string]$Profile = "reading",
     [switch]$ResetProgress,
     [switch]$SkipModelDownload,
@@ -42,6 +42,14 @@ $profileInfo = @{
         MinimumFreeGb = 20
         Detail = "読み上げ・STTを導入または確認し、npm依存、Playwright Chromium、Windows GUIスモーク依存も追加します。"
     }
+}
+
+$profileInfo.frontend = @{
+    Title = "リモート生成フロントエンド"
+    Download = "約0.3〜0.6 GB"
+    Disk = "約1〜2 GB"
+    MinimumFreeGb = 2
+    Detail = "Windows小窓、ローカル再生、SSH生成接続を導入します。CUDA・IrodoriモデルはこのPCへ導入しません。"
 }
 
 if ($Describe) {
@@ -362,6 +370,7 @@ function Test-ReadingEnvironmentReady {
 
 function Get-RequiredFreeSpaceGb {
     param([string]$SelectedProfile)
+    if ($SelectedProfile -eq "frontend") { return 2.0 }
     if ($SelectedProfile -eq "reading") { return 15.0 }
     if (Test-ReadingEnvironmentReady) {
         if ($SelectedProfile -eq "stt") { return 3.0 }
@@ -385,7 +394,7 @@ try {
         if (-not (Get-Command py.exe -ErrorAction SilentlyContinue) -and -not (Get-Command python.exe -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $python)) {
             throw "Python 3.10以上が見つかりません。"
         }
-        if (-not (Test-EarlyNvidiaCapability)) {
+        if ($Profile -ne "frontend" -and -not (Test-EarlyNvidiaCapability)) {
             throw "NVIDIA GPUまたはNVIDIAドライバーを確認できません。Local Voice Bridgeの実音声機能にはNVIDIA GPU/CUDAが必要です。"
         }
     }
@@ -402,6 +411,7 @@ try {
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel") -FailureMessage "pip基盤の更新に失敗しました。"
     }
 
+    if ($Profile -ne "frontend") {
     Invoke-SetupStage -Id "torch" -Name "CUDA版PyTorch・TorchAudioの導入" -Code "LVB-SETUP-040" -Verify { Test-PythonImport "import torch, torchaudio" } -Action {
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "torch==2.11.0", "torchaudio==2.11.0", "--index-url", "https://download.pytorch.org/whl/cu128") -FailureMessage "CUDA版PyTorchの導入に失敗しました。"
     }
@@ -437,6 +447,12 @@ try {
     if (-not $SkipModelDownload) {
         Invoke-SetupStage -Id "model-cache" -Name "Irodoriモデル・Codecの取得" -Code "LVB-SETUP-110" -AlwaysRun -Action {
             Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\preflight_irodori.py"), "--strict-cuda") -FailureMessage "Irodoriモデルの取得または確認に失敗しました。"
+        }
+    }
+
+    } else {
+        Invoke-SetupStage -Id "frontend-dependencies" -Name "リモート生成フロントエンド依存の導入" -Code "LVB-SETUP-085" -Verify { Test-PythonImport "import PySide6, soundfile, sounddevice, numpy, paramiko" } -Action {
+            Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", (Join-Path $localApi "requirements-frontend.txt")) -FailureMessage "フロントエンド依存の導入に失敗しました。"
         }
     }
 

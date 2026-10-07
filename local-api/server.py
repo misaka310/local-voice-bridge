@@ -23,6 +23,7 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 import api_router
 from control_state import ControlStateStore
 from desktop_pet_config import discover_available_pets
+from generation_backend import normalize_generation_backend
 from http_io import ResponseWriteError, is_normal_client_disconnect, json_response, request_json
 from http_io import MAX_POST_BODY_BYTES, browser_origin_allowed, validate_post_request, validate_request_host
 from installation_identity import installation_id
@@ -180,6 +181,10 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
         if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
             raise BridgeError("このAPIはローカル専用です。publicBaseUrl に path、query、fragment は指定できません")
         config["publicBaseUrl"] = f"http://127.0.0.1:{parsed.port or config.get('port', 8717)}"
+    try:
+        normalize_generation_backend(config)
+    except ValueError as exc:
+        raise BridgeError(str(exc)) from exc
     config["engine"] = "irodori_direct"
     existing = config.get("models") if isinstance(config.get("models"), dict) else {}
     irodori_model = copy.deepcopy(DEFAULT_CONFIG["models"]["irodori-v3"])

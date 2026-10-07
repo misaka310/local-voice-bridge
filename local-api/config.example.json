@@ -1,5 +1,11 @@
 {
   "engine": "irodori_direct",
+  "generationBackend": "local",
+  "remoteGeneration": {
+    "sshAlias": "generation-host",
+    "remoteRepoRoot": "C:/path/to/local-voice-bridge",
+    "connectTimeoutSeconds": 7.0
+  },
   "host": "127.0.0.1",
   "port": 8717,
   "publicBaseUrl": "http://127.0.0.1:8717",

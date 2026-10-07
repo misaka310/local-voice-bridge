@@ -15,6 +15,8 @@
 
 `.venv`、`pythonw.exe`、`PySide6`、`QtWidgets`、`QtSvg`などが不足している場合は、EXEから正式なセットアップ/修復画面へ進めます。通常利用者へ内部セットアップスクリプトを直接案内しません。
 
+`generationBackend=remote_ssh`では、このPCのLocal API `127.0.0.1:8717`、Windows小窓、設定、キャラクター、再生はそのまま起動し、音声の**生成バックエンド**だけをSSH先へ委譲します。バックエンドが停止・切断してもLocal API自体は終了せず、音声生成だけを利用不可として扱います。生成側PCでLocal Voice Bridgeのtrayや8717を起動する必要はありません。
+
 ## 通知領域メニュー
 
 表示言語はWindows小窓と同じ日本語です。
