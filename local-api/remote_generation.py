@@ -125,7 +125,9 @@ class RemoteGenerationClient:
 
     def _worker_command(self) -> str:
         root = self._normalized_remote_root()
-        return f'py -3.11 -u "{root}/local-api/remote_generation_worker.py"'
+        python = f"{root}/local-api/.venv/Scripts/python.exe"
+        worker = f"{root}/local-api/remote_generation_worker.py"
+        return f'"{python}" -u "{worker}"'
 
     def _close_connection(self) -> None:
         channel = self._channel
