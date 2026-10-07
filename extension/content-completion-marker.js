@@ -13,9 +13,10 @@
     playing: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#16a34a"/><path d="M7 13h5l6-5v16l-6-5H7z" fill="#fff"/><path d="M21 12c2 2 2 6 0 8M24 9c4 4 4 10 0 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
     error: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#dc2626"/><path d="M16 8v11" stroke="#fff" stroke-width="4" stroke-linecap="round"/><circle cx="16" cy="24" r="2.2" fill="#fff"/></svg>',
   });
-  const FAVICON_DATA_URLS = Object.freeze(Object.fromEntries(
-    Object.entries(STATUS_SVG).map(([status, svg]) => [status, `data:image/svg+xml,${encodeURIComponent(svg)}`]),
-  ));
+  function versionedFaviconDataUrl(svg, revision) {
+    const versioned = String(svg || '').replace('</svg>', '<!--local-voice-revision:' + revision + '--></svg>');
+    return 'data:image/svg+xml,' + encodeURIComponent(versioned);
+  }
 
   function elementForNode(node) {
     if (!node) return null;
@@ -56,6 +57,33 @@
     });
   }
 
+  function activeCompetingFaviconNode(node) {
+    const element = elementForNode(node);
+    if (!element) return false;
+    const links = [];
+    if (String(element.tagName || '').toLowerCase() === 'link') links.push(element);
+    if (typeof element.querySelectorAll === 'function') {
+      try {
+        links.push(...element.querySelectorAll('link'));
+      } catch (_error) {}
+    }
+    return links.some((link) => (
+      link.id !== FAVICON_ID
+      && String(link.getAttribute?.('rel') || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon')
+    ));
+  }
+
+  function headMutationNeedsFaviconRefresh(mutations = []) {
+    const batch = Array.from(mutations || []);
+    return batch.some((mutation) => {
+      if (mutation.type === 'attributes') return activeCompetingFaviconNode(mutation.target);
+      if (mutation.type !== 'childList') return false;
+      return Array.from(mutation.addedNodes || []).some(activeCompetingFaviconNode);
+    });
+  }
+
   function create(ctx) {
     let terminalStatus = null;
     let newConversation = false;
@@ -63,6 +91,8 @@
     let playing = false;
     let baseTitle = '';
     let titleObserver = null;
+    let faviconRevision = Date.now();
+    let activeFaviconHref = '';
 
     function stripPrefix(title) {
       const value = String(title || '');
@@ -132,23 +162,30 @@
       }
     }
 
-    function ensureFavicon(status) {
-      if (!ctx.document.head || !FAVICON_DATA_URLS[status]) return;
+    function freshFaviconHref(status) {
+      faviconRevision += 1;
+      return versionedFaviconDataUrl(STATUS_SVG[status], faviconRevision);
+    }
+
+    function ensureFavicon(status, refreshFavicon = false) {
+      if (!ctx.document.head || !STATUS_SVG[status]) return;
       let favicon = ctx.document.getElementById(FAVICON_ID);
+      const previousStatus = favicon?.getAttribute('data-local-voice-status') || '';
       if (!favicon) {
         favicon = ctx.document.createElement('link');
         favicon.id = FAVICON_ID;
         favicon.rel = 'icon';
         favicon.type = 'image/svg+xml';
       }
-      if (favicon.getAttribute('data-local-voice-status') !== status) {
-        favicon.setAttribute('data-local-voice-status', status);
-      }
-      if (favicon.href !== FAVICON_DATA_URLS[status]) favicon.href = FAVICON_DATA_URLS[status];
+      const statusChanged = previousStatus !== status;
+      if (statusChanged) favicon.setAttribute('data-local-voice-status', status);
+      if (favicon.getAttribute('sizes') !== 'any') favicon.setAttribute('sizes', 'any');
+      if (!activeFaviconHref || statusChanged || refreshFavicon) activeFaviconHref = freshFaviconHref(status);
+      if (favicon.href !== activeFaviconHref) favicon.href = activeFaviconHref;
       if (favicon.parentNode !== ctx.document.head) ctx.document.head.appendChild(favicon);
     }
 
-    function sync() {
+    function sync(options = {}) {
       const currentTitle = stripPrefix(ctx.document.title);
       if (currentTitle) {
         baseTitle = currentTitle;
@@ -157,11 +194,12 @@
       const status = displayedStatus();
       if (status === 'idle') {
         ctx.document.getElementById(FAVICON_ID)?.remove();
+        activeFaviconHref = '';
         restoreOriginalFavicons();
         return;
       }
       suppressOriginalFavicons();
-      ensureFavicon(status);
+      ensureFavicon(status, Boolean(options.refreshFavicon));
     }
 
     function setTerminalStatus(status) {
@@ -241,7 +279,9 @@
       if (await isTabActivelyViewed()) setTerminalStatus(null);
       else sync();
       titleObserver = new ctx.MutationObserver((mutations) => {
-        if (headMutationNeedsSync(mutations)) sync();
+        if (headMutationNeedsSync(mutations)) {
+          sync({ refreshFavicon: headMutationNeedsFaviconRefresh(mutations) });
+        }
       });
       titleObserver.observe(ctx.document.head, {
         childList: true,
@@ -277,5 +317,5 @@
     };
   }
 
-  global.LocalVoiceCompletionMarker = Object.freeze({ create, headMutationNeedsSync });
+  global.LocalVoiceCompletionMarker = Object.freeze({ create, headMutationNeedsSync, headMutationNeedsFaviconRefresh });
 })(globalThis);

@@ -34,6 +34,7 @@ REFERENCE_DIR = LOCAL_API_DIR / "reference" / "voices"
 HEALTH_URL = "http://127.0.0.1:8717/health"
 PORT = 8717
 HEALTH_INTERVAL_SECONDS = 5.0
+HEALTH_RESTART_GRACE_SECONDS = 45.0
 RESTART_MIN_INTERVAL_SECONDS = 10.0
 PREFLIGHT_TIMEOUT_SECONDS = 180.0
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -149,6 +150,7 @@ class VoiceBridgeController:
         self._status_callback: Callable[[str], None] | None = None
         self._last_start_attempt = 0.0
         self._health_failures = 0
+        self._unhealthy_since: float | None = None
 
     @property
     def status(self) -> str:
@@ -201,13 +203,17 @@ class VoiceBridgeController:
             healthy, _ = probe_health()
             if healthy:
                 self._health_failures = 0
+                self._unhealthy_since = None
                 self.set_status("Ready" if self._process is not None else "Ready (existing)")
                 continue
 
             self._health_failures += 1
             if self._process is not None and self._process.poll() is None:
                 self.set_status("Unhealthy")
-                if self._health_failures >= 2:
+                now = time.monotonic()
+                if self._unhealthy_since is None:
+                    self._unhealthy_since = now
+                if now - self._unhealthy_since >= HEALTH_RESTART_GRACE_SECONDS:
                     self._restart_owned_server()
                 continue
 
