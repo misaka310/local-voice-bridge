@@ -181,6 +181,15 @@ class TrayControllerContractTests(unittest.TestCase):
     def test_public_tree_has_no_vbs_launcher(self) -> None:
         self.assertFalse((ROOT / "start-voice-bridge.vbs").exists())
 
+    def test_uninstall_removes_current_and_legacy_startup_folder_entries(self) -> None:
+        source = (ROOT / "scripts" / "uninstall-local-voice-bridge.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("$startupEntryNames", source)
+        self.assertIn("'Local Voice Bridge.lnk'", source)
+        self.assertIn("'ChatGPT Local Voice Bridge.lnk'", source)
+        self.assertIn("'Local Voice Bridge.vbs'", source)
+        self.assertIn("'ChatGPT Local Voice Bridge.vbs'", source)
+        self.assertIn("foreach ($name in $startupEntryNames)", source)
+
     def test_public_contributor_contract_requires_agent_entrypoint(self) -> None:
         self.assertTrue((ROOT / "CONTRIBUTING.md").is_file())
         agents_path = ROOT / "AGENTS.md"
