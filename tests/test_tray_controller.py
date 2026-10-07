@@ -162,7 +162,7 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn("install-start-menu-shortcut.ps1", setup_engine)
         self.assertIn("開発者向け（通常は不要）", setup_gui)
         self.assertIn("開発者向けの項目を表示", setup_gui)
-        self.assertIn('$visibleProfileKeys = @("reading", "stt")', setup_gui)
+        self.assertIn('$visibleProfileKeys = @("reading", "stt", "frontend")', setup_gui)
         self.assertIn('if ($advancedCheck.Checked)', setup_gui)
         self.assertIn("失敗内容をコピー", setup_gui)
 
@@ -311,6 +311,24 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertIn("フォールバック", install)
         self.assertIn("切断", install)
         self.assertIn("更新待ち", install)
+
+    def test_remote_generation_docs_and_worker_keep_frontend_owned_reference_assets(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        setup = (ROOT / "docs" / "setup.md").read_text(encoding="utf-8")
+        startup = (ROOT / "docs" / "startup.md").read_text(encoding="utf-8")
+        operation = (ROOT / "docs" / "operation.md").read_text(encoding="utf-8")
+        worker = (ROOT / "local-api" / "remote_generation_worker.py").read_text(encoding="utf-8")
+
+        self.assertIn("remote_ssh", readme)
+        self.assertIn("生成だけ", readme)
+        self.assertIn("参照音声はフロントエンド側", architecture)
+        self.assertIn("frontend", setup)
+        self.assertIn("バックエンド", startup)
+        self.assertIn("参照音声はフロントエンド側", operation)
+        self.assertNotIn("socket.socket", worker)
+        self.assertNotIn("ThreadingHTTPServer", worker)
+        self.assertNotIn("listen(", worker)
 
 
 if __name__ == "__main__":
