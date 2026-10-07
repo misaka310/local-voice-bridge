@@ -37,11 +37,17 @@ foreach ($name in @('Local Voice Bridge.lnk', 'ChatGPT Local Voice Bridge.lnk'))
 
 $appData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
 $startupFolder = Join-Path $appData 'Microsoft\Windows\Start Menu\Programs\Startup'
-foreach ($name in @('Local Voice Bridge.vbs', 'ChatGPT Local Voice Bridge.vbs')) {
+$startupEntryNames = @(
+    'Local Voice Bridge.lnk',
+    'ChatGPT Local Voice Bridge.lnk',
+    'Local Voice Bridge.vbs',
+    'ChatGPT Local Voice Bridge.vbs'
+)
+foreach ($name in $startupEntryNames) {
     $path = Join-Path $startupFolder $name
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         Remove-Item -LiteralPath $path -Force
-        $removed.Add("legacy-startup:$name")
+        $removed.Add("startup-folder:$name")
     }
 }
 
