@@ -158,6 +158,8 @@ def _build_remote_voice_runtime(
             ssh_alias=str(remote.get("sshAlias") or ""),
             remote_repo_root=str(remote.get("remoteRepoRoot") or ""),
             connect_timeout_seconds=float(remote.get("connectTimeoutSeconds", 7.0)),
+            preferred_cuda_device=str(remote.get("preferredCudaDevice") or ""),
+            preferred_gpu_min_free_mib=int(remote.get("preferredGpuMinFreeMiB", 8192)),
         ),
         output_dir=output_dir(config),
     )

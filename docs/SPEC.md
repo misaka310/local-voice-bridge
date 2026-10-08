@@ -65,6 +65,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 「既存ツールを再利用できる」「責務分離がきれいになる」「別ツールの不具合を直せる」は、前項の承認を省略する理由にならない。通常利用者が管理するものが増える変更は内部変更として扱わない。
 - 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とし、追加ポートは明示承認済みの仕様変更がない限り導入しない。
 - 承認済みの`generationBackend=remote_ssh`では、フロントエンドPCがLocal API、Windows UI、設定、キュー、再生、ブラウザ状態、`referenceVoice`と参照音声資産を所有し、Irodori/CUDAの生成だけを既存SSH trust上のstdio workerへ委譲する。生成側PCはLocal Voice Bridgeのtray、Local API、追加listener、キャラクターライブラリを所有しない。
+- `remote_ssh` workerは生成側Windowsユーザーの`CUDA_VISIBLE_DEVICES`を暗黙継承しない。`remoteGeneration.preferredCudaDevice`を優先GPUとして指定でき、起動時にそのGPUの空きVRAMが`preferredGpuMinFreeMiB`以上なら優先し、不足時はその時点で最も空きVRAMの大きいGPUへ自動フォールバックする。
 - リモート生成時も参照音声はフロントエンド側で解決し、選択中の参照音声・参照テキストだけをリクエスト単位で送る。生成側へキャラクター別の参照音声ライブラリを永続複製しない。
 - `remote_ssh`の生成バックエンドが停止・切断してもフロントエンドの`127.0.0.1:8717`、設定、favicon、タブ状態は維持し、音声生成だけをbackend unavailableとして扱う。ローカル生成への暗黙フォールバックは行わない。
 - ローカルAPIはloopback専用を維持し、全HTTPリクエストで`Host`をloopback名またはloopback IPへ限定する。POSTはJSONだけを受け付け、通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。

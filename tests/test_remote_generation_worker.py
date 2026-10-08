@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ if str(LOCAL_API) not in sys.path:
     sys.path.insert(0, str(LOCAL_API))
 
 from remote_generation_protocol import PROTOCOL_VERSION, read_frame, write_frame  # noqa: E402
+import remote_generation_worker  # noqa: E402
 from remote_generation_worker import run_worker  # noqa: E402
 
 
@@ -26,6 +28,54 @@ class RemoteGenerationWorkerTests(unittest.TestCase):
     def _read_response(self, stream: io.BytesIO) -> tuple[dict, bytes]:
         stream.seek(0)
         return read_frame(stream, max_payload_bytes=64 * 1024 * 1024)
+
+    def test_gpu_selection_prefers_3060_when_it_has_required_free_memory(self) -> None:
+        gpus = [
+            {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 9000},
+            {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 12000},
+        ]
+
+        selected = remote_generation_worker.select_cuda_device(
+            gpus,
+            preferred_device="GPU-3060",
+            preferred_min_free_mib=8192,
+        )
+
+        self.assertEqual(selected["uuid"], "GPU-3060")
+
+    def test_gpu_selection_falls_back_to_freest_gpu_when_preferred_is_busy(self) -> None:
+        gpus = [
+            {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 4096},
+            {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 11000},
+        ]
+
+        selected = remote_generation_worker.select_cuda_device(
+            gpus,
+            preferred_device="GPU-3060",
+            preferred_min_free_mib=8192,
+        )
+
+        self.assertEqual(selected["uuid"], "GPU-5060")
+
+    def test_cuda_visibility_ignores_inherited_user_selection_and_uses_policy_result(self) -> None:
+        original = os.environ.get("CUDA_VISIBLE_DEVICES")
+        try:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "GPU-5060"
+            selected = remote_generation_worker.configure_cuda_visibility(
+                preferred_device="GPU-3060",
+                preferred_min_free_mib=8192,
+                gpu_query=lambda: [
+                    {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 9000},
+                    {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 12000},
+                ],
+            )
+            self.assertEqual(selected["uuid"], "GPU-3060")
+            self.assertEqual(os.environ.get("CUDA_VISIBLE_DEVICES"), "GPU-3060")
+        finally:
+            if original is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = original
 
     def test_prepare_returns_runtime_metadata_without_starting_server(self) -> None:
         stdin = self._request_stream({"op": "prepare", "requestId": "prep-1"})

@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 
 映像は実ChatGPTアカウントではなく、安全なローカルフィクスチャで実際の拡張機能コードを動かしています。ローカル音声生成エンジンにはIrodori v3を使用しています。音声生成はこのリポジトリ内のIrodori direct runtimeで完結し、別アプリの`local-tts-service`には依存しません。
 
-Irodori/CUDAを別のWindows PCへ置く場合は`generationBackend=remote_ssh`を使用できます。このモードでもLocal API、Windows小窓、設定、キャラクター/参照音声、再生、ブラウザ状態はフロントエンドPCが所有し、**生成だけ**をSSH経由のheadless workerへ渡します。生成側PCにLocal Voice Bridgeの8717、tray、キャラクターライブラリを起動・複製する構成ではありません。
+Irodori/CUDAを別のWindows PCへ置く場合は`generationBackend=remote_ssh`を使用できます。このモードでもLocal API、Windows小窓、設定、キャラクター/参照音声、再生、ブラウザ状態はフロントエンドPCが所有し、**生成だけ**をSSH経由のheadless workerへ渡します。生成側PCにLocal Voice Bridgeの8717、tray、キャラクターライブラリを起動・複製する構成ではありません。複数GPU環境では優先GPUと必要な空きVRAMを設定でき、優先GPUの空きが不足している場合はworker起動時に最も空いているGPUへ自動フォールバックします。
 
 ## 主な機能
 
