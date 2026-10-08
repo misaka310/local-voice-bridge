@@ -20,6 +20,7 @@ MAX_REFERENCE_WAV_BYTES = 32 * 1024 * 1024
 MAX_GENERATED_WAV_BYTES = 64 * 1024 * 1024
 _SAFE_REMOTE_ROOT = re.compile(r"^[A-Za-z]:[\\/][A-Za-z0-9 _./\\-]+$")
 _SAFE_ALIAS = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_CUDA_DEVICE = re.compile(r"^(?:[0-9]+|GPU-[A-Fa-f0-9-]+)$")
 
 
 class RemoteGenerationError(RuntimeError):
@@ -35,6 +36,8 @@ class RemoteGenerationConfig:
     ssh_alias: str
     remote_repo_root: str
     connect_timeout_seconds: float = 7.0
+    preferred_cuda_device: str = ""
+    preferred_gpu_min_free_mib: int = 8192
 
 
 class RemoteGenerationClient:
@@ -127,7 +130,23 @@ class RemoteGenerationClient:
         root = self._normalized_remote_root()
         python = f"{root}/local-api/.venv/Scripts/python.exe"
         worker = f"{root}/local-api/remote_generation_worker.py"
-        return f'"{python}" -u "{worker}"'
+        preferred = str(self.config.preferred_cuda_device or "").strip()
+        if preferred and not _SAFE_CUDA_DEVICE.fullmatch(preferred):
+            raise RemoteGenerationError("Remote generation preferred CUDA device is invalid")
+        try:
+            min_free_mib = max(0, int(self.config.preferred_gpu_min_free_mib))
+        except (TypeError, ValueError) as exc:
+            raise RemoteGenerationError("Remote generation GPU free-memory threshold is invalid") from exc
+        args = [
+            f'"{python}"',
+            "-u",
+            f'"{worker}"',
+            "--preferred-gpu-min-free-mib",
+            str(min_free_mib),
+        ]
+        if preferred:
+            args.extend(["--preferred-cuda-device", preferred])
+        return " ".join(args)
 
     def _close_connection(self) -> None:
         channel = self._channel

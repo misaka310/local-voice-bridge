@@ -152,6 +152,8 @@ DESK側の絶対パス、秘密鍵、ローカルcache pathはDESK2へ返さな�
 
 DESK workerは受け取ったreference assetを一時ディレクトリへ置いてIrodoriへ渡し、生成完了・失敗・キャンセルのいずれでも一時物を削除する。
 
+複数GPU環境ではworker起動時にGPU空きVRAMを確認する。`remoteGeneration.preferredCudaDevice`のGPUが`preferredGpuMinFreeMiB`以上空いていれば優先し、不足時はその時点で最も空きVRAMの大きいGPUへ自動フォールバックする。生成側Windowsユーザーの`CUDA_VISIBLE_DEVICES`は暗黙継承しない。
+
 これによりDESK側へ `reference/voices/asuka` 等を永続複製しない。
 
 ## Lifecycle

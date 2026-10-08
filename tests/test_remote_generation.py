@@ -223,6 +223,32 @@ class RemoteGenerationClientTests(unittest.TestCase):
             self.assertTrue(request["hasReference"])
             self.assertEqual(request_payload, b"RIFF-reference")
 
+    def test_worker_command_requests_preferred_cuda_device_with_automatic_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ssh_config, known_hosts, output = self._paths(root)
+            client = RemoteGenerationClient(
+                RemoteGenerationConfig(
+                    "desk",
+                    "C:/00_dev/17_chatgpt-local-voice-bridge",
+                    preferred_cuda_device="GPU-df2abfc7-2b62-e5ce-2738-f7b68d784457",
+                    preferred_gpu_min_free_mib=8192,
+                ),
+                output_dir=output,
+                paramiko_module=FakeParamiko([]),
+                ssh_config_path=ssh_config,
+                known_hosts_path=known_hosts,
+            )
+
+            command = client._worker_command()
+
+            self.assertIn(
+                "--preferred-cuda-device GPU-df2abfc7-2b62-e5ce-2738-f7b68d784457",
+                command,
+            )
+            self.assertIn("--preferred-gpu-min-free-mib 8192", command)
+            self.assertNotIn("CUDA_VISIBLE_DEVICES", command)
+
     def test_channel_loss_reconnects_once_and_next_response_succeeds(self) -> None:
         first = FakeChannel(b"")
         second = FakeChannel(

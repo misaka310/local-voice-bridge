@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import io
+import os
+import ctypes
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -21,6 +24,122 @@ MAX_REFERENCE_WAV_BYTES = 32 * 1024 * 1024
 MAX_GENERATED_WAV_BYTES = 64 * 1024 * 1024
 MAX_REFERENCE_TEXT_CHARS = 64 * 1024
 REMOTE_REFERENCE_ID = "remote-request"
+DEFAULT_PREFERRED_GPU_MIN_FREE_MIB = 8192
+_SELECTED_GPU: dict[str, Any] = {}
+
+
+def query_nvidia_gpus() -> list[dict[str, Any]]:
+    class MemoryInfo(ctypes.Structure):
+        _fields_ = [
+            ("total", ctypes.c_ulonglong),
+            ("free", ctypes.c_ulonglong),
+            ("used", ctypes.c_ulonglong),
+        ]
+
+    try:
+        nvml = ctypes.WinDLL("nvml.dll")
+        nvml.nvmlInit_v2.restype = ctypes.c_int
+        nvml.nvmlShutdown.restype = ctypes.c_int
+        nvml.nvmlDeviceGetCount_v2.argtypes = [ctypes.POINTER(ctypes.c_uint)]
+        nvml.nvmlDeviceGetCount_v2.restype = ctypes.c_int
+        nvml.nvmlDeviceGetHandleByIndex_v2.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)]
+        nvml.nvmlDeviceGetHandleByIndex_v2.restype = ctypes.c_int
+        nvml.nvmlDeviceGetUUID.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint]
+        nvml.nvmlDeviceGetUUID.restype = ctypes.c_int
+        nvml.nvmlDeviceGetName.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint]
+        nvml.nvmlDeviceGetName.restype = ctypes.c_int
+        nvml.nvmlDeviceGetMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(MemoryInfo)]
+        nvml.nvmlDeviceGetMemoryInfo.restype = ctypes.c_int
+    except (AttributeError, OSError):
+        return []
+
+    if nvml.nvmlInit_v2() != 0:
+        return []
+    try:
+        count = ctypes.c_uint(0)
+        if nvml.nvmlDeviceGetCount_v2(ctypes.byref(count)) != 0:
+            return []
+        gpus: list[dict[str, Any]] = []
+        for index in range(int(count.value)):
+            handle = ctypes.c_void_p()
+            if nvml.nvmlDeviceGetHandleByIndex_v2(index, ctypes.byref(handle)) != 0:
+                continue
+            uuid_buffer = ctypes.create_string_buffer(96)
+            name_buffer = ctypes.create_string_buffer(96)
+            memory = MemoryInfo()
+            if nvml.nvmlDeviceGetUUID(handle, uuid_buffer, len(uuid_buffer)) != 0:
+                continue
+            if nvml.nvmlDeviceGetName(handle, name_buffer, len(name_buffer)) != 0:
+                continue
+            if nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) != 0:
+                continue
+            uuid = uuid_buffer.value.decode("utf-8", errors="replace").strip()
+            if not uuid:
+                continue
+            gpus.append(
+                {
+                    "index": str(index),
+                    "uuid": uuid,
+                    "name": name_buffer.value.decode("utf-8", errors="replace").strip(),
+                    "freeMiB": max(0, int(memory.free // (1024 * 1024))),
+                }
+            )
+        return gpus
+    finally:
+        nvml.nvmlShutdown()
+
+
+def select_cuda_device(
+    gpus: list[dict[str, Any]],
+    *,
+    preferred_device: str = "",
+    preferred_min_free_mib: int = DEFAULT_PREFERRED_GPU_MIN_FREE_MIB,
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for gpu in gpus:
+        uuid = str(gpu.get("uuid") or "").strip()
+        index = str(gpu.get("index") or "").strip()
+        name = str(gpu.get("name") or "").strip()
+        try:
+            free_mib = max(0, int(gpu.get("freeMiB", 0)))
+        except (TypeError, ValueError):
+            continue
+        if not uuid:
+            continue
+        candidates.append({"index": index, "uuid": uuid, "name": name, "freeMiB": free_mib})
+    if not candidates:
+        return {}
+
+    preferred = str(preferred_device or "").strip()
+    minimum = max(0, int(preferred_min_free_mib))
+    if preferred:
+        preferred_lower = preferred.lower()
+        for candidate in candidates:
+            if candidate["index"] == preferred or candidate["uuid"].lower() == preferred_lower:
+                if candidate["freeMiB"] >= minimum:
+                    return candidate
+                break
+
+    return max(candidates, key=lambda item: item["freeMiB"])
+
+
+def configure_cuda_visibility(
+    *,
+    preferred_device: str = "",
+    preferred_min_free_mib: int = DEFAULT_PREFERRED_GPU_MIN_FREE_MIB,
+    gpu_query: Callable[[], list[dict[str, Any]]] = query_nvidia_gpus,
+) -> dict[str, Any]:
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    selected = select_cuda_device(
+        gpu_query(),
+        preferred_device=preferred_device,
+        preferred_min_free_mib=preferred_min_free_mib,
+    )
+    if selected:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(selected["uuid"])
+    global _SELECTED_GPU
+    _SELECTED_GPU = dict(selected)
+    return selected
 
 
 class _PrefixedStream:
@@ -77,7 +196,14 @@ def _handle_prepare(
         with redirect_stdout(sys.stderr):
             detail = prepare_irodori_direct(raw_config=config, model_config=_model_config(config))
         header = _response_base(request, ok=True, op="prepare")
-        header["runtime"] = detail if isinstance(detail, dict) else {}
+        runtime_detail = dict(detail) if isinstance(detail, dict) else {}
+        if _SELECTED_GPU:
+            runtime_detail.update(
+                selectedCudaDevice=str(_SELECTED_GPU.get("uuid") or ""),
+                selectedGpuName=str(_SELECTED_GPU.get("name") or ""),
+                selectedGpuFreeMiBAtLaunch=int(_SELECTED_GPU.get("freeMiB") or 0),
+            )
+        header["runtime"] = runtime_detail
         write_frame(stdout, header)
     except BaseException as exc:
         header = _response_base(request, ok=False, op="prepare")
@@ -209,6 +335,18 @@ def run_worker(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preferred-cuda-device", default="")
+    parser.add_argument(
+        "--preferred-gpu-min-free-mib",
+        type=int,
+        default=DEFAULT_PREFERRED_GPU_MIN_FREE_MIB,
+    )
+    args = parser.parse_args()
+    configure_cuda_visibility(
+        preferred_device=str(args.preferred_cuda_device or ""),
+        preferred_min_free_mib=max(0, int(args.preferred_gpu_min_free_mib)),
+    )
     # Importing the normal server config loader is safe here: it does not start
     # the HTTP server or tray. Runtime diagnostics are redirected away from the
     # binary stdout protocol by the operation handlers above.
