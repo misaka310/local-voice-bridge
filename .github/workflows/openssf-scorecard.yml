@@ -27,7 +27,7 @@ jobs:
           SCORECARD_REPOSITORY: ${{ github.repository }}
           SCORECARD_COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
-          docker run --rm -e GITHUB_AUTH_TOKEN ghcr.io/ossf/scorecard:v5.5.0 --repo="github.com/${SCORECARD_REPOSITORY}" --commit="${SCORECARD_COMMIT}" --format=json > scorecard.json
+          docker run --rm -e GITHUB_AUTH_TOKEN ghcr.io/ossf/scorecard:v5.5.0@sha256:3f24714e9366917adb7a05635382c97dfecb14b21eaef3dfa2ea48c8e23e0795 --repo="github.com/${SCORECARD_REPOSITORY}" --commit="${SCORECARD_COMMIT}" --format=json > scorecard.json
       - name: Upload PR Scorecard result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
