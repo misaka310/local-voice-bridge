@@ -1,0 +1,6 @@
+{
+  "managed_by": "repo-launch-doctor-security-baseline-v1",
+  "fuzzing": "not_applicable",
+  "fuzzing_reason": "local-voice-bridge is an end-user application/utility repository; no continuously exposed parser or library fuzzing service boundary is published.",
+  "sast": "codeql"
+}
