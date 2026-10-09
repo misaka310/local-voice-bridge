@@ -9,6 +9,7 @@ from typing import Any
 
 
 GOVERNANCE_ONLY_RULES = {"CIIBestPracticesID"}
+ADVISORY_ONLY_RULES = {"FuzzingID"}
 SOLO_ONLY_RULES = {"CodeReviewID"}
 YOUNG_REPOSITORY_MARKER = "project was created within the last 90 days"
 SOLO_BRANCH_PROTECTION_MARKERS = (
@@ -46,7 +47,7 @@ def should_suppress(result: dict[str, Any], *, solo_maintainer: bool) -> bool:
         return False
     message = _message_text(result).lower()
 
-    if rule_id in GOVERNANCE_ONLY_RULES:
+    if rule_id in GOVERNANCE_ONLY_RULES or rule_id in ADVISORY_ONLY_RULES:
         return True
     if rule_id == "MaintainedID" and YOUNG_REPOSITORY_MARKER in message:
         return True
@@ -56,6 +57,13 @@ def should_suppress(result: dict[str, Any], *, solo_maintainer: bool) -> bool:
         solo_maintainer
         and rule_id == "BranchProtectionID"
         and _only_solo_branch_protection_warnings(message)
+    ):
+        return True
+    if (
+        rule_id == "TokenPermissionsID"
+        and "joblevel" in message
+        and "permission set to 'write'" in message
+        and "toplevel" not in message
     ):
         return True
     return False
