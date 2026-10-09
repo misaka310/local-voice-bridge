@@ -1,12 +1,20 @@
 version: 2
 updates:
-  - package-ecosystem: pip
-    directory: /local-api
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 5
-  - package-ecosystem: npm
-    directory: /
+  - package-ecosystem: "pip"
+    directory: "/local-api"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 5
