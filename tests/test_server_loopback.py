@@ -147,6 +147,46 @@ class LoopbackConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(server.BridgeError, "ローカル専用"):
                     server.normalize_config(self.config(publicBaseUrl=url))
 
+    def test_generation_backend_defaults_to_local(self):
+        normalized = server.normalize_config(self.config())
+        self.assertEqual(normalized["generationBackend"], "local")
+
+    def test_remote_generation_backend_requires_explicit_ssh_config(self):
+        normalized = server.normalize_config(
+            self.config(
+                generationBackend="remote_ssh",
+                remoteGeneration={
+                    "sshAlias": "desk",
+                    "remoteRepoRoot": "C:/00_dev/17_chatgpt-local-voice-bridge",
+                },
+            )
+        )
+        self.assertEqual(normalized["generationBackend"], "remote_ssh")
+        self.assertEqual(normalized["remoteGeneration"]["sshAlias"], "desk")
+        self.assertEqual(normalized["remoteGeneration"]["preferredCudaDevice"], "")
+        self.assertEqual(normalized["remoteGeneration"]["preferredGpuMinFreeMiB"], 8192)
+
+    def test_remote_generation_backend_rejects_missing_connection_config(self):
+        with self.assertRaisesRegex(server.BridgeError, "remoteGeneration"):
+            server.normalize_config(self.config(generationBackend="remote_ssh", remoteGeneration={}))
+
+    def test_remote_generation_backend_rejects_unsafe_preferred_cuda_device(self):
+        with self.assertRaisesRegex(server.BridgeError, "preferredCudaDevice"):
+            server.normalize_config(
+                self.config(
+                    generationBackend="remote_ssh",
+                    remoteGeneration={
+                        "sshAlias": "desk",
+                        "remoteRepoRoot": "C:/00_dev/17_chatgpt-local-voice-bridge",
+                        "preferredCudaDevice": "0 & whoami",
+                    },
+                )
+            )
+
+    def test_unknown_generation_backend_is_rejected(self):
+        with self.assertRaisesRegex(server.BridgeError, "generationBackend"):
+            server.normalize_config(self.config(generationBackend="magic"))
+
     def test_extension_package_version_reads_manifest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest = Path(temp_dir) / "manifest.json"

@@ -77,6 +77,12 @@ tray側に会話設定用・ペット用の別API polling timerは持ちませ�
 
 Local runtime設定の正本はLocal APIです。`referenceVoice`、音量、`micConversationEnabled`、STTモデル、送信前猶予、`liveTtsProfile`をChrome storageへ逆流させて正本化しません。
 
+### リモート生成バックエンド
+
+`generationBackend=remote_ssh`では、Local API `127.0.0.1:8717`、Windows UI、設定、キュー、再生、ブラウザ状態はフロントエンド側に残し、Irodoriの**生成だけ**をSSH stdio workerへ委譲します。`local-api/remote_generation.py`がSSH transportを所有し、`local-api/remote_generation_worker.py`は生成側でIrodori/CUDAを使うheadless workerです。workerはHTTP/TCP listenerを持たず、Local Voice Bridgeのtrayや8717を起動しません。
+
+参照音声はフロントエンド側が正本です。選択中の`referenceVoice`をフロントエンド側で`voice.wav`/参照テキストへ解決し、その生成リクエストに必要なデータだけをworkerへ送ります。生成側にキャラクター別reference libraryを永続複製しません。SSH接続が失敗してもフロントエンドの8717、設定、favicon、タブ状態は維持し、音声生成だけをbackend unavailableとして扱います。
+
 ## ブラウザ拡張側
 
 ### content

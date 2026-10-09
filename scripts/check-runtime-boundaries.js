@@ -67,6 +67,13 @@ for (const relativePath of boundaryFiles) {
   }
 }
 
+const remoteWorker = read('local-api/remote_generation_worker.py');
+for (const forbidden of ['socket.socket', 'ThreadingHTTPServer', 'HTTPServer(', '.listen(']) {
+  if (remoteWorker.includes(forbidden)) {
+    fail(`local-api/remote_generation_worker.py: remote generation worker must remain stdio-only; found ${forbidden}`);
+  }
+}
+
 if (failures.length) {
   console.error('RUNTIME BOUNDARY CHECK: FAIL');
   for (const failure of failures) console.error(`- ${failure}`);

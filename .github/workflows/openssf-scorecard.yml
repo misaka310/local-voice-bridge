@@ -1,0 +1,64 @@
+# managed-by: repo-launch-doctor-public-guard-v2
+# policy-source: https://github.com/misaka310/repo-launch-doctor/blob/main/docs/evaluation.md#公開リポジトリ運用の正本
+name: OpenSSF Scorecard
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 1 * * 6"
+  workflow_dispatch:
+permissions: read-all
+concurrency:
+  group: openssf-scorecard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  pr-preview:
+    name: scorecard-pr
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Run Scorecard CLI against PR head
+        shell: bash
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCORECARD_REPOSITORY: ${{ github.repository }}
+          SCORECARD_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docker run --rm -e GITHUB_AUTH_TOKEN ghcr.io/ossf/scorecard:v5.5.0@sha256:3f24714e9366917adb7a05635382c97dfecb14b21eaef3dfa2ea48c8e23e0795 --repo="github.com/${SCORECARD_REPOSITORY}" --commit="${SCORECARD_COMMIT}" --format=json > scorecard.json
+      - name: Upload PR Scorecard result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openssf-scorecard-pr
+          path: scorecard.json
+          retention-days: 5
+  analysis:
+    name: Scorecard analysis
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openssf-scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results.sarif

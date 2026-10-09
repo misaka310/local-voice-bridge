@@ -6,6 +6,7 @@ chatgpt.comにローカル音声読み上げと、任意のプッシュ・トゥ
 
 > **非公式・非提携について**
 > このプロジェクトは独立して開発された非公式ツールであり、OpenAIの公式製品、提携製品、承認製品、スポンサー製品ではありません。ChatGPT、OpenAIおよび関連する名称・商標は各権利者に帰属します。
+> Irodori v3、CUDA、worker APIなどの第三者ソフトウェア・モデルは、それぞれのライセンスと利用規約に従います。名前の記載は、本リポジトリへの同梱や提供元との提携・承認を意味しません。
 
 <p align="center">
   <img src="docs/media/system-overview.png" alt="Local Voice Bridgeの処理フロー概要" width="100%">
@@ -19,7 +20,11 @@ https://github.com/user-attachments/assets/55580bbe-1325-4548-a03b-d70f7004a7fb
 
 映像は実ChatGPTアカウントではなく、安全なローカルフィクスチャで実際の拡張機能コードを動かしています。ローカル音声生成エンジンにはIrodori v3を使用しています。既定の1台構成では、このリポジトリ内のIrodori direct runtimeで音声生成まで完結し、別アプリの`local-tts-service`には依存しません。
 
-明示的に`remoteTts.enabled=true`を設定した2台構成では、Local Voice Bridge本体、Windows小窓、キャラクター選択、設定、拡張機能、favicon、再生制御、loopback API `127.0.0.1:8717`はフロントPCに残し、音声生成だけを別PCのTTS workerへ委譲できます。workerには`local-tts-service`など互換TTS APIを使え、worker側へLocal Voice Bridgeのtray、小窓、拡張機能、キャラクターUIを移しません。詳細は[起動とヘルス確認](docs/startup.md)を参照してください。
+`remoteTts`は、アプリとブラウザー拡張をフロントPCに残し、音声生成だけを別PCのHTTP TTS workerへ委譲する任意機能です。既定ではオフで、workerは別途準備します。設定手順は[起動とヘルス確認](docs/startup.md)を参照してください。
+
+HTTP方式では読み上げテキスト、選択した音声ID、モデルと生成パラメーターをworkerへ送信しますが、参照WAVは送信しません。`remoteTts`と`generationBackend=remote_ssh`は同時に設定できません。互換workerの例と検証上の制約は[起動とヘルス確認](docs/startup.md)に記載しています。
+
+Irodori/CUDAを別のWindows PCへ置く場合は`generationBackend=remote_ssh`を使用できます。このモードでもLocal API、Windows小窓、設定、キャラクター/参照音声、再生、ブラウザ状態はフロントエンドPCが所有し、**生成だけ**をSSH経由のheadless workerへ渡します。生成側PCにLocal Voice Bridgeの8717、tray、キャラクターライブラリを起動・複製する構成ではありません。複数GPU環境では優先GPUと必要な空きVRAMを設定でき、優先GPUの空きが不足している場合はworker起動時に最も空いているGPUへ自動フォールバックします。
 
 ## 主な機能
 
@@ -95,7 +100,7 @@ Windows小窓の`詳細設定`では、STTモデル、送信前猶予、Live TTS
 | --- | --- | --- | --- |
 | 軽量デモ / mock CI | Node.js 22、Chromium | Windows 11のPlaywright Chromium | Firefox、macOSの実行は未検証 |
 | 実音声 | Windows、Python、NVIDIA GPU、CUDA、Irodori v3 | Windows 11、Windows外部小窓、Playwright Chromium、NVIDIA CUDA環境 | CPUのみ、macOS、Linux、Firefox、Edgeは未検証または未対応 |
-| 2台構成のフロントPC | Windows、Local Voice Bridge本体、loopbackのTTS workerトンネル | `remoteTts`経由で別PCのNVIDIA/CUDA workerへ音声生成を委譲 | フロントPC単体でのIrodori生成は行わない |
+| 2台構成のフロントPC | Windows、Local Voice Bridge本体、loopbackのTTS workerトンネル | mock HTTP workerとのunit test | 別PCの実worker接続・実ブラウザー経路は未検証。フロントPC単体でのIrodori生成は行わない |
 
 GPU、VRAM、ブラウザごとの扱いは[動作環境](docs/hardware.md)にまとめています。未検証の環境を対応済みとはしていません。
 

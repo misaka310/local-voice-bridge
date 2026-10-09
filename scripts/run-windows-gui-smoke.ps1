@@ -10,7 +10,8 @@ if (
     $env:RUNNER_OS -ne 'Windows' -or
     $env:LOCAL_VOICE_GUI_RUNNER -ne 'github-hosted-windows-latest'
 ) {
-    throw 'Windows GUI smoke must run only on GitHub-hosted windows-latest. Do not run it on the user''s everyday Windows desktop.'
+    [Console]::Error.WriteLine('Windows GUI smoke must run only on GitHub-hosted windows-latest. Do not run it on the user''s everyday Windows desktop.')
+    exit 1
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot

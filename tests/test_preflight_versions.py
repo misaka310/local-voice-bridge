@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCAL_API = ROOT / "local-api"
 PREFLIGHT_PATH = LOCAL_API / "scripts" / "preflight_irodori.py"
 AUDIT_PATH = LOCAL_API / "scripts" / "audit_runtime_dependencies.py"
+FRONTEND_PREFLIGHT_PATH = LOCAL_API / "scripts" / "preflight_frontend.py"
+FRONTEND_REQUIREMENTS = LOCAL_API / "requirements-frontend.txt"
 
 
 def load_module(name: str, path: Path):
@@ -28,6 +30,7 @@ def load_module(name: str, path: Path):
 
 preflight = load_module("irodori_preflight_for_test", PREFLIGHT_PATH)
 audit = load_module("runtime_dependency_audit_for_test", AUDIT_PATH)
+frontend_preflight = load_module("frontend_preflight_for_test", FRONTEND_PREFLIGHT_PATH)
 
 
 class SecurityBaselineTests(unittest.TestCase):
@@ -61,6 +64,31 @@ class SecurityBaselineTests(unittest.TestCase):
     def test_rejects_missing_required_package(self):
         with patch.object(preflight, "package_version", side_effect=PackageNotFoundError):
             self.assertFalse(preflight.security_baselines_ok())
+
+
+class FrontendDependencyTests(unittest.TestCase):
+    def test_frontend_requirements_are_minimal_and_pinned(self):
+        requirements = {
+            line.strip()
+            for line in FRONTEND_REQUIREMENTS.read_text(encoding="utf-8-sig").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertEqual(
+            requirements,
+            {
+                "PySide6==6.11.2",
+                "soundfile==0.14.0",
+                "sounddevice>=0.5.6,<0.6",
+                "numpy==2.4.6",
+                "paramiko==5.0.0",
+            },
+        )
+
+    def test_frontend_preflight_checks_only_frontend_modules(self):
+        self.assertEqual(
+            frontend_preflight.REQUIRED_MODULES,
+            ("PySide6", "soundfile", "sounddevice", "numpy", "paramiko"),
+        )
 
 
 class DependencyAuditTests(unittest.TestCase):
