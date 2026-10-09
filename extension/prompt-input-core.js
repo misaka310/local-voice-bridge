@@ -264,9 +264,15 @@
     const commitSubmission = typeof environment.commitSubmission === 'function' ? environment.commitSubmission : null;
     const invalidateSubmission = typeof environment.invalidateSubmission === 'function' ? environment.invalidateSubmission : null;
     const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
+    const cryptoObject = environment.crypto || globalThis.crypto;
+    let generatedIdSequence = 0;
     const createId = typeof environment.createId === 'function'
       ? environment.createId
-      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      : (prefix = 'id') => {
+        if (cryptoObject && typeof cryptoObject.randomUUID === 'function') return `${prefix}-${cryptoObject.randomUUID()}`;
+        generatedIdSequence += 1;
+        return `${prefix}-${Date.now().toString(36)}-${generatedIdSequence.toString(36)}`;
+      };
     let pending = null;
     let generation = 0;
 
