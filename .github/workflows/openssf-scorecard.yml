@@ -1,4 +1,4 @@
-# managed-by: repo-launch-doctor-public-guard-v2
+# managed-by: repo-launch-doctor-public-guard-v3
 # policy-source: https://github.com/misaka310/repo-launch-doctor/blob/main/docs/evaluation.md#公開リポジトリ運用の正本
 name: OpenSSF Scorecard
 on:
@@ -39,7 +39,7 @@ jobs:
     name: Scorecard analysis
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       security-events: write
       id-token: write
@@ -54,13 +54,21 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
+      - name: Keep actionable findings for GitHub Security
+        run: >-
+          python3 .github/scripts/filter-scorecard-sarif.py
+          --input results.sarif
+          --output results-code-scanning.sarif
+          --solo-maintainer
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openssf-scorecard-sarif
-          path: results.sarif
+          path: |
+            results.sarif
+            results-code-scanning.sarif
           retention-days: 5
       - name: Upload to code-scanning
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          sarif_file: results.sarif
+          sarif_file: results-code-scanning.sarif
