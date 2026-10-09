@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-GOVERNANCE_ONLY_RULES = {"CIIBestPracticesID"}
+GOVERNANCE_ONLY_RULES = {"CIIBestPracticesID", "FuzzingID"}
 SOLO_ONLY_RULES = {"CodeReviewID"}
+SAST_HISTORY_ONLY_MARKER = "sast tool detected but not run on all commits"
 YOUNG_REPOSITORY_MARKER = "project was created within the last 90 days"
 SOLO_BRANCH_PROTECTION_MARKERS = (
     "does not require approvers",
@@ -47,6 +48,8 @@ def should_suppress(result: dict[str, Any], *, solo_maintainer: bool) -> bool:
     message = _message_text(result).lower()
 
     if rule_id in GOVERNANCE_ONLY_RULES:
+        return True
+    if rule_id == "SASTID" and SAST_HISTORY_ONLY_MARKER in message:
         return True
     if rule_id == "MaintainedID" and YOUNG_REPOSITORY_MARKER in message:
         return True
