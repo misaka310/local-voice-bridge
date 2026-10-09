@@ -15,6 +15,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 拡張機能更新時はWindows Local Voice小窓またはリポジトリ内の正式な再読み込み経路から更新でき、通常利用で`chrome://extensions`の手動操作を要求しない。
 - 通常利用ではターミナルを表示しない。
 - 再起動、拡張機能再接続、TTS再生失敗などから利用者が状態を理解して復旧できる。
+- 明示的な2台構成では、フロントPCがLocal Voice Bridge本体・設定・キャラクターUI・拡張機能・favicon・再生・`127.0.0.1:8717`を所有したまま、音声生成だけを別PCのTTS workerへ委譲できる。
 
 ### 完成扱いにしないもの
 
@@ -62,8 +63,16 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - 設定、キュー、再生状態、Ref、Autoなど既存UXを内部都合で削除・置換しない。
 - 通常利用者へ内部APIや複数の起動経路を選ばせない。
 - Local Voice Bridgeの通常runtimeまたはセットアップへ、別リポジトリのアプリ／runtime、別常駐プロセス／アプリ、新しいlocalhostサービス／ポート、新しいインストール・起動・監視手順、外部runtime依存、または本プロジェクトの目的外の利用者機能を追加する場合は、実装開始前に利用者の明示承認を必須とする。承認なしでは実装しない。
+- 利用者が明示承認した`remoteTts`構成では、外部worker依存を音声生成だけに限定する。ChatGPTタブ状態、favicon、設定、キュー、再生制御、Windows小窓、キャラクターUIをworkerへ移さない。
+- `remoteTts`構成でもLocal Voice Bridgeの`127.0.0.1:8717`はフロントPC自身が所有し、8717全体をworkerへ転送しない。workerへの経路は別のloopbackトンネルまたは同等のローカル専用経路に限定する。
+- `remoteTts`は読み上げテキスト、参照音声ID、モデルと生成パラメーターをworkerへ送る。参照WAVはフロントPCから送らない。
+- `remoteTts`のworker応答URLは設定したloopback worker originに限定し、別originへのredirectを拒否する。JSON応答は1 MiB、WAV応答は64 MiBまでとし、WAV形式を確認してから保存する。
+- workerへのHTTP接続はloopbackへ直接行い、環境のHTTP proxy設定を経由しない。
+- workerのhealth詳細と応答エラー文字列はローカルAPIの状態・エラーへ転送しない。worker応答に含まれるホスト固有パス等を公開しない。
+- `remoteTts.enabled=true`と`generationBackend=remote_ssh`は同時に設定できない。`remoteTts`はHTTP TTS worker、`remote_ssh`はIrodori stdio workerを使う独立した方式である。
+- フロントPCには参照音声IDと表示ラベルだけを保持でき、実際の参照WAVとCUDAモデルはworker側だけに保持してよい。
 - 「既存ツールを再利用できる」「責務分離がきれいになる」「別ツールの不具合を直せる」は、前項の承認を省略する理由にならない。通常利用者が管理するものが増える変更は内部変更として扱わない。
-- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とし、追加ポートは明示承認済みの仕様変更がない限り導入しない。
+- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とする。明示承認済みの`remoteTts`構成ではworker専用トンネルのloopbackポートだけを追加でき、他の追加ポートは別途承認済みの仕様変更がない限り導入しない。
 - 承認済みの`generationBackend=remote_ssh`では、フロントエンドPCがLocal API、Windows UI、設定、キュー、再生、ブラウザ状態、`referenceVoice`と参照音声資産を所有し、Irodori/CUDAの生成だけを既存SSH trust上のstdio workerへ委譲する。生成側PCはLocal Voice Bridgeのtray、Local API、追加listener、キャラクターライブラリを所有しない。
 - `remote_ssh` workerは生成側Windowsユーザーの`CUDA_VISIBLE_DEVICES`を暗黙継承しない。`remoteGeneration.preferredCudaDevice`を優先GPUとして指定でき、起動時にそのGPUの空きVRAMが`preferredGpuMinFreeMiB`以上なら優先し、不足時はその時点で最も空きVRAMの大きいGPUへ自動フォールバックする。
 - リモート生成時も参照音声はフロントエンド側で解決し、選択中の参照音声・参照テキストだけをリクエスト単位で送る。生成側へキャラクター別の参照音声ライブラリを永続複製しない。
@@ -100,6 +109,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - [ ] Local APIレスポンスにユーザー固有の絶対ファイルパスが露出せず、structured runtime event logは有限サイズでローテーションされる。
 - [ ] 30タブ想定で、アイドル中にsub-second全タブpollや同一タブ操作起点の全タブbroadcastが発生せず、通常生成中のAuto監視がassistant本文の全DOM cloneを繰り返さない。
 - [ ] 通常runtimeに承認のない別リポジトリ依存、別常駐プロセス、追加localhostサービス／ポート、目的外機能が存在せず、`scripts/check-runtime-boundaries.js`がPASSする。
+- [ ] `remoteTts`構成ではworker停止時もフロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御が維持され、worker復旧後はLocal Voice Bridge本体をworker側へ移さず音声生成だけ復旧できる。
 - [ ] `remote_ssh`では生成バックエンドが利用不能でもフロントエンドのLocal APIとブラウザ/Windows UI状態が維持され、復旧後は拡張機能の再読み込みなしで次の生成を実行できる。
 - [ ] フロントエンドにだけ存在する参照音声をリモート生成へ使用でき、生成側へキャラクター/参照音声ライブラリの永続コピーや追加listenerを残さない。
 - [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。

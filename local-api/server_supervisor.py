@@ -40,6 +40,20 @@ RESTART_MIN_INTERVAL_SECONDS = 10.0
 PREFLIGHT_TIMEOUT_SECONDS = 180.0
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LOGGER = logging.getLogger("local-voice-bridge-tray")
+CONFIG_PATHS = (LOCAL_API_DIR / "config.json", LOCAL_API_DIR / "config.local.json")
+
+
+def remote_tts_enabled() -> bool:
+    merged: dict[str, Any] = {}
+    for path in CONFIG_PATHS:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            merged.update(payload)
+    remote = merged.get("remoteTts")
+    return isinstance(remote, dict) and bool(remote.get("enabled")) and bool(str(remote.get("baseUrl") or "").strip())
 
 
 def configure_logging() -> None:
@@ -239,6 +253,9 @@ class VoiceBridgeController:
     def _run_preflight(self) -> bool:
         if self._stop_event.is_set():
             return False
+        if remote_tts_enabled():
+            self.set_status("Checking remote worker")
+            return True
         self.set_status("Checking environment")
         try:
             process = subprocess.Popen(

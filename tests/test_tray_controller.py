@@ -53,7 +53,7 @@ class TrayControllerContractTests(unittest.TestCase):
         self.assertNotIn(".bat", " ".join(command).lower())
 
     def test_preflight_keeps_the_existing_cuda_contract(self) -> None:
-        command = supervisor.preflight_command()
+        command = supervisor.preflight_command("local")
         self.assertIn("--strict-cuda", command)
         self.assertIn("--quick", command)
         self.assertEqual(command[0], str(supervisor.SERVER_PYTHON))

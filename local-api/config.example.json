@@ -17,6 +17,14 @@
     "maxBytes": 1073741824,
     "maxAgeDays": 14
   },
+  "remoteTts": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:18730",
+    "healthPath": "/health",
+    "speakPath": "/v1/speak",
+    "model": "irodori_v3_low_latency",
+    "timeoutSeconds": 180
+  },
 
   "defaultModel": "irodori-v3",
   "models": {

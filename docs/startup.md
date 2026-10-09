@@ -15,6 +15,59 @@
 
 `.venv`、`pythonw.exe`、`PySide6`、`QtWidgets`、`QtSvg`などが不足している場合は、EXEから正式なセットアップ/修復画面へ進めます。通常利用者へ内部セットアップスクリプトを直接案内しません。
 
+## 2台構成: フロントPC + TTS worker
+
+`remoteTts.enabled=true`を明示した場合だけ、音声生成を別PCへ委譲できます。責務は次のように固定します。
+
+このHTTP TTS worker方式とSSH Irodori worker方式は別の選択肢です。`remoteTts.enabled=true`と`generationBackend=remote_ssh`は同時に設定できません。HTTP方式では読み上げテキスト、参照音声ID、モデルと生成パラメーターをworkerへ送り、参照WAVは送信しません。
+
+- **フロントPC**: `LocalVoiceBridge.exe`、通知領域、小窓、キャラクター選択、設定、Chrome / Brave拡張、ChatGPTタブ状態、favicon、音声再生、`127.0.0.1:8717`
+- **TTS worker PC**: Irodoriモデル、CUDA、生成に必要な参照音声、音声生成APIだけ
+- worker側ではLocal Voice Bridgeの通知領域、小窓、デスクトップペット、Chrome拡張、favicon制御を起動しない
+- `8717`全体をworker PCへ転送しない。フロントPCのLocal Voice Bridge APIは必ずフロントPC自身が所有する
+
+worker APIはLANへ直接公開せず、フロントPC上のloopbackトンネルを経由します。標準例はフロントPCの`127.0.0.1:18730`をworkerの`127.0.0.1:8730`へ転送し、`config.local.json`へ次を設定します。
+
+互換workerの例は[local-tts-service](https://github.com/misaka310/local-tts-service)です。Bridgeは`GET /health`の`ok=true`、`POST /v1/speak`の`result.audioUrl`、そのURLから取得できるWAV音声を必要とします。workerはこのリポジトリには含まれず、別途セットアップします。
+
+フロントPCで次のSSHポート転送を起動し、Local Voice Bridgeを使う間は実行したままにします。接続先は実際のworker PCのSSHユーザー名とホスト名に置き換えてください。
+
+```powershell
+ssh -N -L 18730:127.0.0.1:8730 worker-user@worker-host
+```
+
+worker APIはworker PCのloopbackだけで待ち受けさせ、LANへ直接公開しないでください。接続確認は応答全体を表示せず、`ok`だけを確認できます。
+
+```powershell
+(Invoke-RestMethod "http://127.0.0.1:18730/health").ok
+```
+
+```json
+{
+  "remoteTts": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:18730",
+    "healthPath": "/health",
+    "speakPath": "/v1/speak",
+    "model": "irodori_v3_low_latency",
+    "timeoutSeconds": 180
+  },
+  "referenceVoices": {
+    "sakura_01": { "label": "sakura_01" },
+    "asuka": { "label": "asuka" },
+    "suguha": { "label": "suguha" }
+  }
+}
+```
+
+`referenceVoices`のフロントPC側エントリはキャラクター選択用のメタデータだけでよく、参照WAVはworker側だけに置けます。生成要求では選択したIDをworkerへ渡し、生成されたWAVだけをフロントPCへ戻して再生します。workerが停止しても、フロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御はworkerと独立して維持します。
+
+### 検証上の制約
+
+自動テストはmock HTTP workerでプロトコルと応答制限を検証します。実機の2台接続とブラウザーを含む生成経路は未検証です。
+
+## 2台構成: SSH Irodori worker
+
 `generationBackend=remote_ssh`では、このPCのLocal API `127.0.0.1:8717`、Windows小窓、設定、キャラクター、再生はそのまま起動し、音声の**生成バックエンド**だけをSSH先へ委譲します。バックエンドが停止・切断してもLocal API自体は終了せず、音声生成だけを利用不可として扱います。生成側PCでLocal Voice Bridgeのtrayや8717を起動する必要はありません。
 
 ## 通知領域メニュー
