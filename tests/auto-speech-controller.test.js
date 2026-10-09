@@ -216,7 +216,7 @@ test('short streaming fragment waits for stable completion evidence before Auto'
   assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-with-action-control');
 });
 
-test('long streaming text never queues before the response completion control appears', () => {
+test('long streaming text completes after generation stops even if action controls are absent', () => {
   const harness = createHarness();
   const node = {
     key: 'long-stream',
@@ -232,14 +232,14 @@ test('long streaming text never queues before the response completion control ap
 
   harness.setGenerating(false);
   harness.controller.processNode(node);
-  harness.clock.advance(5000);
-  assert.equal(harness.reports.length, 0);
+  harness.clock.advance(200);
+  assert.equal(harness.reports.length, 1);
 
   node.complete = true;
   harness.controller.processNode(node);
   harness.clock.advance(200);
   assert.equal(harness.reports.length, 1);
-  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-with-action-control');
+  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-stable');
 });
 
 test('transient completion evidence for a short prefix is revoked when generation resumes', () => {
