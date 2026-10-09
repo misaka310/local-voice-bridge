@@ -16,6 +16,8 @@ concurrency:
 
 jobs:
   extension-e2e:
+    permissions:
+      contents: read
     name: Mock extension E2E
     runs-on: windows-latest
     timeout-minutes: 15

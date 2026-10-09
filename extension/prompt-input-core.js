@@ -266,7 +266,18 @@
     const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
     const createId = typeof environment.createId === 'function'
       ? environment.createId
-      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      : (prefix = 'id') => {
+          const cryptoObject = environment.crypto || globalThis.crypto;
+          if (cryptoObject && typeof cryptoObject.randomUUID === 'function') {
+            return `${prefix}-${cryptoObject.randomUUID()}`;
+          }
+          if (cryptoObject && typeof cryptoObject.getRandomValues === 'function') {
+            const bytes = new Uint32Array(4);
+            cryptoObject.getRandomValues(bytes);
+            return `${prefix}-${Array.from(bytes, (value) => value.toString(36)).join('-')}`;
+          }
+          throw new Error('Secure random generator is unavailable');
+        };
     let pending = null;
     let generation = 0;
 
