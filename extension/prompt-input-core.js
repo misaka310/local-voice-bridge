@@ -266,7 +266,13 @@
     const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
     const createId = typeof environment.createId === 'function'
       ? environment.createId
-      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      : (prefix = 'id') => {
+          const cryptoObject = environment.crypto || globalThis.crypto;
+          if (!cryptoObject || typeof cryptoObject.randomUUID !== 'function') {
+            throw new Error('Secure random ID generation is unavailable');
+          }
+          return `${prefix}-${cryptoObject.randomUUID()}`;
+        };
     let pending = null;
     let generation = 0;
 
