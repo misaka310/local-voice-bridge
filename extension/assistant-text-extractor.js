@@ -7,6 +7,8 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, (textCore, sourceFilter) => {
   if (!sourceFilter) throw new Error('assistant-source-filter.js must load before assistant-text-extractor.js');
 
+  let fallbackStableKeySequence = 0;
+
   const REMOVED_CONTENT_SELECTOR = [
     'pre',
     'button',
@@ -108,7 +110,7 @@
     if (!node.__localVoiceBridgeId) {
       node.__localVoiceBridgeId = typeof createId === 'function'
         ? String(createId())
-        : `node-${Math.random().toString(36).slice(2)}`;
+        : `node-${Date.now().toString(36)}-${(++fallbackStableKeySequence).toString(36)}`;
     }
     return node.__localVoiceBridgeId;
   }

@@ -5,6 +5,8 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LocalVoicePromptInput = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, () => {
+  let fallbackIdSequence = 0;
+
   const COMPOSER_SELECTORS = [
     '#prompt-textarea',
     'textarea[data-id="root"]',
@@ -266,7 +268,10 @@
     const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
     const createId = typeof environment.createId === 'function'
       ? environment.createId
-      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      : (prefix = 'id') => {
+        fallbackIdSequence += 1;
+        return `${prefix}-${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}`;
+      };
     let pending = null;
     let generation = 0;
 

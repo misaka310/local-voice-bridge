@@ -7,6 +7,8 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, () => {
   const TERMINAL_PATTERN = /[。！？!?](?:[」』】）)\]”’"']*)$/u;
 
+  let fallbackIdSequence = 0;
+
   function normalizeText(value) {
     return String(value || '')
       .replace(/\u00a0/g, ' ')
@@ -36,7 +38,8 @@
       cryptoObject.getRandomValues(bytes);
       return `${prefix}-${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`;
     }
-    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    fallbackIdSequence += 1;
+    return `${prefix}-${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}`;
   }
 
   async function sha256Text(value, cryptoObject = globalThis.crypto) {
