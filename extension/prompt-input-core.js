@@ -264,9 +264,17 @@
     const commitSubmission = typeof environment.commitSubmission === 'function' ? environment.commitSubmission : null;
     const invalidateSubmission = typeof environment.invalidateSubmission === 'function' ? environment.invalidateSubmission : null;
     const markSubmissionClick = typeof environment.markSubmissionClick === 'function' ? environment.markSubmissionClick : null;
+    let fallbackIdCounter = 0;
     const createId = typeof environment.createId === 'function'
       ? environment.createId
-      : (prefix = 'id') => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      : (prefix = 'id') => {
+        fallbackIdCounter += 1;
+        const cryptoObject = globalThis.crypto;
+        const suffix = cryptoObject && typeof cryptoObject.randomUUID === 'function'
+          ? cryptoObject.randomUUID()
+          : `${Date.now().toString(36)}-${fallbackIdCounter.toString(36)}`;
+        return `${prefix}-${suffix}`;
+      };
     let pending = null;
     let generation = 0;
 
