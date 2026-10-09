@@ -67,7 +67,7 @@
 
     function responseTurnForNode(node) {
       if (!node || typeof node.closest !== 'function') return null;
-      return node.closest('[data-testid^="conversation-turn-"], [data-conversation-role="assistant"], article') || node;
+      return node.closest('[data-testid^="conversation-turn-"]') || node.closest('article') || node.closest('[data-conversation-role="assistant"]') || node;
     }
 
     function hasResponseCompletionControl(node) {

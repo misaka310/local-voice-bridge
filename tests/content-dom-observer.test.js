@@ -55,26 +55,37 @@ function mutation(target, { addedNodes = [], removedNodes = [] } = {}) {
   return { target, addedNodes, removedNodes };
 }
 
-function loadDomObserverApi() {
+function loadDomObserverHarness() {
   const source = fs.readFileSync(path.resolve(__dirname, '../extension/content-dom-observer.js'), 'utf8');
+  let autoSpeechEnvironment = null;
   const sandbox = {
     globalThis: {
       LocalVoiceContentMutationFilter: require('../extension/content-mutation-filter.js'),
       ContentTextCore: {},
       LocalVoiceAssistantText: { getAssistantNodes: () => [] },
       LocalVoiceAutoSpeech: {
-        createAutoSpeechController: () => ({
-          markExistingMessagesAsSeen() {},
-          rebaseline() {},
-          reportLatestSnapshot() { return false; },
-          inspectLatestAssistant() { return false; },
-          scheduleInspect() { return false; },
-        }),
+        createAutoSpeechController: (environment) => {
+          autoSpeechEnvironment = environment;
+          return {
+            markExistingMessagesAsSeen() {},
+            rebaseline() {},
+            reportLatestSnapshot() { return false; },
+            inspectLatestAssistant() { return false; },
+            scheduleInspect() { return false; },
+          };
+        },
       },
     },
   };
   vm.runInNewContext(source, sandbox, { filename: 'content-dom-observer.js' });
-  return sandbox.globalThis.LocalVoiceContentDomObserver;
+  return {
+    api: sandbox.globalThis.LocalVoiceContentDomObserver,
+    getAutoSpeechEnvironment: () => autoSpeechEnvironment,
+  };
+}
+
+function loadDomObserverApi() {
+  return loadDomObserverHarness().api;
 }
 
 test('blank new conversation status is derived from route and message DOM without polling', () => {
@@ -137,6 +148,8 @@ test('current ChatGPT generation DOM is covered by selectors and attribute obser
   assert.match(ASSISTANT_SELECTOR, /data-conversation-role="assistant"/);
   assert.match(RESPONSE_GENERATING_SELECTOR, /aria-label="Stop"/);
   assert.match(RESPONSE_COMPLETE_SELECTOR, /\.turn-action-controls/);
+  assert.match(RESPONSE_COMPLETE_SELECTOR, /data-testid\*=\"copy\"/);
+  assert.match(RESPONSE_COMPLETE_SELECTOR, /aria-label\^=\"Copy\"/);
   assert.equal(OBSERVER_OPTIONS.attributes, true);
   assert.equal(OBSERVER_OPTIONS.childList, true);
   assert.equal(OBSERVER_OPTIONS.subtree, true);
@@ -144,6 +157,35 @@ test('current ChatGPT generation DOM is covered by selectors and attribute obser
     Array.from(OBSERVER_OPTIONS.attributeFilter),
     ['aria-label', 'title', 'data-testid', 'data-message-author-role', 'data-conversation-role'],
   );
+});
+
+test('completion lookup prefers the outer conversation turn so sibling action controls count', () => {
+  const harness = loadDomObserverHarness();
+  const turn = {
+    querySelector(selector) {
+      return selector.includes('copy-turn-action-button') ? {} : null;
+    },
+  };
+  const assistantNode = {
+    closest(selector) {
+      if (selector === '[data-testid^="conversation-turn-"]') return turn;
+      if (selector === '[data-conversation-role="assistant"]') return this;
+      if (selector === 'article') return null;
+      return null;
+    },
+  };
+  const controller = harness.api.create({
+    document: { querySelector: () => null, querySelectorAll: () => [] },
+    location: { pathname: '/c/example' },
+    getSettings: () => ({}),
+    isEnabled: () => false,
+    setNewConversation() {},
+  });
+  controller.markExistingMessagesAsSeen();
+  const environment = harness.getAutoSpeechEnvironment();
+
+  assert.ok(environment);
+  assert.equal(environment.hasResponseCompletionControl(assistantNode), true);
 });
 
 test('ordinary completed prose mentioning an error is not treated as a ChatGPT failure', () => {

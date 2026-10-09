@@ -35,8 +35,10 @@
   const RESPONSE_COMPLETE_SELECTOR = [
     '.turn-action-controls',
     'button[data-testid="copy-turn-action-button"]',
+    'button[data-testid*="copy"]',
     'button[aria-label="Copy"]',
-    'button[aria-label="コピー"]',
+    'button[aria-label^="Copy"]',
+    'button[aria-label*="コピー"]',
   ].join(',');
   const RESPONSE_ERROR_SELECTOR = [
     '[data-testid="response-error"]',

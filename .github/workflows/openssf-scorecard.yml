@@ -17,6 +17,7 @@ jobs:
     name: scorecard-pr
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -38,6 +39,7 @@ jobs:
     name: Scorecard analysis
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write
       id-token: write
