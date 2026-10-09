@@ -44,14 +44,18 @@ const TEST_MODULES = [
 
 function pythonCandidates() {
   const candidates = [];
-  if (process.env.PYTHON) candidates.push(process.env.PYTHON);
-  candidates.push(path.join(ROOT, 'local-api', '.venv', 'Scripts', 'python.exe'));
-  candidates.push(path.join(ROOT, 'local-api', '.venv', 'bin', 'python'));
+  if (process.env.PYTHON) candidates.push({ command: process.env.PYTHON, prefixArgs: [] });
+  candidates.push({ command: path.join(ROOT, 'local-api', '.venv', 'Scripts', 'python.exe'), prefixArgs: [] });
+  candidates.push({ command: path.join(ROOT, 'local-api', '.venv', 'bin', 'python'), prefixArgs: [] });
   if (process.platform === 'win32') {
-    candidates.push('python');
+    if (process.env.LOCALAPPDATA) {
+      candidates.push({ command: path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python311', 'python.exe'), prefixArgs: [] });
+    }
+    candidates.push({ command: 'py', prefixArgs: ['-3.11'] });
+    candidates.push({ command: 'python', prefixArgs: [] });
     return candidates;
   }
-  candidates.push('python', 'python3');
+  candidates.push({ command: 'python', prefixArgs: [] }, { command: 'python3', prefixArgs: [] });
   return candidates;
 }
 
@@ -60,16 +64,17 @@ function isLocalPath(command) {
 }
 
 function resolvePython() {
-  for (const command of pythonCandidates()) {
+  for (const candidate of pythonCandidates()) {
+    const { command, prefixArgs } = candidate;
     if (isLocalPath(command) && (!fs.existsSync(command) || !fs.statSync(command).isFile())) continue;
-    const probe = spawnSync(command, ['--version'], {
+    const probe = spawnSync(command, [...prefixArgs, '--version'], {
       cwd: ROOT,
       encoding: 'utf8',
       windowsHide: true,
       shell: false,
       timeout: 10000,
     });
-    if (!probe.error && probe.status === 0) return command;
+    if (!probe.error && probe.status === 0) return candidate;
     if (probe.error?.code === 'ENOENT') continue;
     if (probe.error) {
       console.error(`Could not start Python candidate ${command}: ${probe.error.message}`);
@@ -94,7 +99,7 @@ if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
 for (const moduleName of TEST_MODULES) {
   const startedAt = Date.now();
   console.log(`[python-tests] START ${moduleName}`);
-  const result = spawnSync(python, ['-m', 'unittest', '-v', moduleName], {
+  const result = spawnSync(python.command, [...python.prefixArgs, '-m', 'unittest', '-v', moduleName], {
     cwd: ROOT,
     stdio: 'inherit',
     windowsHide: true,
