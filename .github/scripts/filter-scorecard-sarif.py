@@ -11,6 +11,7 @@ from typing import Any
 GOVERNANCE_ONLY_RULES = {"CIIBestPracticesID"}
 SOLO_ONLY_RULES = {"CodeReviewID"}
 YOUNG_REPOSITORY_MARKER = "project was created within the last 90 days"
+SAST_HISTORY_MARKER = "sast tool is not run on all commits"
 SOLO_BRANCH_PROTECTION_MARKERS = (
     "does not require approvers",
     "codeowners review is not required",
@@ -40,7 +41,40 @@ def _only_solo_branch_protection_warnings(message: str) -> bool:
     )
 
 
-def should_suppress(result: dict[str, Any], *, solo_maintainer: bool) -> bool:
+def _codeql_configured(repo_root: Path) -> bool:
+    workflows = repo_root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return False
+    for path in workflows.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".yml", ".yaml"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8").lower()
+        except OSError:
+            continue
+        if "github/codeql-action/" in text:
+            return True
+    return False
+
+
+def _scorecard_policy(repo_root: Path) -> dict[str, Any]:
+    path = repo_root / ".github" / "scorecard-policy.json"
+    if not path.is_file():
+        return {}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def should_suppress(
+    result: dict[str, Any],
+    *,
+    solo_maintainer: bool,
+    repo_root: Path,
+    policy: dict[str, Any],
+) -> bool:
     rule_id = result.get("ruleId")
     if not isinstance(rule_id, str):
         return False
@@ -58,16 +92,26 @@ def should_suppress(result: dict[str, Any], *, solo_maintainer: bool) -> bool:
         and _only_solo_branch_protection_warnings(message)
     ):
         return True
+    if rule_id == "SASTID" and SAST_HISTORY_MARKER in message and _codeql_configured(repo_root):
+        return True
+    if rule_id == "FuzzingID" and policy.get("fuzzing") == "not_applicable":
+        return True
     return False
 
 
-def filter_sarif(document: dict[str, Any], *, solo_maintainer: bool) -> tuple[int, int]:
+def filter_sarif(
+    document: dict[str, Any],
+    *,
+    solo_maintainer: bool,
+    repo_root: Path,
+) -> tuple[int, int]:
     suppressed = 0
     kept = 0
     runs = document.get("runs")
     if not isinstance(runs, list):
         return suppressed, kept
 
+    policy = _scorecard_policy(repo_root)
     for run in runs:
         if not isinstance(run, dict):
             continue
@@ -76,7 +120,12 @@ def filter_sarif(document: dict[str, Any], *, solo_maintainer: bool) -> tuple[in
             continue
         filtered: list[Any] = []
         for item in results:
-            if isinstance(item, dict) and should_suppress(item, solo_maintainer=solo_maintainer):
+            if isinstance(item, dict) and should_suppress(
+                item,
+                solo_maintainer=solo_maintainer,
+                repo_root=repo_root,
+                policy=policy,
+            ):
                 suppressed += 1
                 continue
             filtered.append(item)
@@ -94,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument("--solo-maintainer", action="store_true")
     return parser.parse_args()
 
@@ -103,9 +153,16 @@ def main() -> int:
     document = json.loads(args.input.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         raise ValueError("SARIF root must be a JSON object")
-    suppressed, kept = filter_sarif(document, solo_maintainer=args.solo_maintainer)
+    suppressed, kept = filter_sarif(
+        document,
+        solo_maintainer=args.solo_maintainer,
+        repo_root=args.repo_root.resolve(),
+    )
     args.output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"Scorecard SARIF filter: suppressed={suppressed} kept={kept} solo_maintainer={args.solo_maintainer}")
+    print(
+        f"Scorecard SARIF filter: suppressed={suppressed} kept={kept} "
+        f"solo_maintainer={args.solo_maintainer} repo_root={args.repo_root.resolve()}"
+    )
     return 0
 
 
