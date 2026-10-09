@@ -80,7 +80,7 @@ class FrontendDependencyTests(unittest.TestCase):
                 "soundfile==0.14.0",
                 "sounddevice>=0.5.6,<0.6",
                 "numpy==2.4.6",
-                "paramiko==3.5.1",
+                "paramiko==5.0.0",
             },
         )
 
