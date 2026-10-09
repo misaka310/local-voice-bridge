@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -189,6 +190,17 @@ class RemoteTtsWorkerTests(unittest.TestCase):
 
         self.assertEqual(readiness["health"], {"ok": True})
         self.assertNotIn(private_path, repr(readiness))
+
+    def test_remote_worker_requests_bypass_environment_proxies(self) -> None:
+        proxy = "http://127.0.0.1:1"
+        config = {"remoteTts": {"enabled": True, "baseUrl": self.base_url}}
+        with patch.dict(
+            os.environ,
+            {"http_proxy": proxy, "HTTP_PROXY": proxy, "no_proxy": "", "NO_PROXY": ""},
+        ):
+            readiness = voice_service.prepare_remote_tts(config)
+
+        self.assertEqual(readiness["health"]["ok"], True)
 
     def test_remote_worker_errors_do_not_expose_worker_details(self) -> None:
         private_path = r"C:\worker\runtime\audio"

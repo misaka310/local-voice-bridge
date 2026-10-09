@@ -67,6 +67,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - `remoteTts`構成でもLocal Voice Bridgeの`127.0.0.1:8717`はフロントPC自身が所有し、8717全体をworkerへ転送しない。workerへの経路は別のloopbackトンネルまたは同等のローカル専用経路に限定する。
 - `remoteTts`は読み上げテキスト、参照音声ID、モデルと生成パラメーターをworkerへ送る。参照WAVはフロントPCから送らない。
 - `remoteTts`のworker応答URLは設定したloopback worker originに限定し、別originへのredirectを拒否する。JSON応答は1 MiB、WAV応答は64 MiBまでとし、WAV形式を確認してから保存する。
+- workerへのHTTP接続はloopbackへ直接行い、環境のHTTP proxy設定を経由しない。
 - workerのhealth詳細と応答エラー文字列はローカルAPIの状態・エラーへ転送しない。worker応答に含まれるホスト固有パス等を公開しない。
 - `remoteTts.enabled=true`と`generationBackend=remote_ssh`は同時に設定できない。`remoteTts`はHTTP TTS worker、`remote_ssh`はIrodori stdio workerを使う独立した方式である。
 - フロントPCには参照音声IDと表示ラベルだけを保持でき、実際の参照WAVとCUDAモデルはworker側だけに保持してよい。

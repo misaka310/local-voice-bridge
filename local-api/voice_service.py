@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from audio_quality import inspect_wav_dict
 from gpu_arbiter import GpuArbiter
@@ -125,7 +125,7 @@ def _open_remote(request: Request | str, *, base_url: str, timeout: float):
     request_url = request.full_url if isinstance(request, Request) else str(request)
     if _url_origin(request_url) != _url_origin(base_url):
         raise VoiceServiceError("remote TTS requests must use the worker loopback origin")
-    opener = build_opener(_SameOriginRedirectHandler(base_url))
+    opener = build_opener(ProxyHandler({}), _SameOriginRedirectHandler(base_url))
     try:
         return opener.open(request, timeout=timeout)
     except HTTPError as exc:
