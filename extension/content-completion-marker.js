@@ -254,9 +254,6 @@
         return;
       }
       setTerminalStatus('complete');
-      void isTabActivelyViewed().then((active) => {
-        if (active) acknowledge();
-      });
     }
 
     function markResponseError() {

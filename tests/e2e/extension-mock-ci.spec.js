@@ -533,7 +533,6 @@ test('external panel controls Auto, Next, Regen, Replay, Ref, and excludes trans
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
-
 test('Auto excludes compact source chips even when their labels do not match host order', async () => {
   test.setTimeout(60000);
   const api = await startMock();
@@ -587,7 +586,6 @@ test('Auto excludes compact source chips even when their labels do not match hos
     fs.rmSync(PROFILE, { recursive: true, force: true });
   }
 });
-
 test('inline code text is preserved before Auto finalizes a streaming preview', async () => {
   test.setTimeout(60000);
   const api = await startMock();
@@ -1000,7 +998,7 @@ test('blank new conversation shows a plus favicon until the first message appear
   }
 });
 
-test('a reply shows generating, playing, completion, and clears when acknowledged', async () => {
+test('a hidden background tab shows a yellow completion favicon and clears when acknowledged', async () => {
   test.setTimeout(90000);
   const api = await startMock({ localPlaybackDelayMs: 750 });
   const context = await launchContext();
@@ -1050,6 +1048,12 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
       return activeTab && activeTab.url;
     }), { timeout: 10000 }).toContain('/completion-marker-1');
+    await foregroundPage.bringToFront();
+    const tabActivity = await controllerPage.evaluate(async ({ backgroundTabId, foregroundTabId }) => ({
+      backgroundActive: (await chrome.tabs.get(backgroundTabId)).active,
+      foregroundActive: (await chrome.tabs.get(foregroundTabId)).active,
+    }), { backgroundTabId, foregroundTabId });
+    expect(tabActivity).toEqual({ backgroundActive: false, foregroundActive: true });
     await controllerPage.evaluate(async (tabId) => {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -1112,6 +1116,10 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'playing');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /%2316a34a/i);
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'complete');
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /%23facc15/i);
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).favIconUrl
+    ), backgroundTabId), { timeout: 10000 }).toMatch(/%23facc15/i);
     await expect(backgroundPage.locator('#fixture-original-favicon')).not.toHaveAttribute('rel', /(^|\s)icon(\s|$)/i);
     expect(await backgroundPage.locator('link[rel~="icon"]').count()).toBe(1);
     expect(await foregroundPage.title()).toBe('Local Voice Demo Fixture');
@@ -1126,6 +1134,184 @@ test('a reply shows generating, playing, completion, and clears when acknowledge
     await expect.poll(() => backgroundPage.title(), { timeout: 5000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveCount(0);
     await expect(backgroundPage.locator('#fixture-original-favicon')).toHaveAttribute('rel', 'icon');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('a background reply already generating at startup turns yellow when it completes', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const backgroundPage = await context.newPage();
+    const inFlightHtml = fixtureHtml().replace(
+      '<button class="send" id="add-reply">送信</button>',
+      '<button class="send" id="fixture-composer-action" aria-label="Stop">停止</button>',
+    );
+    await backgroundPage.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: inFlightHtml,
+    }));
+    await backgroundPage.goto('https://chatgpt.com/c/in-flight-background-reply', { waitUntil: 'domcontentloaded' });
+    await expect(backgroundPage.locator('#chat')).toBeVisible();
+
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker, { enabled: false });
+    await waitForControlReady(1);
+    const extensionId = new URL(worker.url()).host;
+
+    const foregroundPage = await context.newPage();
+    await foregroundPage.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await foregroundPage.goto('https://chatgpt.com/c/foreground-reply', { waitUntil: 'domcontentloaded' });
+    await expect(foregroundPage.locator('#chat')).toBeVisible();
+    await waitForControlReady(2);
+
+    const controllerPage = await context.newPage();
+    await controllerPage.goto(`chrome-extension://${extensionId}/options.html`);
+    const { backgroundTabId, foregroundTabId } = await controllerPage.evaluate(async () => {
+      const [backgroundTab] = await chrome.tabs.query({ url: 'https://chatgpt.com/c/in-flight-background-reply' });
+      const [foregroundTab] = await chrome.tabs.query({ url: 'https://chatgpt.com/c/foreground-reply' });
+      return { backgroundTabId: backgroundTab?.id, foregroundTabId: foregroundTab?.id };
+    });
+    expect(backgroundTabId).toBeTruthy();
+    expect(foregroundTabId).toBeTruthy();
+    await controllerPage.evaluate((tabId) => chrome.tabs.update(tabId, { active: true }), foregroundTabId);
+    await foregroundPage.bringToFront();
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).active
+    ), backgroundTabId)).toBe(false);
+
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          document.querySelector('#fixture-composer-action')?.setAttribute('aria-label', 'Send prompt');
+          const turn = document.querySelector('[data-testid="conversation-turn-assistant"]');
+          const actions = document.createElement('div');
+          actions.className = 'turn-action-controls';
+          turn.append(actions);
+        },
+      });
+    }, backgroundTabId);
+
+    await expect(backgroundPage.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-local-voice-status', 'complete', { timeout: 30000 });
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /%23facc15/i);
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).favIconUrl
+    ), backgroundTabId), { timeout: 10000 }).toMatch(/%23facc15/i);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
+    await wait(1500);
+    await expect(backgroundPage.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-local-voice-status', 'complete');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('a stale background tab updates after its reply completes and shows the yellow favicon', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const backgroundPage = await context.newPage();
+    const inFlightHtml = fixtureHtml().replace(
+      '<button class="send" id="add-reply">送信</button>',
+      '<button class="send" id="fixture-composer-action" aria-label="Stop">停止</button>',
+    );
+    let pageLoads = 0;
+    await backgroundPage.route('https://chatgpt.com/**', (route) => {
+      pageLoads += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: pageLoads === 1 ? inFlightHtml : fixtureHtml(),
+      });
+    });
+    await backgroundPage.goto('https://chatgpt.com/c/stale-background-reply', { waitUntil: 'domcontentloaded' });
+    await expect(backgroundPage.locator('#chat')).toBeVisible();
+    await backgroundPage.evaluate(() => {
+      const composer = document.createElement('textarea');
+      composer.id = 'prompt-textarea';
+      document.body.append(composer);
+    });
+
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker, { enabled: false });
+    await waitForControlReady(1);
+    const extensionId = new URL(worker.url()).host;
+    const foregroundPage = await context.newPage();
+    await foregroundPage.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: fixtureHtml(),
+    }));
+    await foregroundPage.goto('https://chatgpt.com/c/visible-background-update-test', { waitUntil: 'domcontentloaded' });
+    await expect(foregroundPage.locator('#chat')).toBeVisible();
+    await foregroundPage.bringToFront();
+
+    const controllerPage = await context.newPage();
+    await controllerPage.goto(`chrome-extension://${extensionId}/options.html`);
+    const backgroundTabId = await controllerPage.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'https://chatgpt.com/c/stale-background-reply' });
+      return tab && tab.id;
+    });
+    expect(backgroundTabId).toBeTruthy();
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).active
+    ), backgroundTabId)).toBe(false);
+
+    const watcherStarted = await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['background-tab-update-watcher.js'],
+      });
+      return chrome.tabs.sendMessage(tabId, {
+        type: 'bridge-watch-for-update',
+        contentScriptVersion: chrome.runtime.getManifest().version,
+      });
+    }, backgroundTabId);
+    expect(watcherStarted).toMatchObject({ ok: true, watching: true });
+
+    await controllerPage.evaluate(async (tabId) => {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          document.querySelector('#fixture-composer-action')?.setAttribute('aria-label', 'Send prompt');
+          const turn = document.querySelector('[data-testid="conversation-turn-assistant"]');
+          const actions = document.createElement('div');
+          actions.className = 'turn-action-controls';
+          turn.append(actions);
+        },
+      });
+    }, backgroundTabId);
+
+    await expect.poll(() => pageLoads, { timeout: 30000 }).toBeGreaterThan(1);
+    await expect(backgroundPage.locator('#local-voice-completion-favicon'))
+      .toHaveAttribute('data-local-voice-status', 'complete', { timeout: 30000 });
+    await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /%23facc15/i);
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).favIconUrl
+    ), backgroundTabId), { timeout: 10000 }).toMatch(/%23facc15/i);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak'))
+      .toHaveLength(0);
+    await expect.poll(async () => controllerPage.evaluate(async (tabId) => (
+      (await chrome.tabs.get(tabId)).active
+    ), backgroundTabId)).toBe(false);
+    await wait(1000);
+    expect(pageLoads).toBe(2);
   } finally {
     await context.close().catch(() => {});
     await stopMock(api);

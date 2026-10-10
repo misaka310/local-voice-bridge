@@ -24,6 +24,17 @@
         return false;
       }
 
+      if (message.type === 'bridge-page-ready-for-update') {
+        if (!senderTabId || !sender.tab || typeof ctx.handlePageReadyForUpdate !== 'function') {
+          sendResponse({ ok: false, retry: false });
+          return false;
+        }
+        ctx.handlePageReadyForUpdate(sender.tab, message.contentScriptVersion)
+          .then((result) => sendResponse(result))
+          .catch(() => sendResponse({ ok: false, retry: true }));
+        return true;
+      }
+
       if (message.type === 'composer-focused') {
         if (ctx.noteComposerFocused(senderTabId)) {
           sendResponse({ ok: true, payload: { targetTabId: senderTabId } });

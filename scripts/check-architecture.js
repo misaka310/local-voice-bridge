@@ -40,6 +40,13 @@ function capLines(relativePath, maximum) {
   }
 }
 
+const manifestVersion = JSON.parse(read('extension/manifest.json')).version;
+const contentVersionMatch = read('extension/content-message-router.js')
+  .match(/const CONTENT_SCRIPT_VERSION = '([^']+)';/);
+if (!contentVersionMatch || contentVersionMatch[1] !== manifestVersion) {
+  failures.push('extension/content-message-router.js: baked content-script version must match the manifest');
+}
+
 for (const file of [
   'local-api/state_normalization.py',
   'local-api/browser_runtime_state.py',
@@ -77,6 +84,8 @@ for (const file of [
   'extension/background-control-poll-policy.js',
   'extension/background-control-sync.js',
   'extension/background-tab-registry.js',
+  'extension/background-tab-update-watcher.js',
+  'extension/background-tab-update-lifecycle.js',
   'extension/background-conversation-target.js',
   'extension/background-local-api-client.js',
   'extension/background-runtime-store.js',
@@ -110,6 +119,8 @@ capLines('local-api/control_panel.py', 540);
 capLines('local-api/advanced_settings_dialog.py', 220);
 capLines('local-api/tray_controller.py', 650);
 capLines('extension/content.js', 330);
+capLines('extension/background-tab-update-watcher.js', 240);
+capLines('extension/background-tab-update-lifecycle.js', 120);
 capLines('extension/background.js', 470);
 capLines('extension/background-external-state.js', 100);
 capLines('extension/background-playback-queue.js', 330);
@@ -184,6 +195,21 @@ requireText(
   'extension/background-entry.js',
   "'background-control-sync.js'",
   'the service worker must load durable control synchronization before background.js',
+);
+requireText(
+  'extension/background-entry.js',
+  "'background-tab-update-lifecycle.js'",
+  'managed ChatGPT page refresh lifecycle must load before background.js',
+);
+requireText(
+  'extension/manifest.json',
+  '"background-tab-update-watcher.js"',
+  'stale ChatGPT pages must receive the isolated update watcher',
+);
+requireText(
+  'extension/background-tab-reconnect.js',
+  "const UPDATE_WATCHER_FILE = 'background-tab-update-watcher.js'",
+  'stale pages must be upgraded with the focused watcher instead of duplicate content injection',
 );
 requireText(
   'extension/manifest.json',

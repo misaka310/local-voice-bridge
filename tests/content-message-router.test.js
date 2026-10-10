@@ -55,6 +55,21 @@ test('tab activation acknowledges the terminal favicon state', () => {
   assert.deepEqual(harness.marks, ['clear']);
 });
 
+test('reconnect reports the running content-script version', async () => {
+  const harness = createHarness();
+  let responseValue = null;
+  const handled = harness.router(
+    { type: 'bridge-reconnect' },
+    {},
+    (response) => { responseValue = response; },
+  );
+
+  assert.equal(handled, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(responseValue.ok, true);
+  assert.equal(responseValue.contentScriptVersion, '0.4.6');
+});
+
 test('local playback status ignores stale completion tokens', () => {
   const harness = createHarness();
 

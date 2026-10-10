@@ -176,6 +176,24 @@ test('generating, complete, playing, and text-response error use distinct static
   assert.equal(original.hasAttribute('rel'), false);
 });
 
+test('completion remains yellow on the active tab until it is acknowledged after completion', async () => {
+  const { document, marker } = createMarker({ active: true });
+  await marker.initialize();
+
+  marker.markResponseGenerating();
+  assert.equal(marker.displayedStatus(), 'generating');
+
+  marker.markResponseCompleted();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+
+  marker.acknowledge();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+});
+
 test('generation end immediately removes a stale generating favicon', async () => {
   const { document, marker } = createMarker();
   const original = document.createElement('link');

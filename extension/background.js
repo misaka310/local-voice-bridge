@@ -16,6 +16,9 @@ const BRIDGE_CONSUMER_ID_KEY = 'bridgeConsumerId';
 
 const tabs = new Map();
 const reconnectingTabs = new Map();
+const pendingContentUpdateTabs = new Set();
+const managedRefreshTabs = new Set();
+const tabUpdateState = globalThis.BackgroundTabUpdateLifecycle.createState(chrome, managedRefreshTabs);
 let selectedTabId = null;
 let uiOwnerTabId = null;
 let queue = [];
@@ -286,11 +289,24 @@ const tabReconnect = globalThis.BackgroundTabReconnect.create({
   chrome,
   tabs,
   reconnectingTabs,
+  pendingContentUpdateTabs,
+  managedRefreshTabs,
+  persistManagedRefreshTabs: tabUpdateState.persist,
+  contentScriptVersion: chrome.runtime.getManifest().version,
+  isTabPlaying: (tabId) => Boolean(isPlaying && currentItem && Number(currentItem.tabId) === Number(tabId)),
+  hasPendingPlayback: (tabId) => queue.some((item) => Number(item.tabId) === Number(tabId)),
   tabPatterns: CHATGPT_TAB_PATTERNS,
   ensureOwner,
   broadcastState,
 });
 const reconnectOpenChatGptTabs = tabReconnect.reconnectOpenTabs;
+const tabUpdateLifecycle = globalThis.BackgroundTabUpdateLifecycle.createEvents({
+  chrome,
+  state: tabUpdateState,
+  tabReconnect,
+  clearAutoRecheck,
+  removeTab,
+});
 
 function externalStateSnapshot() {
   const currentText = String(currentItem?.text || lastPlayedItem?.text || '');
@@ -405,15 +421,8 @@ chrome.runtime.onStartup.addListener(() => { void initializeBackgroundRuntime();
 globalThis.BackgroundControlHeartbeat?.install(chrome, () => scheduleExternalControlPoll(0));
 if (chrome.runtime && chrome.runtime.id) scheduleExternalControlPoll(0);
 void initializeBackgroundRuntime().catch(() => {});
-chrome.tabs.onRemoved.addListener((tabId) => {
-  clearAutoRecheck(tabId);
-  removeTab(tabId, 'Playback tab closed; skipped');
-});
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo || changeInfo.status !== 'loading') return;
-  clearAutoRecheck(tabId);
-  removeTab(tabId, 'Playback tab reloaded; skipped');
-});
+chrome.tabs.onRemoved.addListener(tabUpdateLifecycle.onRemoved);
+chrome.tabs.onUpdated.addListener(tabUpdateLifecycle.onUpdated);
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   activateTab(tabId);
 });
@@ -423,6 +432,7 @@ chrome.runtime.onMessage.addListener(globalThis.BackgroundMessageRouter.create({
   tabs,
   registerTab,
   noteComposerFocused,
+  handlePageReadyForUpdate: tabReconnect.handlePageReadyForUpdate,
   statePayload,
   broadcastState,
   scheduleAutoRecheck,

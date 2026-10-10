@@ -1,6 +1,9 @@
 'use strict'; (function initContentMessageRouter(global) {
+  const CONTENT_SCRIPT_VERSION = '0.4.6';
+
   function create(ctx) {
     let activePlaybackToken = '';
+    const contentScriptVersion = String(ctx.contentScriptVersion || CONTENT_SCRIPT_VERSION);
     const terminalMarks = { 'playback-completed': ctx.markPlaybackCompleted, 'playback-stopped': ctx.markPlaybackStopped, 'playback-error': ctx.markPlaybackError };
     const tokenOf = (message) => String((message.payload && message.payload.playbackToken) || '');
     function reconcilePlayback(payload = {}) {
@@ -25,7 +28,10 @@
       if (message.type === 'tab-activated') { ctx.clearCompletionMarker(); return false; }
       if (message.type === 'bridge-reconnect') {
         ctx.registerCurrentTab({ includeLatest: true })
-          .then((payload) => { reconcilePlayback(payload); sendResponse({ ok: true, payload }); })
+          .then((payload) => {
+            reconcilePlayback(payload);
+            sendResponse({ ok: true, payload, contentScriptVersion });
+          })
           .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
         return true;
       }
