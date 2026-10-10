@@ -216,7 +216,7 @@ test('short streaming fragment waits for stable completion evidence before Auto'
   assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-with-action-control');
 });
 
-test('long streaming text never queues before the response completion control appears', () => {
+test('long streaming text completes after generation stops even if action controls are absent', () => {
   const harness = createHarness();
   const node = {
     key: 'long-stream',
@@ -232,14 +232,75 @@ test('long streaming text never queues before the response completion control ap
 
   harness.setGenerating(false);
   harness.controller.processNode(node);
-  harness.clock.advance(5000);
-  assert.equal(harness.reports.length, 0);
+  harness.clock.advance(200);
+  assert.equal(harness.reports.length, 1);
 
   node.complete = true;
   harness.controller.processNode(node);
   harness.clock.advance(200);
   assert.equal(harness.reports.length, 1);
-  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-with-action-control');
+  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-stable');
+});
+
+test('generation stop without action controls still confirms completion after the stable window', () => {
+  const harness = createHarness();
+  const node = {
+    key: 'no-action-control',
+    text: 'ChatGPT側の完了ボタン構造が変わっても、生成終了から回答完了を検出します。',
+    dataset: {},
+    complete: false,
+  };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+  assert.equal(harness.completionMarks(), 0);
+
+  harness.setGenerating(false);
+  harness.controller.processNode(node);
+  harness.clock.advance(50);
+  assert.equal(harness.completionMarks(), 0);
+  harness.clock.advance(150);
+  assert.equal(harness.completionMarks(), 1);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-stable');
+});
+
+test('generation observed before the assistant node exists survives a fast completion without action controls', () => {
+  const harness = createHarness();
+  harness.setGenerating(true);
+  harness.controller.markGenerationObserved();
+
+  harness.setGenerating(false);
+  const node = {
+    key: 'fast-no-control',
+    text: '短い生成でも完了状態を取りこぼしません。',
+    dataset: {},
+    complete: false,
+  };
+  harness.nodes.push(node);
+  harness.controller.processNode(node);
+  harness.clock.advance(200);
+
+  assert.equal(harness.completionMarks(), 1);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].entry.completionReason, 'generation-ended-stable');
+});
+
+test('cancelled generation without a new assistant response does not mark the previous response complete', () => {
+  const harness = createHarness();
+  const oldNode = { key: 'old-before-cancel', text: '前の回答です。', dataset: {} };
+  harness.nodes.push(oldNode);
+  harness.controller.markExistingMessagesAsSeen();
+
+  harness.setGenerating(true);
+  harness.controller.markGenerationObserved();
+  harness.setGenerating(false);
+  harness.controller.processNode(oldNode);
+  harness.clock.advance(200);
+
+  assert.equal(harness.completionMarks(), 0);
+  assert.equal(harness.reports.length, 0);
 });
 
 test('transient completion evidence for a short prefix is revoked when generation resumes', () => {

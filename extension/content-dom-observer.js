@@ -4,6 +4,7 @@
   const AUTO_SENT_FLAG = 'localVoiceSent';
   const MESSAGE_SELECTOR = '[data-message-author-role="user"], [data-message-author-role="assistant"], [data-conversation-role="user"], [data-conversation-role="assistant"]';
   const mutationFilter = global.LocalVoiceContentMutationFilter;
+  const generationEvidence = global.LocalVoiceGenerationCompletionEvidence;
   if (!mutationFilter) throw new Error('content-mutation-filter.js must load before content-dom-observer.js');
   const { RESPONSE_GENERATING_SELECTOR, RESPONSE_COMPLETE_SELECTOR } = mutationFilter;
 
@@ -220,6 +221,11 @@
       return autoSpeechController;
     }
 
+    const generationTracker = generationEvidence.createTransitionTracker({
+      onStart: () => ensureController().markGenerationObserved(),
+      onGenerating: ctx.markResponseGenerating, onEnded: ctx.markResponseGenerationEnded,
+    });
+
     return {
       getAssistantNodes,
       getStableKey,
@@ -231,24 +237,16 @@
       inspectLatestAssistant: () => {
         updateNewConversationStatus();
         const generating = isResponseGenerating();
-        if (generating) ctx.markResponseGenerating();
-        else ctx.markResponseGenerationEnded();
-        if (!generating && isResponseError()) {
-          ctx.markResponseError();
-          return false;
-        }
+        generationTracker.sync(generating);
+        if (!generating && isResponseError()) { ensureController().resetGenerationObservation(); ctx.markResponseError(); return false; }
         return ensureController().inspectLatestAssistant();
       },
       scheduleInspect: (mutations = []) => {
         updateNewConversationStatus(mutations);
         if (!mutationFilter.isRelevantMutationBatch(mutations)) return false;
         const generating = isResponseGenerating();
-        if (generating) ctx.markResponseGenerating();
-        else ctx.markResponseGenerationEnded();
-        if (!generating && isResponseError()) {
-          ctx.markResponseError();
-          return false;
-        }
+        generationTracker.sync(generating);
+        if (!generating && isResponseError()) { ensureController().resetGenerationObservation(); ctx.markResponseError(); return false; }
         return ensureController().scheduleInspect(mutations);
       },
     };
