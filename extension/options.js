@@ -10,7 +10,12 @@
 
   function clampInteger(value, fallback, minimum, maximum) {
     if (value === '' || value === null || value === undefined) return fallback;
-    const number = Number(value);
+    let number;
+    try {
+      number = Number(value);
+    } catch (_error) {
+      return fallback;
+    }
     if (!Number.isFinite(number)) return fallback;
     return Math.min(maximum, Math.max(minimum, Math.round(number)));
   }

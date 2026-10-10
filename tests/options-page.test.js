@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fc = require('fast-check');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -41,4 +42,22 @@ test('options settings preserve and clamp browser-only preview values', () => {
     previewMaxLines: 20,
     previewMaxChars: 40,
   });
+});
+
+test('property: arbitrary preview settings always normalize into safe bounds', () => {
+  fc.assert(
+    fc.property(
+      fc.anything(),
+      fc.anything(),
+      (previewMaxLines, previewMaxChars) => {
+        const normalized = normalizeSettings({ previewMaxLines, previewMaxChars });
+        assert.equal(normalized.settingsVersion, SETTINGS_VERSION);
+        assert.ok(Number.isInteger(normalized.previewMaxLines));
+        assert.ok(normalized.previewMaxLines >= 1 && normalized.previewMaxLines <= 20);
+        assert.ok(Number.isInteger(normalized.previewMaxChars));
+        assert.ok(normalized.previewMaxChars >= 40 && normalized.previewMaxChars <= 1000);
+        assert.deepEqual(normalizeSettings(normalized), normalized);
+      },
+    ),
+  );
 });
