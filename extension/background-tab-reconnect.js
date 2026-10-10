@@ -9,6 +9,7 @@
     'content-text-core.js',
     'assistant-source-filter.js',
     'assistant-text-extractor.js',
+    'generation-completion-evidence.js',
     'auto-speech-controller.js',
     'content-settings.js',
     'content-mic-keepalive.js',

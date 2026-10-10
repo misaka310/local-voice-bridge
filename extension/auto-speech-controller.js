@@ -5,6 +5,10 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LocalVoiceAutoSpeech = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, () => {
+  const generationEvidenceApi = typeof module !== 'undefined' && module.exports
+    ? require('./generation-completion-evidence.js')
+    : globalThis.LocalVoiceGenerationCompletionEvidence;
+
   function createAutoSpeechController(environment = {}) {
     const getAssistantNodes = environment.getAssistantNodes;
     const extractAssistantText = environment.extractAssistantText;
@@ -96,6 +100,14 @@
       return item;
     }
 
+    const completionEvidence = generationEvidenceApi.createCompletionEvidence({
+      getAssistantNodes, extractAssistantText,
+      stateFor: (node) => stateByElement.get(node) || null,
+      ensureState: ensureElementState,
+      hasCompletionControl: hasResponseCompletionControl,
+      stableMs: completionEvidenceStableMs,
+    });
+
     function previewParts(text) {
       const options = getPreviewOptions();
       const chunks = splitSpeakChunks(text, options);
@@ -103,40 +115,8 @@
       return { chunks, preview };
     }
 
-    function resetCompletionCandidate(item) {
-      item.completionCandidateText = '';
-      item.completionCandidateSince = 0;
-      item.completionReason = '';
-    }
-
-    function observeCompletion(node, item, text, timestamp) {
-      const generating = Boolean(isResponseGenerating());
-      if (generating) {
-        item.generationObserved = true;
-        resetCompletionCandidate(item);
-        return { generating: true, confirmed: false, reason: '' };
-      }
-      if (!hasResponseCompletionControl(node)) {
-        resetCompletionCandidate(item);
-        return { generating: false, confirmed: false, reason: '' };
-      }
-      const reason = item.generationObserved
-        ? 'generation-ended-with-action-control'
-        : 'action-control';
-      if (item.completionCandidateText !== text || item.completionReason !== reason) {
-        item.completionCandidateText = text;
-        item.completionCandidateSince = timestamp;
-        item.completionReason = reason;
-      }
-      return {
-        generating: false,
-        confirmed: timestamp - item.completionCandidateSince >= completionEvidenceStableMs,
-        reason,
-      };
-    }
-
     function shouldSendNow(node, text, preview, timestamp, item) {
-      const completion = observeCompletion(node, item, text, timestamp);
+      const completion = completionEvidence.observe(node, item, text, timestamp, Boolean(isResponseGenerating()));
       if (!completion.confirmed) return false;
       return timestamp - item.lastChangedAt >= stableDelayForPreview(preview || text);
     }
@@ -163,6 +143,7 @@
     function finalizeCompletedResponse(node, item, text, chunks, preview) {
       const autoEnabled = Boolean(isAutoEnabled());
       item.sent = true;
+      completionEvidence.reset();
       notifyCompleted(item);
       if (!autoEnabled || !preview || !chunks.length) return;
       if (node.dataset) node.dataset[sentFlag] = '1';
@@ -181,7 +162,7 @@
 
     function scheduleGenerationRecheck(node, item) {
       item.generationObserved = true;
-      resetCompletionCandidate(item);
+      completionEvidence.resetCandidate(item);
       if (item.idleTimer) clearTimer(item.idleTimer);
       item.idleTimer = setTimer(() => { item.idleTimer = null; if (!item.sent) processNode(node); }, generationRecheckMs);
     }
@@ -220,11 +201,15 @@
         return false;
       }
       const item = ensureElementState(node, text);
+      const inheritedGeneration = completionEvidence.inherit(node, item, text);
       if (item.sent) {
-        if (text === item.lastText) return true;
+        if (text === item.lastText) {
+          if (completionEvidence.active() && !inheritedGeneration) completionEvidence.reset();
+          return true;
+        }
         item.lastText = text;
         item.lastChangedAt = now();
-        resetCompletionCandidate(item);
+        completionEvidence.resetCandidate(item);
         const { chunks, preview } = previewParts(text);
         if (chunks.length && preview) void reportEntry(node, item, text, chunks, preview, false);
         return true;
@@ -237,7 +222,7 @@
       if (text !== item.lastText) {
         item.lastText = text;
         item.lastChangedAt = now();
-        resetCompletionCandidate(item);
+        completionEvidence.resetCandidate(item);
       }
       const { chunks, preview } = previewParts(text);
       if (!preview && !hasResponseCompletionControl(node)) return false;
@@ -250,6 +235,7 @@
     }
 
     function markExistingMessagesAsSeen() {
+      completionEvidence.reset();
       for (const node of getAssistantNodes()) {
         const text = extractAssistantText(node);
         if (!text) {
@@ -308,6 +294,7 @@
     function destroy() {
       if (inspectTimer) clearTimer(inspectTimer);
       inspectTimer = null;
+      completionEvidence.reset();
       for (const node of getAssistantNodes()) clearStateTimers(stateByElement.get(node));
     }
 
@@ -315,6 +302,8 @@
       destroy,
       inspectLatestAssistant,
       markExistingMessagesAsSeen,
+      markGenerationObserved: completionEvidence.markGenerationObserved,
+      resetGenerationObservation: completionEvidence.reset,
       processNode,
       rebaseline: markExistingMessagesAsSeen,
       reportLatestSnapshot,

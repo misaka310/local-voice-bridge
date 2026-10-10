@@ -58,9 +58,11 @@ function mutation(target, { addedNodes = [], removedNodes = [] } = {}) {
 function loadDomObserverHarness() {
   const source = fs.readFileSync(path.resolve(__dirname, '../extension/content-dom-observer.js'), 'utf8');
   let autoSpeechEnvironment = null;
+  const autoSpeechCalls = [];
   const sandbox = {
     globalThis: {
       LocalVoiceContentMutationFilter: require('../extension/content-mutation-filter.js'),
+      LocalVoiceGenerationCompletionEvidence: require('../extension/generation-completion-evidence.js'),
       ContentTextCore: {},
       LocalVoiceAssistantText: { getAssistantNodes: () => [] },
       LocalVoiceAutoSpeech: {
@@ -72,6 +74,8 @@ function loadDomObserverHarness() {
             reportLatestSnapshot() { return false; },
             inspectLatestAssistant() { return false; },
             scheduleInspect() { return false; },
+            markGenerationObserved() { autoSpeechCalls.push('generation-observed'); },
+            resetGenerationObservation() { autoSpeechCalls.push('generation-reset'); },
           };
         },
       },
@@ -81,6 +85,7 @@ function loadDomObserverHarness() {
   return {
     api: sandbox.globalThis.LocalVoiceContentDomObserver,
     getAutoSpeechEnvironment: () => autoSpeechEnvironment,
+    getAutoSpeechCalls: () => [...autoSpeechCalls],
   };
 }
 
@@ -261,4 +266,38 @@ test('generating favicon is cleared when the generation control disappears', () 
   controller.scheduleInspect([mutation(element(), { removedNodes: [generationNode] })]);
 
   assert.deepEqual(marks, ['generating', 'generation-ended']);
+});
+
+test('generation evidence is captured once per generating transition before completion inspection', () => {
+  const harness = loadDomObserverHarness();
+  const generationNode = element({ generationControl: true });
+  let generating = true;
+  const document = {
+    querySelector(selector) {
+      if (selector.includes('stop-button')) return generating ? generationNode : null;
+      if (selector.includes('data-message-author-role')) return {};
+      return null;
+    },
+    querySelectorAll() { return []; },
+  };
+  const controller = harness.api.create({
+    document,
+    location: { pathname: '/c/example' },
+    getSettings: () => ({}),
+    isEnabled: () => true,
+    setNewConversation() {},
+    markResponseGenerating() {},
+    markResponseGenerationEnded() {},
+    markResponseError() {},
+  });
+
+  controller.scheduleInspect([mutation(element(), { addedNodes: [generationNode] })]);
+  controller.scheduleInspect([mutation(element({ assistantAncestor: true }))]);
+  assert.deepEqual(harness.getAutoSpeechCalls(), ['generation-observed']);
+
+  generating = false;
+  controller.scheduleInspect([mutation(element(), { removedNodes: [generationNode] })]);
+  generating = true;
+  controller.scheduleInspect([mutation(element(), { addedNodes: [generationNode] })]);
+  assert.deepEqual(harness.getAutoSpeechCalls(), ['generation-observed', 'generation-observed']);
 });
