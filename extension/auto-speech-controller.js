@@ -15,6 +15,8 @@
     const getStableKey = environment.getStableKey;
     const isResponseGenerating = environment.isResponseGenerating;
     const hasResponseCompletionControl = environment.hasResponseCompletionControl;
+    const isResponseError = typeof environment.isResponseError === 'function'
+      ? environment.isResponseError : () => false;
     const getPreviewOptions = environment.getPreviewOptions;
     const splitSpeakChunks = environment.splitSpeakChunks;
     const extractAutoPreview = environment.extractAutoPreview;
@@ -105,6 +107,9 @@
       stateFor: (node) => stateByElement.get(node) || null,
       ensureState: ensureElementState,
       hasCompletionControl: hasResponseCompletionControl,
+      getStableKey,
+      isResponseGenerating,
+      isResponseError,
       stableMs: completionEvidenceStableMs,
     });
 
@@ -124,7 +129,7 @@
     function notifyCompleted(item) {
       if (item.completionNotified) return;
       item.completionNotified = true;
-      markResponseCompleted();
+      markResponseCompleted(item.key);
     }
 
     function reportEntry(node, item, text, chunks, preview, isAuto) {
@@ -234,10 +239,14 @@
       return true;
     }
 
-    function markExistingMessagesAsSeen() {
+    function markExistingMessagesAsSeen(options = {}) {
       completionEvidence.reset();
-      for (const node of getAssistantNodes()) {
+      const nodes = getAssistantNodes();
+      const latest = nodes[nodes.length - 1];
+      let latestText = '';
+      for (const node of nodes) {
         const text = extractAssistantText(node);
+        if (node === latest) latestText = text;
         if (!text) {
           pendingElements.add(node);
           continue;
@@ -250,6 +259,10 @@
           completionNotified: true,
         }));
         if (node.dataset) node.dataset[sentFlag] = '1';
+      }
+      if (options.restoreLatestCompletion) {
+        const key = completionEvidence.getRestorableCompletionKey(latest, latestText);
+        if (key) markResponseCompleted(key);
       }
     }
 

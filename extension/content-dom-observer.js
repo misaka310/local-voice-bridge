@@ -204,6 +204,7 @@
         getStableKey,
         isResponseGenerating,
         hasResponseCompletionControl,
+        isResponseError,
         getPreviewOptions,
         splitSpeakChunks,
         extractAutoPreview,
@@ -231,7 +232,7 @@
       getStableKey,
       extractAssistantText,
       isResponseGenerating,
-      markExistingMessagesAsSeen: () => ensureController().markExistingMessagesAsSeen(),
+      markExistingMessagesAsSeen: (options = {}) => ensureController().markExistingMessagesAsSeen(options),
       rebaseline: () => ensureController().rebaseline(),
       reportLatestSnapshot: () => ensureController().reportLatestSnapshot(),
       inspectLatestAssistant: () => {

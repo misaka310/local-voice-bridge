@@ -98,6 +98,34 @@ function createMarker({ active = false, session = {} } = {}) {
   return { document, marker, markerApi, sessionStorage };
 }
 
+test('acknowledged answer stays cleared after content script reinitialization', async () => {
+  const first = createMarker();
+  await first.marker.initialize();
+  first.marker.markResponseCompleted('reply-1');
+  first.marker.acknowledge();
+
+  const session = first.sessionStorage.snapshot();
+  assert.equal(session.localVoiceTerminalStatus, undefined);
+  assert.equal(session.localVoiceAcknowledgedMessageKey, 'reply-1');
+
+  const restored = createMarker({ session });
+  await restored.marker.initialize();
+  restored.marker.markResponseCompleted('reply-1');
+  assert.equal(restored.marker.displayedStatus(), 'idle');
+
+  restored.marker.markResponseCompleted('reply-2');
+  assert.equal(restored.marker.displayedStatus(), 'complete');
+});
+
+test('startup restores only the latest eligible completion and forwards restoration options', () => {
+  const content = fs.readFileSync(path.join(ROOT, 'extension/content.js'), 'utf8');
+  const observer = fs.readFileSync(DOM_OBSERVER_SOURCE, 'utf8');
+
+  assert.match(content, /markExistingMessagesAsSeen\(\{ restoreLatestCompletion: true \}\)/);
+  assert.match(observer, /markExistingMessagesAsSeen: \(options = \{\}\) => ensureController\(\)\.markExistingMessagesAsSeen\(options\)/);
+  assert.match(observer, /hasResponseCompletionControl,\s+isResponseError,/);
+});
+
 function activeIcons(document) {
   return document.querySelectorAll('link').filter((link) => /(^|\s)icon(\s|$)/i.test(link.rel));
 }

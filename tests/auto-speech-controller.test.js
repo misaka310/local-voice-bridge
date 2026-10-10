@@ -41,6 +41,7 @@ function createHarness() {
   const nodes = [];
   const reports = [];
   const requestRechecks = [];
+  const completionKeys = [];
   let autoEnabled = true;
   let generating = false;
   let completionMarks = 0;
@@ -55,12 +56,13 @@ function createHarness() {
     getStableKey: (node) => node.key,
     isResponseGenerating: () => generating,
     hasResponseCompletionControl: (node) => Boolean(node.complete),
+    isResponseError: (node) => Boolean(node && node.error),
     getPreviewOptions: () => ({ maxLines: 2, maxChars: 80, minChars: 10 }),
     splitSpeakChunks: (text) => [text],
     extractAutoPreview: (text) => text,
     stableDelayForPreview: () => 100,
     reportChunks: (entry, isAuto) => { reports.push({ entry, isAuto }); },
-    markResponseCompleted: () => { completionMarks += 1; },
+    markResponseCompleted: (key) => { completionMarks += 1; completionKeys.push(key); },
     requestRecheck: (delayMs) => { requestRechecks.push(delayMs); },
     isAutoEnabled: () => autoEnabled,
     isGenerationControlNode: (node) => Boolean(node && node.generationControl),
@@ -80,9 +82,41 @@ function createHarness() {
     setAutoEnabled: (value) => { autoEnabled = value; },
     setGenerating: (value) => { generating = value; },
     completionMarks: () => completionMarks,
+    completionKeys: () => completionKeys,
     extractCount: () => extractCount,
   };
 }
+
+test('startup restores the latest completed answer without queueing it for Auto', () => {
+  const harness = createHarness();
+  const oldNode = { key: 'old', text: '以前の返答です。', dataset: {}, complete: true };
+  const latestNode = { key: 'latest', text: '最新の完了済み返答です。', dataset: {}, complete: true };
+  harness.nodes.push(oldNode, latestNode);
+
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+
+  assert.deepEqual(harness.completionKeys(), ['latest']);
+  assert.equal(harness.reports.length, 0);
+  assert.equal(oldNode.dataset.sent, '1');
+  assert.equal(latestNode.dataset.sent, '1');
+});
+
+test('startup skips completion restore while generating or for error/incomplete replies', () => {
+  const cases = [
+    { generating: true, node: { key: 'generating', text: '生成中です。', dataset: {}, complete: true } },
+    { generating: false, node: { key: 'error', text: 'エラーです。', dataset: {}, complete: true, error: true } },
+    { generating: false, node: { key: 'incomplete', text: '未完了です。', dataset: {}, complete: false } },
+  ];
+
+  for (const scenario of cases) {
+    const harness = createHarness();
+    harness.nodes.push(scenario.node);
+    harness.setGenerating(scenario.generating);
+    harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+    assert.deepEqual(harness.completionKeys(), []);
+    assert.equal(harness.reports.length, 0);
+  }
+});
 
 test('baseline marks visible replies as consumed and does not Auto queue later growth', () => {
   const harness = createHarness();
@@ -147,6 +181,7 @@ test('new completed reply queues exactly one Auto preview and one completion mar
   assert.equal(harness.reports[0].entry.completionReason, 'action-control');
   assert.equal(node.dataset.sent, '1');
   assert.equal(harness.completionMarks(), 1);
+  assert.deepEqual(harness.completionKeys(), ['new']);
   harness.controller.processNode(node);
   assert.equal(harness.completionMarks(), 1);
 });
