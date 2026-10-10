@@ -116,12 +116,12 @@
         resetCompletionCandidate(item);
         return { generating: true, confirmed: false, reason: '' };
       }
-      if (!hasResponseCompletionControl(node)) {
+      if (!hasResponseCompletionControl(node) && !item.generationObserved) {
         resetCompletionCandidate(item);
         return { generating: false, confirmed: false, reason: '' };
       }
       const reason = item.generationObserved
-        ? 'generation-ended-with-action-control'
+        ? (hasResponseCompletionControl(node) ? 'generation-ended-with-action-control' : 'generation-ended-stable')
         : 'action-control';
       if (item.completionCandidateText !== text || item.completionReason !== reason) {
         item.completionCandidateText = text;
