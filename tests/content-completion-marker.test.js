@@ -406,6 +406,7 @@ test('repository-local policy owns ChatGPT tab status and favicon behavior', () 
   assert.match(design, /data-conversation-role="assistant"/);
   assert.match(design, /turn-action-controls/);
   assert.match(design, /conversation-turn.*兄弟要素/);
+  assert.match(design, /生成中を実際に観測.*Stop系生成コントロールが消えて本文が安定/);
 });
 
 test('completion marker contract stays independent of speech preview, Auto, and local API recovery', async () => {
