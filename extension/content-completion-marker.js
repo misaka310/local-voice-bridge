@@ -4,6 +4,8 @@
   const LEGACY_TITLE_PREFIX = '● ';
   const LEGACY_SESSION_KEY = 'localVoiceCompletionPending';
   const SESSION_KEY = 'localVoiceTerminalStatus';
+  const COMPLETED_MESSAGE_KEY_SESSION_KEY = 'localVoiceCompletedMessageKey';
+  const ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY = 'localVoiceAcknowledgedMessageKey';
   const FAVICON_ID = 'local-voice-completion-favicon';
   const ORIGINAL_REL_ATTRIBUTE = 'data-local-voice-original-rel';
   const STATUS_SVG = Object.freeze({
@@ -86,6 +88,8 @@
 
   function create(ctx) {
     let terminalStatus = null;
+    let completedMessageKey = '';
+    let acknowledgedMessageKey = '';
     let newConversation = false;
     let generating = false;
     let playing = false;
@@ -129,6 +133,12 @@
         ctx.sessionStorage.removeItem(LEGACY_SESSION_KEY);
         if (terminalStatus) ctx.sessionStorage.setItem(SESSION_KEY, terminalStatus);
         else ctx.sessionStorage.removeItem(SESSION_KEY);
+        if (completedMessageKey) {
+          ctx.sessionStorage.setItem(COMPLETED_MESSAGE_KEY_SESSION_KEY, completedMessageKey);
+        } else ctx.sessionStorage.removeItem(COMPLETED_MESSAGE_KEY_SESSION_KEY);
+        if (acknowledgedMessageKey) {
+          ctx.sessionStorage.setItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY, acknowledgedMessageKey);
+        } else ctx.sessionStorage.removeItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY);
       } catch (_error) {}
     }
 
@@ -204,6 +214,7 @@
 
     function setTerminalStatus(status) {
       terminalStatus = status === 'complete' || status === 'error' ? status : null;
+      if (terminalStatus !== 'complete') completedMessageKey = '';
       persistTerminalStatus();
       sync();
     }
@@ -217,6 +228,9 @@
 
     function acknowledge() {
       if (!terminalStatus && !ctx.document.getElementById(FAVICON_ID)) return;
+      if (terminalStatus === 'complete' && completedMessageKey) {
+        acknowledgedMessageKey = completedMessageKey;
+      }
       setTerminalStatus(null);
     }
 
@@ -232,8 +246,13 @@
       sync();
     }
 
-    function markResponseCompleted() {
+    function markResponseCompleted(messageKey) {
       generating = false;
+      completedMessageKey = String(messageKey || '').trim();
+      if (completedMessageKey && completedMessageKey === acknowledgedMessageKey) {
+        setTerminalStatus(null);
+        return;
+      }
       setTerminalStatus('complete');
       void isTabActivelyViewed().then((active) => {
         if (active) acknowledge();
@@ -272,11 +291,27 @@
         terminalStatus = stored === 'complete' || stored === 'error'
           ? stored
           : ctx.sessionStorage.getItem(LEGACY_SESSION_KEY) === '1' ? 'complete' : null;
+        completedMessageKey = String(
+          ctx.sessionStorage.getItem(COMPLETED_MESSAGE_KEY_SESSION_KEY) || ''
+        ).trim();
+        acknowledgedMessageKey = String(
+          ctx.sessionStorage.getItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY) || ''
+        ).trim();
       } catch (_error) {
         terminalStatus = null;
+        completedMessageKey = '';
+        acknowledgedMessageKey = '';
+      }
+      if (
+        terminalStatus === 'complete'
+        && completedMessageKey
+        && completedMessageKey === acknowledgedMessageKey
+      ) {
+        terminalStatus = null;
+        completedMessageKey = '';
       }
       persistTerminalStatus();
-      if (await isTabActivelyViewed()) setTerminalStatus(null);
+      if (await isTabActivelyViewed()) acknowledge();
       else sync();
       titleObserver = new ctx.MutationObserver((mutations) => {
         if (headMutationNeedsSync(mutations)) {

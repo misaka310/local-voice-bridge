@@ -12,8 +12,13 @@
       stateFor,
       ensureState,
       hasCompletionControl,
+      getStableKey,
+      isResponseGenerating,
+      isResponseError,
       stableMs,
     } = environment;
+    const isGenerating = typeof isResponseGenerating === 'function' ? isResponseGenerating : () => false;
+    const isError = typeof isResponseError === 'function' ? isResponseError : () => false;
     let baselineNode = null;
     let baselineText = '';
     let active = false;
@@ -28,6 +33,11 @@
       item.completionCandidateText = '';
       item.completionCandidateSince = 0;
       item.completionReason = '';
+    }
+
+    function getRestorableCompletionKey(node, text) {
+      if (!node || !text || isGenerating() || !hasCompletionControl(node) || isError(node)) return '';
+      return getStableKey(node);
     }
 
     function markGenerationObserved() {
@@ -81,6 +91,7 @@
       observe,
       reset,
       resetCandidate,
+      getRestorableCompletionKey,
     });
   }
 

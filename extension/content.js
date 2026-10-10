@@ -270,7 +270,7 @@
     micKeepalive?.sync();
     await syncDesktopPetSelection();
     await initializeCompletionMarker();
-    markExistingMessagesAsSeen();
+    markExistingMessagesAsSeen({ restoreLatestCompletion: true });
     observer = new MutationObserver(scheduleInspect);
     observer.observe(document.body, globalThis.LocalVoiceContentMutationFilter.OBSERVER_OPTIONS);
     try { await registerCurrentTab({ includeLatest: true }); } catch (_error) {}
