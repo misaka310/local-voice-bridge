@@ -52,6 +52,7 @@ if (status === 0) {
     'tests/background-queue-core.test.js',
     'tests/content-text-core.test.js',
     'tests/assistant-text-extractor.test.js',
+    'tests/fuzz-properties.test.js',
     'tests/auto-speech-controller.test.js',
     'tests/completion-favicon-non-speakable.test.js',
     'tests/completion-favicon-recovery.test.js',
