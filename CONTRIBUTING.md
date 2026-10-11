@@ -39,7 +39,7 @@ ChatGPT固有の責務は次の境界を維持します。
 
 - assistant本文抽出は `assistant-text-extractor.js`
 - 出典・citation UI判定は `assistant-source-filter.js`
-- Autoのbaseline、streaming安定性、完了判定は `auto-speech-controller.js`
+- 回答生成・完了の証拠判定は `generation-completion-evidence.js`、streaming安定性と読み上げ確定は `auto-speech-controller.js`
 - ProseMirror入力、送信ボタン、送信前ACKは `prompt-input-core.js`
 - Auto受付、既読境界、Next・Regen、キュー項目生成は `background-queue-core.js`
 

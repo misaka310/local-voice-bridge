@@ -104,7 +104,6 @@
 
     const completionEvidence = generationEvidenceApi.createCompletionEvidence({
       getAssistantNodes, extractAssistantText,
-      stateFor: (node) => stateByElement.get(node) || null,
       ensureState: ensureElementState,
       hasCompletionControl: hasResponseCompletionControl,
       getStableKey,
@@ -150,7 +149,7 @@
       item.sent = true;
       completionEvidence.reset();
       notifyCompleted(item);
-      if (!autoEnabled || !preview || !chunks.length) return;
+      if (!autoEnabled || item.suppressAuto || !preview || !chunks.length) return;
       if (node.dataset) node.dataset[sentFlag] = '1';
       void reportEntry(node, item, text, chunks, preview, true);
     }
@@ -230,7 +229,7 @@
         completionEvidence.resetCandidate(item);
       }
       const { chunks, preview } = previewParts(text);
-      if (!preview && !hasResponseCompletionControl(node)) return false;
+      if ((item.suppressAuto && !completionEvidence.hasResponseProgress(node, text)) || (!preview && !hasResponseCompletionControl(node))) return false;
       if (shouldSendNow(node, text, preview, now(), item)) {
         finalizeCompletedResponse(node, item, text, chunks, preview);
         return true;

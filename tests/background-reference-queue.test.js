@@ -19,6 +19,7 @@ const BACKGROUND_CONTROL_POLL_POLICY_PATH = path.join(ROOT, 'extension', 'backgr
 const BACKGROUND_CONTROL_SYNC_PATH = path.join(ROOT, 'extension', 'background-control-sync.js');
 const BACKGROUND_TAB_REGISTRY_PATH = path.join(ROOT, 'extension', 'background-tab-registry.js');
 const BACKGROUND_TAB_RECONNECT_PATH = path.join(ROOT, 'extension', 'background-tab-reconnect.js');
+const BACKGROUND_TAB_UPDATE_LIFECYCLE_PATH = path.join(ROOT, 'extension', 'background-tab-update-lifecycle.js');
 const BACKGROUND_CONVERSATION_TARGET_PATH = path.join(ROOT, 'extension', 'background-conversation-target.js');
 const BACKGROUND_LOCAL_API_CLIENT_PATH = path.join(ROOT, 'extension', 'background-local-api-client.js');
 const BACKGROUND_RUNTIME_STORE_PATH = path.join(ROOT, 'extension', 'background-runtime-store.js');
@@ -183,6 +184,7 @@ function createHarness(harnessOptions = {}) {
     BACKGROUND_CONTROL_SYNC_PATH,
     BACKGROUND_TAB_REGISTRY_PATH,
     BACKGROUND_TAB_RECONNECT_PATH,
+    BACKGROUND_TAB_UPDATE_LIFECYCLE_PATH,
     BACKGROUND_CONVERSATION_TARGET_PATH,
     BACKGROUND_LOCAL_API_CLIENT_PATH,
     BACKGROUND_RUNTIME_STORE_PATH,

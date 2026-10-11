@@ -16,6 +16,7 @@ importScripts(
   'background-control-heartbeat.js',
   'background-tab-registry.js',
   'background-tab-reconnect.js',
+  'background-tab-update-lifecycle.js',
   'background-conversation-target.js',
   'background-local-api-client.js',
   'background-runtime-store.js',

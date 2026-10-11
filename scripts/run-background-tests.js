@@ -45,6 +45,8 @@ if (status === 0) {
     'tests/background-state-publisher.test.js',
     'tests/background-control-heartbeat.test.js',
     'tests/background-tab-reconnect.test.js',
+    'tests/background-tab-update-lifecycle.test.js',
+    'tests/background-tab-update-watcher.test.js',
     'tests/background-external-panel.test.js',
     'tests/background-message-router.test.js',
     'tests/background-playback-queue.test.js',

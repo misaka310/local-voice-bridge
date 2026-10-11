@@ -9,7 +9,6 @@
     const {
       getAssistantNodes,
       extractAssistantText,
-      stateFor,
       ensureState,
       hasCompletionControl,
       getStableKey,
@@ -46,9 +45,14 @@
       baselineText = baselineNode ? extractAssistantText(baselineNode) : '';
       active = true;
       if (!baselineNode) return;
-      const existing = stateFor(baselineNode);
-      if (existing && existing.sent) return;
-      ensureState(baselineNode, baselineText).generationObserved = true;
+      const item = ensureState(baselineNode, baselineText);
+      item.generationObserved = true;
+      if (item.sent) {
+        item.sent = false;
+        item.suppressAuto = true;
+        item.completionNotified = false;
+      }
+      resetCandidate(item);
     }
 
     function inherit(node, item, text) {
@@ -84,8 +88,13 @@
       };
     }
 
+    function hasResponseProgress(node, text) {
+      return node !== baselineNode || text !== baselineText || hasCompletionControl(node);
+    }
+
     return Object.freeze({
       active: () => active,
+      hasResponseProgress,
       inherit,
       markGenerationObserved,
       observe,

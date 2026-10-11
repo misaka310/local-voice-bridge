@@ -118,6 +118,26 @@ test('startup skips completion restore while generating or for error/incomplete 
   }
 });
 
+test('a reply already generating at startup gets a completion marker without Auto playback', () => {
+  const harness = createHarness();
+  const node = { key: 'startup-generation', text: '起動時から生成中の返答です。', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+
+  harness.controller.markExistingMessagesAsSeen();
+  harness.controller.markGenerationObserved();
+  assert.equal(node.dataset.sent, '1');
+
+  harness.setGenerating(false);
+  node.complete = true;
+  harness.controller.processNode(node);
+  harness.clock.advance(300);
+
+  assert.equal(harness.completionMarks(), 1);
+  assert.deepEqual(harness.completionKeys(), ['startup-generation']);
+  assert.equal(harness.reports.length, 0);
+});
+
 test('baseline marks visible replies as consumed and does not Auto queue later growth', () => {
   const harness = createHarness();
   const node = { key: 'old', text: '既存の返答です。', dataset: {} };
