@@ -11,6 +11,7 @@
     'assistant-source-filter.js',
     'assistant-text-extractor.js',
     'generation-completion-evidence.js',
+    'assistant-snapshot-selection.js',
     'auto-speech-controller.js',
     'content-settings.js',
     'content-mic-keepalive.js',

@@ -8,6 +8,7 @@
   const generationEvidenceApi = typeof module !== 'undefined' && module.exports
     ? require('./generation-completion-evidence.js')
     : globalThis.LocalVoiceGenerationCompletionEvidence;
+  const snapshotSelectionApi = typeof module !== 'undefined' && module.exports ? require('./assistant-snapshot-selection.js') : globalThis.LocalVoiceAssistantSnapshotSelection;
 
   function createAutoSpeechController(environment = {}) {
     const getAssistantNodes = environment.getAssistantNodes;
@@ -269,9 +270,9 @@
     function reportLatestSnapshot() {
       const nodes = getAssistantNodes();
       if (!nodes.length) return false;
-      const node = nodes[nodes.length - 1];
-      const text = extractAssistantText(node);
-      if (!text) return false;
+      const snapshot = snapshotSelectionApi.latestNonEmpty(nodes, extractAssistantText);
+      if (!snapshot) return false;
+      const { node, text } = snapshot;
       const item = ensureElementState(node, text);
       const { chunks, preview } = previewParts(text);
       if (!chunks.length || !preview) return false;
@@ -324,6 +325,5 @@
       stateFor: (node) => stateByElement.get(node) || null,
     };
   }
-
   return { createAutoSpeechController };
 }));

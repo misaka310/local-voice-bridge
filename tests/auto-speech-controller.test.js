@@ -101,6 +101,22 @@ test('startup restores the latest completed answer without queueing it for Auto'
   assert.equal(latestNode.dataset.sent, '1');
 });
 
+test('initial manual target falls back past an empty latest assistant node without Auto-reading old text', async () => {
+  const harness = createHarness();
+  const previousAnswer = { key: 'previous-answer', text: '前の実回答本文です。', dataset: {}, complete: true };
+  const latestTransient = { key: 'latest-transient', text: '', dataset: {}, complete: false };
+  harness.nodes.push(previousAnswer, latestTransient);
+
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+  const reported = await harness.controller.reportLatestSnapshot();
+
+  assert.equal(reported, true);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].entry.messageKey, 'previous-answer');
+  assert.equal(harness.reports[0].entry.text, '前の実回答本文です。');
+  assert.equal(harness.reports[0].isAuto, false);
+});
+
 test('startup skips completion restore while generating or for error/incomplete replies', () => {
   const cases = [
     { generating: true, node: { key: 'generating', text: '生成中です。', dataset: {}, complete: true } },

@@ -87,8 +87,18 @@
 
   function getAssistantNodes(documentObject) {
     if (!documentObject || typeof documentObject.querySelectorAll !== 'function') return [];
-    const primary = Array.from(documentObject.querySelectorAll('[data-message-author-role="assistant"], [data-conversation-role="assistant"]'));
-    if (primary.length > 0) return primary;
+    const messageNodes = Array.from(documentObject.querySelectorAll('[data-message-author-role="assistant"]'));
+    if (messageNodes.length > 0) return messageNodes;
+
+    const roleNodes = Array.from(documentObject.querySelectorAll('[data-conversation-role="assistant"]'));
+    if (roleNodes.length > 0) {
+      return Array.from(new Set(roleNodes.map((node) => {
+        const label = normalizeText(node.innerText || node.textContent || '');
+        if (!isTransientAssistantStatus(label)) return node;
+        return node.nextElementSibling || node.previousElementSibling || node.parentElement || node;
+      })));
+    }
+
     return Array.from(documentObject.querySelectorAll('article')).filter((node) => {
       const label = `${node.getAttribute('aria-label') || ''} ${node.textContent || ''}`.toLowerCase();
       return label.includes('assistant') || label.includes('chatgpt');

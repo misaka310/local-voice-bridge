@@ -154,3 +154,26 @@ test('assistant text extraction handles the source-chip DOM matrix', async ({ pa
     });
   }
 });
+
+test('assistant role heading resolves to its sibling response body in current ChatGPT markup', async ({ page }) => {
+  await page.setContent([
+    '<main>',
+    '<div class="assistant-turn">',
+    '<h4 data-conversation-role="assistant" class="sr-only">ChatGPT の発言:</h4>',
+    '<div class="response-body"><p>ここにChatGPTの実回答本文があります。</p></div>',
+    '</div>',
+    '</main>',
+  ].join(''));
+  await page.addScriptTag({ content: CONTENT_TEXT_CORE });
+  await page.addScriptTag({ content: ASSISTANT_SOURCE_FILTER });
+  await page.addScriptTag({ content: ASSISTANT_TEXT_EXTRACTOR });
+
+  const extracted = await page.evaluate(() => {
+    const nodes = globalThis.LocalVoiceAssistantText.getAssistantNodes(document);
+    return { count: nodes.length, text: nodes.length ? globalThis.LocalVoiceAssistantText.extractAssistantText(nodes.at(-1)) : '' };
+  });
+
+  expect(extracted.count).toBe(1);
+  expect(extracted.text).toContain('ここにChatGPTの実回答本文があります。');
+  expect(extracted.text).not.toContain('ChatGPT の発言:');
+});
