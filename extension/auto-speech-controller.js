@@ -103,7 +103,7 @@
     }
 
     const completionEvidence = generationEvidenceApi.createCompletionEvidence({
-      getAssistantNodes, extractAssistantText,
+      getAssistantNodes, extractAssistantText, sentFlag,
       ensureState: ensureElementState,
       hasCompletionControl: hasResponseCompletionControl,
       getStableKey,
@@ -242,13 +242,13 @@
       completionEvidence.reset();
       const nodes = getAssistantNodes();
       const latest = nodes[nodes.length - 1];
+      const latestGenerating = completionEvidence.prepareLatestStartupGeneration(options.restoreLatestCompletion);
       let latestText = '';
       for (const node of nodes) {
         const text = extractAssistantText(node);
         if (node === latest) latestText = text;
-        if (!text) {
-          pendingElements.add(node);
-          if (node === latest && options.restoreLatestCompletion && isResponseGenerating()) completionEvidence.markGenerationObserved({ suppressAuto: true });
+        if (!text || (node === latest && latestGenerating)) {
+          if (!text) pendingElements.add(node);
           continue;
         }
         if (pendingElements.has(node)) continue;
