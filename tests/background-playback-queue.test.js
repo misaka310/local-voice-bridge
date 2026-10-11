@@ -128,7 +128,7 @@ function statusTypes(harness, tabId = 202) {
     .map((entry) => entry.message.type);
 }
 
-test('playback waits until the source tab observes the started status', async () => {
+test('playback starts while the source-tab acknowledgement is still pending', async () => {
   let releaseStarted;
   const started = new Promise((resolve) => { releaseStarted = resolve; });
   const harness = createHarness({
@@ -138,10 +138,11 @@ test('playback waits until the source tab observes the started status', async ()
 
   const playback = harness.controller.playNext();
   await delay(20);
-  assert.equal(harness.speakCalls(), 0);
+  const speakCallsBeforeAcknowledgement = harness.speakCalls();
 
   releaseStarted({ ok: true });
   await playback;
+  assert.equal(speakCallsBeforeAcknowledgement, 1);
   assert.equal(harness.speakCalls(), 1);
   assert.deepEqual(statusTypes(harness), ['playback-started', 'playback-completed']);
 });

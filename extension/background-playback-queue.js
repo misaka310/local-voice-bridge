@@ -177,11 +177,10 @@
         currentPlaybackTabId: null,
       });
       ctx.setStatus(`Generating audio chunk ${chunkLabel(item)}`, 'info');
-      const playbackStatusReady = notifyPlaybackStatus(item, 'playback-started', playbackToken);
+      void notifyPlaybackStatus(item, 'playback-started', playbackToken);
       ctx.broadcastState();
       try {
         await flushBeforePlayback();
-        await playbackStatusReady;
         let payload;
         if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text, item);
         else {

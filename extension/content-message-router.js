@@ -1,5 +1,5 @@
 'use strict'; (function initContentMessageRouter(global) {
-  const CONTENT_SCRIPT_VERSION = '0.4.10';
+  const CONTENT_SCRIPT_VERSION = '0.4.11';
 
   function create(ctx) {
     let activePlaybackToken = '';
