@@ -44,7 +44,7 @@
     const cleaned = stripInternalControlTokens(original);
     if (original && !cleaned) return true;
     const normalized = cleaned.replace(/\s+/g, '');
-    return /^(?:(?:\d+|個の)?画像を(?:分析|解析)(?:中|しています)|思考中|考え中|Thinking|Analyzing(?:the)?images?)(?:ストリーミングが中断されました。?完全なメッセージを待機しています)?(?:[.…。・]+)?$/i.test(normalized);
+    return /^(?:(?:\d+|個の)?画像を(?:分析|解析)(?:中|しています)|思考中|考え中|Thinking|Analyzing(?:the)?images?|ChatGPTの発言)[:：]?(?:ストリーミングが中断されました。?完全なメッセージを待機しています)?(?:[.…。・]+)?$/i.test(normalized);
   }
 
   function normalizeMarkdownLine(line) {

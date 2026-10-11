@@ -14,8 +14,10 @@ test('normalizes assistant text without flattening meaningful line boundaries', 
 test('recognizes transient ChatGPT generation labels only when they are the whole message', () => {
   assert.equal(assistantText.isTransientAssistantStatus('画像を分析しています…'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinking...'), true);
+  assert.equal(assistantText.isTransientAssistantStatus('ChatGPT の発言:'), true);
   assert.equal(assistantText.isTransientAssistantStatus('<|SpawnThinking|>'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinkingについて説明します。'), false);
+  assert.equal(assistantText.isTransientAssistantStatus('ChatGPT の発言: この回答は参考になります。'), false);
 });
 
 test('removes internal ChatGPT control tokens before assistant speech extraction', () => {
