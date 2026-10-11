@@ -138,6 +138,24 @@ test('a reply already generating at startup gets a completion marker without Aut
   assert.equal(harness.reports.length, 0);
 });
 
+test('an empty assistant shell already generating at startup gets completion-only tracking', () => {
+  const harness = createHarness();
+  const node = { key: 'startup-empty-generation', text: '', dataset: {}, complete: false };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+  node.text = '初期化後に完成した返答です。';
+  node.complete = true;
+  harness.setGenerating(false);
+  harness.controller.processNode(node);
+  harness.clock.advance(300);
+
+  assert.equal(harness.completionMarks(), 1);
+  assert.deepEqual(harness.completionKeys(), ['startup-empty-generation']);
+  assert.equal(harness.reports.length, 0);
+});
+
 test('baseline marks visible replies as consumed and does not Auto queue later growth', () => {
   const harness = createHarness();
   const node = { key: 'old', text: '既存の返答です。', dataset: {} };
