@@ -39,7 +39,7 @@
       return getStableKey(node);
     }
 
-    function markGenerationObserved() {
+    function markGenerationObserved({ suppressAuto = false } = {}) {
       const nodes = getAssistantNodes();
       baselineNode = nodes.length ? nodes[nodes.length - 1] : null;
       baselineText = baselineNode ? extractAssistantText(baselineNode) : '';
@@ -47,7 +47,7 @@
       if (!baselineNode) return;
       const item = ensureState(baselineNode, baselineText);
       item.generationObserved = true;
-      if (item.sent) {
+      if (item.sent || suppressAuto) {
         item.sent = false;
         item.suppressAuto = true;
         item.completionNotified = false;

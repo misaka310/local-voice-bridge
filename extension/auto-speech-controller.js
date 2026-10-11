@@ -248,6 +248,7 @@
         if (node === latest) latestText = text;
         if (!text) {
           pendingElements.add(node);
+          if (node === latest && options.restoreLatestCompletion && isResponseGenerating()) completionEvidence.markGenerationObserved({ suppressAuto: true });
           continue;
         }
         if (pendingElements.has(node)) continue;
