@@ -23,6 +23,7 @@
     const cloned = cloneItem(item);
     if (!cloned) return null;
     const text = stripInternalControlTokens(cloned.text);
+    if (!text || /^ChatGPTの発言[:：]?$/i.test(text.replace(/\s+/g, ''))) return null;
     return text ? { ...cloned, text } : null;
   }
 

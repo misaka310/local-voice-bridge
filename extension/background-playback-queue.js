@@ -183,7 +183,7 @@
         await flushBeforePlayback();
         await playbackStatusReady;
         let payload;
-        if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text);
+        if (item.audioUrl) payload = await ctx.replayLocalAudio(item.text, item);
         else {
           payload = await ctx.speak(item.text, `bg-${item.id}`, item.voiceProfile, item.referenceVoice, item.voicePrompt, true);
           item.audioUrl = payload.audioUrl;

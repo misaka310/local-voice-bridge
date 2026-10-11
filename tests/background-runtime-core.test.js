@@ -154,3 +154,27 @@ test('runtime restore drops internal control-token-only speech items', () => {
   ]);
   assert.equal(merged.lastPlayedItem, null);
 });
+
+test('runtime restore drops the legacy ChatGPT speaker label from replay state', () => {
+  const legacyLabel = {
+    id: 'legacy-speaker-label',
+    text: 'ChatGPT の発言:',
+    audioUrl: 'http://127.0.0.1:8717/audio/expired.wav',
+  };
+  const merged = runtimeCore.mergeSnapshot({
+    queue: [legacyLabel],
+    lastPlayedItem: legacyLabel,
+  }, {
+    tabs: new Map(),
+    queue: [],
+    currentItem: null,
+    isPlaying: false,
+    lastPlayedItem: null,
+    seq: 1,
+    conversationSessionTargets: new Map(),
+    conversationSessionTargetLocations: new Map(),
+  });
+
+  assert.deepEqual(merged.queue, []);
+  assert.equal(merged.lastPlayedItem, null);
+});
