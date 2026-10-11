@@ -54,6 +54,7 @@ ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し
 - TTS生成失敗、再生失敗、ブラウザ切断、拡張機能更新待ちを区別して表示する。
 - 拡張機能の自己再読み込みが可能なら正式なloopback経路で再読み込みし、`loadedVersion == expectedVersion`と再接続まで確認する。
 - 拡張機能を再読み込みした後、既存ChatGPTタブのcontent script versionも照合する。古い背景タブは、回答生成・入力下書き・添付・再生中の状態を保護し、更新可能になってから新しい処理へ切り替える。
+- content scriptの挙動を変更するときは、manifest versionとcontent scriptが返すversion markerを同じ新しい値へ更新し、既存タブが更新を検出できるようにする。
 - 自己再読み込み不能なら安全なbootstrapまたは制御経路を修復し、現在環境で不可能な場合だけblockedとする。
 - ユーザー利用中のChrome / Brave既存タブ、入力欄、分割表示をテストや復旧へ流用しない。
 - 話している途中に意図しないMuteへ遷移しない。
