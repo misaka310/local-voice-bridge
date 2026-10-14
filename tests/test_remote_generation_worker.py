@@ -29,48 +29,48 @@ class RemoteGenerationWorkerTests(unittest.TestCase):
         stream.seek(0)
         return read_frame(stream, max_payload_bytes=64 * 1024 * 1024)
 
-    def test_gpu_selection_prefers_3060_when_it_has_required_free_memory(self) -> None:
+    def test_gpu_selection_prefers_configured_device_when_it_has_required_free_memory(self) -> None:
         gpus = [
-            {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 9000},
-            {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 12000},
+            {"index": "0", "uuid": "GPU-11111111", "name": "NVIDIA GPU A", "freeMiB": 9000},
+            {"index": "1", "uuid": "GPU-22222222", "name": "NVIDIA GPU B", "freeMiB": 12000},
         ]
 
         selected = remote_generation_worker.select_cuda_device(
             gpus,
-            preferred_device="GPU-3060",
+            preferred_device="GPU-11111111",
             preferred_min_free_mib=8192,
         )
 
-        self.assertEqual(selected["uuid"], "GPU-3060")
+        self.assertEqual(selected["uuid"], "GPU-11111111")
 
     def test_gpu_selection_falls_back_to_freest_gpu_when_preferred_is_busy(self) -> None:
         gpus = [
-            {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 4096},
-            {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 11000},
+            {"index": "0", "uuid": "GPU-11111111", "name": "NVIDIA GPU A", "freeMiB": 4096},
+            {"index": "1", "uuid": "GPU-22222222", "name": "NVIDIA GPU B", "freeMiB": 11000},
         ]
 
         selected = remote_generation_worker.select_cuda_device(
             gpus,
-            preferred_device="GPU-3060",
+            preferred_device="GPU-11111111",
             preferred_min_free_mib=8192,
         )
 
-        self.assertEqual(selected["uuid"], "GPU-5060")
+        self.assertEqual(selected["uuid"], "GPU-22222222")
 
     def test_cuda_visibility_ignores_inherited_user_selection_and_uses_policy_result(self) -> None:
         original = os.environ.get("CUDA_VISIBLE_DEVICES")
         try:
-            os.environ["CUDA_VISIBLE_DEVICES"] = "GPU-5060"
+            os.environ["CUDA_VISIBLE_DEVICES"] = "GPU-22222222"
             selected = remote_generation_worker.configure_cuda_visibility(
-                preferred_device="GPU-3060",
+                preferred_device="GPU-11111111",
                 preferred_min_free_mib=8192,
                 gpu_query=lambda: [
-                    {"index": "0", "uuid": "GPU-3060", "name": "NVIDIA GeForce RTX 3060", "freeMiB": 9000},
-                    {"index": "1", "uuid": "GPU-5060", "name": "NVIDIA GeForce RTX 5060 Ti", "freeMiB": 12000},
+                    {"index": "0", "uuid": "GPU-11111111", "name": "NVIDIA GPU A", "freeMiB": 9000},
+                    {"index": "1", "uuid": "GPU-22222222", "name": "NVIDIA GPU B", "freeMiB": 12000},
                 ],
             )
-            self.assertEqual(selected["uuid"], "GPU-3060")
-            self.assertEqual(os.environ.get("CUDA_VISIBLE_DEVICES"), "GPU-3060")
+            self.assertEqual(selected["uuid"], "GPU-11111111")
+            self.assertEqual(os.environ.get("CUDA_VISIBLE_DEVICES"), "GPU-11111111")
         finally:
             if original is None:
                 os.environ.pop("CUDA_VISIBLE_DEVICES", None)

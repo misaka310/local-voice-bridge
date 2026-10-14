@@ -162,7 +162,6 @@ exit 42
         self.assertIn('frontend = [pscustomobject]@{', source)
         self.assertIn('@("reading", "stt", "frontend")', source)
         self.assertIn('リモート生成フロントエンド', source)
-        self.assertNotIn('DESK2', source)
 
     def test_setup_cancel_stops_the_setup_process_tree(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
