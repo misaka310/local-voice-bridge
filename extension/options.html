@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Voice Bridge 読み上げ範囲</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="hero">
+      <img class="app-icon" src="assets/icons/icon48.png" alt="">
+      <div>
+        <p class="eyebrow">Local Voice Bridge</p>
+        <h1>ブラウザの読み上げ範囲</h1>
+        <p class="lead">ChatGPT返答をどこまで1チャンクとして読むかだけを設定します。音声・マイク・Live TTSの設定はWindows Local Voice Bridgeが管理します。</p>
+      </div>
+    </header>
+
+    <form id="settings-form" class="settings-card" novalidate>
+      <section class="settings-section" aria-labelledby="reading-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">読み上げ範囲</p>
+            <h2 id="reading-heading">1回に読む文章量</h2>
+          </div>
+          <p>行数または文字数のうち、先に到達した上限が使われます。</p>
+        </div>
+
+        <div class="field-grid">
+          <label class="field" for="preview-max-lines">
+            <span class="field-label">最大行数</span>
+            <input id="preview-max-lines" name="previewMaxLines" type="number" min="1" max="20" step="1" inputmode="numeric">
+            <span class="field-help">1〜20行。初期値は2行です。</span>
+          </label>
+
+          <label class="field" for="preview-max-chars">
+            <span class="field-label">最大文字数</span>
+            <input id="preview-max-chars" name="previewMaxChars" type="number" min="40" max="1000" step="10" inputmode="numeric">
+            <span class="field-help">40〜1000文字。初期値は80文字です。</span>
+          </label>
+        </div>
+        <p class="section-note">Autoの冒頭読み上げと、Nextで進む1チャンクの区切りに適用されます。変更後に検出した返答から有効です。</p>
+      </section>
+
+      <footer class="form-actions">
+        <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+        <div class="button-row">
+          <button id="reset-button" class="button secondary" type="button">初期値に戻す</button>
+          <button class="button primary" type="submit">保存</button>
+        </div>
+      </footer>
+    </form>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

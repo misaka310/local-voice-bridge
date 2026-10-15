@@ -1,0 +1,171 @@
+# Local Voice Bridge PROJECT SPEC
+
+## 1. 元の目的
+
+ChatGPTのテキスト回答をWindows上で自然にローカル音声再生し、通常利用者がブラウザ拡張・ローカルAPI・TTS内部構成を意識せず日常利用できる状態を提供する。
+
+このリポジトリはChatGPTタブの回答生成中・回答完了未確認・確認済み・読み上げ中・生成エラーと、それを示すfavicon状態を所有する。ページ内メモなど本製品と無関係なブラウザ機能は責務外とし、別プロジェクトの名称・番号・内部運用契約を仕様へ持ち込まない。
+
+## 2. 期待する最終結果
+
+- `LocalVoiceBridge.exe`から通常利用を開始できる。
+- ChatGPTへ通常どおりメッセージを送り、Auto有効時は回答完了後に先頭プレビュー（最大2行・80文字）が一度だけ自動読み上げされる。
+- `Next`、`Regen`、`Replay`、`Stop`、`Ref`、`Volume`など既存の主要操作が意味どおり動く。
+- 回答生成中・完了未確認・確認済み・読み上げ中・生成エラーが正しい状態表示とfaviconへ反映される。
+- 回答完了の黄色いチェックは、完了時点ですでにタブが前面でも表示し、完了後の次のフォーカスまたはタブ内操作で解除する。
+- 拡張の初期化時点ですでに回答生成中のタブも、回答完了後に黄色いチェックを表示し、その既存回答をAuto読み上げへ再登録しない。
+- 拡張機能更新時はWindows Local Voice小窓またはリポジトリ内の正式な再読み込み経路から更新でき、通常利用で`chrome://extensions`の手動操作を要求しない。
+- 通常利用ではターミナルを表示しない。
+- 再起動、拡張機能再接続、TTS再生失敗などから利用者が状態を理解して復旧できる。
+- 明示的な2台構成では、フロントPCがLocal Voice Bridge本体・設定・キャラクターUI・拡張機能・favicon・再生・`127.0.0.1:8717`を所有したまま、音声生成だけを別PCのTTS workerへ委譲できる。
+
+### 完成扱いにしないもの
+
+- ローカルAPIが200を返すだけ。
+- TTSエンジン単体が音声を生成できるだけ。
+- 拡張機能がロードされているだけ。
+- mock E2EだけがPASSし、実ブラウザ経路を確認していない状態。
+- 音声が出てもノイズ、途切れ、1文字だけの読み上げ、意図しないMuteなど通常利用を妨げる不具合が残る状態。
+- 拡張機能更新後に毎回`chrome://extensions`の手動Reloadが必要な状態。
+- Ready表示でもChatGPT回答の検出・再生経路が実際には動かない状態。
+
+## 3. ユーザー操作・導線
+
+通常利用者の主経路はWindows Local Voiceを起動し、ChatGPTを普段どおり使う1本とする。内部script、API、開発者向け診断画面を通常利用の入口にしない。
+
+### Happy Path
+
+1. ユーザーが`LocalVoiceBridge.exe`を起動する。
+2. ローカルAPI、TTS、拡張機能接続がReadyになる。
+3. ユーザーがChromeまたはBraveでChatGPTを開く。
+4. Windows Local VoiceでAutoを有効にする。
+5. ユーザーがChatGPTへメッセージを送る。
+6. 回答生成中は生成中状態を表示する。
+7. 回答完了を検出し、新しい回答の先頭プレビュー（最大2行・80文字）だけを一度ローカルTTSへ渡す。
+8. 音声を再生し、読み上げ状態を表示する。
+9. `Next`、`Replay`、`Regen`などを必要に応じて操作できる。
+10. 次の会話でも同じ経路を継続できる。
+
+### エラー時
+
+- TTS生成失敗、再生失敗、ブラウザ切断、拡張機能更新待ちを区別して表示する。
+- 拡張機能の自己再読み込みが可能なら正式なloopback経路で再読み込みし、`loadedVersion == expectedVersion`と再接続まで確認する。
+- 拡張機能を再読み込みした後、既存ChatGPTタブのcontent script versionも照合する。古い背景タブは、回答生成・入力下書き・添付・再生中の状態を保護し、更新可能になってから新しい処理へ切り替える。
+- 自己再読み込み不能なら安全なbootstrapまたは制御経路を修復し、現在環境で不可能な場合だけblockedとする。
+- ユーザー利用中のChrome / Brave既存タブ、入力欄、分割表示をテストや復旧へ流用しない。
+- 話している途中に意図しないMuteへ遷移しない。
+
+## 4. 制約条件
+
+- Windows向けローカル補助アプリとして動作する。
+- 通常利用でターミナルやコンソールを表示しない。
+- TTSの標準経路はIrodori v3 directを維持する。
+- ChatGPTタブ状態とfaviconの所有権はこのリポジトリ内に置き、別プロジェクトへ移植・複製しない。
+- ブラウザ実機検証は隔離E2Eまたは専用プロファイルを使用し、ユーザーが利用中のブラウザを壊さない。
+- 拡張機能更新はリポジトリ内の正式な再読み込み経路と検証を使用し、外部ワークスペース固有の仕組みを必須にしない。
+- 設定、キュー、再生状態、Ref、Autoなど既存UXを内部都合で削除・置換しない。
+- 通常利用者へ内部APIや複数の起動経路を選ばせない。
+- Local Voice Bridgeの通常runtimeまたはセットアップへ、別リポジトリのアプリ／runtime、別常駐プロセス／アプリ、新しいlocalhostサービス／ポート、新しいインストール・起動・監視手順、外部runtime依存、または本プロジェクトの目的外の利用者機能を追加する場合は、実装開始前に利用者の明示承認を必須とする。承認なしでは実装しない。
+- 利用者が明示承認した`remoteTts`構成では、外部worker依存を音声生成だけに限定する。ChatGPTタブ状態、favicon、設定、キュー、再生制御、Windows小窓、キャラクターUIをworkerへ移さない。
+- `remoteTts`構成でもLocal Voice Bridgeの`127.0.0.1:8717`はフロントPC自身が所有し、8717全体をworkerへ転送しない。workerへの経路は別のloopbackトンネルまたは同等のローカル専用経路に限定する。
+- `remoteTts`は読み上げテキスト、参照音声ID、モデルと生成パラメーターをworkerへ送る。参照WAVはフロントPCから送らない。
+- `remoteTts`のworker応答URLは設定したloopback worker originに限定し、別originへのredirectを拒否する。JSON応答は1 MiB、WAV応答は64 MiBまでとし、WAV形式を確認してから保存する。
+- workerへのHTTP接続はloopbackへ直接行い、環境のHTTP proxy設定を経由しない。
+- workerのhealth詳細と応答エラー文字列はローカルAPIの状態・エラーへ転送しない。worker応答に含まれるホスト固有パス等を公開しない。
+- `remoteTts.enabled=true`と`generationBackend=remote_ssh`は同時に設定できない。`remoteTts`はHTTP TTS worker、`remote_ssh`はIrodori stdio workerを使う独立した方式である。
+- フロントPCには参照音声IDと表示ラベルだけを保持でき、実際の参照WAVとCUDAモデルはworker側だけに保持してよい。
+- 「既存ツールを再利用できる」「責務分離がきれいになる」「別ツールの不具合を直せる」は、前項の承認を省略する理由にならない。通常利用者が管理するものが増える変更は内部変更として扱わない。
+- 通常runtimeのloopbackサービスはLocal Voice Bridge自身のLocal API（既定`127.0.0.1:8717`）を正とする。明示承認済みの`remoteTts`構成ではworker専用トンネルのloopbackポートだけを追加でき、他の追加ポートは別途承認済みの仕様変更がない限り導入しない。
+- 承認済みの`generationBackend=remote_ssh`では、フロントエンドPCがLocal API、Windows UI、設定、キュー、再生、ブラウザ状態、`referenceVoice`と参照音声資産を所有し、Irodori/CUDAの生成だけを既存SSH trust上のstdio workerへ委譲する。生成側PCはLocal Voice Bridgeのtray、Local API、追加listener、キャラクターライブラリを所有しない。
+- `remote_ssh` workerは生成側Windowsユーザーの`CUDA_VISIBLE_DEVICES`を暗黙継承しない。`remoteGeneration.preferredCudaDevice`を優先GPUとして指定でき、起動時にそのGPUの空きVRAMが`preferredGpuMinFreeMiB`以上なら優先し、不足時はその時点で最も空きVRAMの大きいGPUへ自動フォールバックする。
+- リモート生成時も参照音声はフロントエンド側で解決し、選択中の参照音声・参照テキストだけをリクエスト単位で送る。生成側へキャラクター別の参照音声ライブラリを永続複製しない。
+- `remote_ssh`の生成バックエンドが停止・切断してもフロントエンドの`127.0.0.1:8717`、設定、favicon、タブ状態は維持し、音声生成だけをbackend unavailableとして扱う。ローカル生成への暗黙フォールバックは行わない。
+- ローカルAPIはloopback専用を維持し、全HTTPリクエストで`Host`をloopback名またはloopback IPへ限定する。POSTはJSONだけを受け付け、通常Webページ由来の`Origin`は拒否し、Chrome拡張またはOriginを持たない同一PCのネイティブクライアントだけを許可する。1リクエストのbodyは32 MiB以下に制限する。
+- Local APIのレスポンスへユーザー名を含む絶対ファイルパスやローカルキャッシュの実パスを返さない。診断上のパスはローカルログまたは明示的な開発者向け経路だけで扱う。
+- マイク録音の生音声と文字起こし履歴は保存しない。一方、再接続・Service Worker復旧・未配送イベントの再配信に必要なassistant返答チャンク、読み上げキュー、未ACKの文字起こしイベントはローカルruntime状態へ限定的に保存してよい。privacy-safeなstructured runtime event logはサイズ上限と有限世代でローテーションし、無制限に増加させない。
+- 30個以上のChatGPTタブを開く通常利用を前提に、定常時のブラウザ負荷をタブ数へ比例して高頻度化させない。Local APIの制御pollはマイク会話オフ時5秒、マイク会話ONの待機時500ms、録音・文字起こし・送信中など低遅延が必要な間だけ100msを上限とする。
+- 通常の回答生成中は、MutationObserverの関連イベントから生成状態を追跡しても、Auto読み上げのためにassistant DOM全体を毎回cloneして本文抽出しない。本文抽出は回答完了時、または実際にstreaming本文が必要なLive会話中に限定する。
+- 同一ChatGPTタブ内の通常クリック・フォーカスだけで全登録タブへ状態broadcastしない。所有者・URL・タイトルなど共有状態が実際に変化した場合だけ全タブ通知する。
+
+## 5. 非目標
+
+- ChatGPTそのものの実装やモデル選択。
+- ページ内メモなど、本製品と無関係なブラウザ機能。
+- 他サービスの再生停止・再開をLocal Voice Bridgeの責務として持つこと。
+- OpenAI公式機能として振る舞うこと。
+- 通常利用者へ開発者向けCLI、内部API、`chrome://extensions`操作を必須にすること。
+- TTSエンジン単体のベンチマーク成功を最終成果とすること。
+
+## 6. 受入条件
+
+- [ ] `LocalVoiceBridge.exe`から通常利用を開始できる。
+- [ ] Ready状態でChatGPTへメッセージを送り、回答完了を実ブラウザで検出できる。
+- [ ] Auto有効時に新しい回答の先頭プレビュー（最大2行・80文字）を一度だけ自然に読み上げられる。
+- [ ] `Next`、`Regen`、`Replay`、`Stop`の主要操作が既存仕様どおり動く。
+- [ ] 回答生成中、完了未確認、確認済み、読み上げ中、生成エラーの状態表示とfaviconが整合する。
+- [ ] 非アクティブタブの未確認の最新回答は、起動・content script再注入後も黄色faviconへ復元される。回答ID単位の既読状態を保持し、生成中・生成エラーの応答は完了扱いせず、既存回答を読み上げキューへ再登録しない。
+- [ ] 意図しないMuteや操作不能状態が残っていない。
+- [ ] 拡張機能更新後、正式な再読み込み導線で新versionへ反映し再接続できる。
+- [ ] すでに開いているChatGPT背景タブも、新しいcontent scriptで回答完了時の黄色faviconを表示できる。生成中の回答は完了状態を保存してから更新する。
+- [ ] 通常復旧でユーザーに`chrome://extensions`の手動Reloadを要求しない。
+- [ ] アプリ再起動後も主要経路が復旧する。
+- [ ] 通常利用でターミナルやコンソールが表示されない。
+- [ ] 非loopback `Host`のGET/POST/OPTIONSは拒否され、通常WebページからLocal APIのPOST系変更操作を実行できず、拡張機能とWindows小窓の正常通信は維持される。
+- [ ] Local APIレスポンスにユーザー固有の絶対ファイルパスが露出せず、structured runtime event logは有限サイズでローテーションされる。
+- [ ] 30タブ想定で、アイドル中にsub-second全タブpollや同一タブ操作起点の全タブbroadcastが発生せず、通常生成中のAuto監視がassistant本文の全DOM cloneを繰り返さない。
+- [ ] 通常runtimeに承認のない別リポジトリ依存、別常駐プロセス、追加localhostサービス／ポート、目的外機能が存在せず、`scripts/check-runtime-boundaries.js`がPASSする。
+- [ ] `remoteTts`構成ではworker停止時もフロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御が維持され、worker復旧後はLocal Voice Bridge本体をworker側へ移さず音声生成だけ復旧できる。
+- [ ] `remote_ssh`では生成バックエンドが利用不能でもフロントエンドのLocal APIとブラウザ/Windows UI状態が維持され、復旧後は拡張機能の再読み込みなしで次の生成を実行できる。
+- [ ] フロントエンドにだけ存在する参照音声をリモート生成へ使用でき、生成側へキャラクター/参照音声ライブラリの永続コピーや追加listenerを残さない。
+- [ ] 関連unit/integration/mock E2Eと実ブラウザ経路の両方を確認している。
+
+## 7. 検証方法
+
+1. 変更に近いunit/integration testを実行する。
+2. 公開ツリー、architecture、runtime boundary、background、mock E2Eを含む既存CI相当を通す。
+3. 隔離ブラウザまたは専用プロファイルでChatGPTの実ユーザー経路を確認する。
+4. Auto読み上げ、Replay、Regen、Next、Stopを実操作する。
+5. 拡張機能更新時は正式なreload経路を実行し、version一致と再接続を確認する。
+6. Local Voice Bridgeを再起動して設定・接続・再生経路を再確認する。
+7. 最後に通常利用者視点で、処理中・成功・失敗・再試行・復旧方法が理解できることを目視確認する。
+
+## 8. UX・責務最終化契約（2026-08-30）
+
+### 8.1 Autoとマイク会話は独立した利用者設定
+
+- `enabled`はAuto読み上げの有効/無効だけを表す。マイク会話のmaster switchとして扱わない。
+- `micConversationEnabled`はマイク会話だけを表す。
+- `Auto`をOFFにしても`マイク会話`を変更しない。
+- `マイク会話`をON/OFFしても`Auto`を変更しない。
+- マイク会話中に通常Auto読み上げを一時抑制する既存の競合回避はruntime phaseで行い、永続設定を書き換えない。
+
+### 8.2 設定の所有者
+
+- Local APIをWindows/runtime設定の正本とする: `referenceVoice`、`voiceVolume`、`micConversationEnabled`、`sttModel`、`cancelGraceMs`、`liveTtsProfile`。
+- Chrome storageはブラウザ側で必要なmirrorを持ってよいが、Local API初期化後に上記の値を逆方向へ上書きする正本にはしない。
+- 拡張Optionsが直接所有するのはブラウザ固有の読み上げ範囲 `previewMaxLines` / `previewMaxChars`。
+- Windows小窓の`詳細設定`からWindows詳細設定UIを開き、STTモデル・送信前猶予・Live TTS profileを変更できる。
+- ブラウザ固有の読み上げ範囲設定へはWindows詳細設定UIから明示的に遷移できる。
+
+### 8.3 復旧導線
+
+- `extension.connected=false`と`updateRequired=true`は別状態として表示する。
+- 切断中に自己再読み込みが完了したかのような文言や無期限の`再読み込みしています`状態を出さない。
+- 接続済みかつ対応版が更新待ちの場合だけ`reload_extension`を通常の自己再読み込み導線として使う。
+- 音声runtime修復が必要な場合、通常利用者へ`setup-voice-env.cmd`を直接案内せず、Windows小窓の`環境を修復`から`LocalVoiceBridge.exe --setup`へ遷移する。
+
+### 8.4 複数タブ操作対象の可視化
+
+- Autoの対象が全登録ChatGPTタブであることをWindows小窓に表示する。
+- `Next` / `Regen`の手動操作対象となるChatGPTタブ名をWindows小窓に表示する。
+- 再生中または直前再生した音声の回答元タブ名を表示できる場合は表示する。
+- 表示のために新しい高頻度pollや全タブbroadcastを追加しない。既存のexternal state snapshotへ必要最小限の文字列を追加する。
+
+### 8.5 受入条件の追加
+
+- [ ] Auto OFF/ONがマイク会話設定を変更せず、マイク会話OFF/ONがAuto設定を変更しない。
+- [ ] Windows詳細設定からSTTモデル、送信前猶予、Live TTS profileを変更し、Local API永続状態が正本として再接続後も復元される。
+- [ ] 拡張Optionsはブラウザ固有の読み上げ範囲だけを編集し、runtime設定の正本にならない。
+- [ ] 拡張切断と更新待ちが別表示になり、切断状態で自己reload成功を誤表示しない。
+- [ ] runtime修復は小窓の`環境を修復`からコンソールなしで正式setup導線へ移れる。
+- [ ] 小窓でAutoの全タブscopeと手動操作対象タブを確認できる。

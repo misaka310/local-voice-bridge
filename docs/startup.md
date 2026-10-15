@@ -1,0 +1,189 @@
+# 起動
+
+初回セットアップ後、Windows検索で`Local Voice Bridge`を開きます。リポジトリ内の`LocalVoiceBridge.exe`を直接ダブルクリックしても同じです。初回セットアップまたは環境修復を明示的に行う場合は`LocalVoiceBridge.exe --setup`を使います。
+
+`LocalVoiceBridge.exe`は既存の`local-api/.venv`と`pythonw.exe`を使い、通知領域アプリ、Windows Local Voice小窓、デスクトップペット、ローカルAPIを1つのWindowsアプリとして管理します。通常利用ではターミナルを表示しません。
+
+## 起動時の導線
+
+- Windows検索やEXEのダブルクリックなど、**ユーザーが手動で起動した場合**はWindows Local Voice小窓を表示します。
+- Windowsログイン時の自動起動は`LocalVoiceBridge.exe --background`で開始し、小窓を勝手に前面へ出しません。
+- 初回オンボーディングが未完了の場合は、自動起動であっても小窓を表示して拡張導入・接続・テスト音声まで案内します。
+- すでに起動中の状態で手動でもう一度`LocalVoiceBridge.exe`を開いた場合、新しい常駐プロセスは増やさず、既存プロセスの小窓を前面へ表示します。
+- 通知領域アイコンをダブルクリックしても小窓を表示できます。
+- デスクトップペットを左ダブルクリックすると小窓を表示・非表示できます。
+
+`.venv`、`pythonw.exe`、`PySide6`、`QtWidgets`、`QtSvg`などが不足している場合は、EXEから正式なセットアップ/修復画面へ進めます。通常利用者へ内部セットアップスクリプトを直接案内しません。
+
+## 2台構成: フロントPC + TTS worker
+
+`remoteTts.enabled=true`を明示した場合だけ、音声生成を別PCへ委譲できます。責務は次のように固定します。
+
+このHTTP TTS worker方式とSSH Irodori worker方式は別の選択肢です。`remoteTts.enabled=true`と`generationBackend=remote_ssh`は同時に設定できません。HTTP方式では読み上げテキスト、参照音声ID、モデルと生成パラメーターをworkerへ送り、参照WAVは送信しません。
+
+- **フロントPC**: `LocalVoiceBridge.exe`、通知領域、小窓、キャラクター選択、設定、Chrome / Brave拡張、ChatGPTタブ状態、favicon、音声再生、`127.0.0.1:8717`
+- **TTS worker PC**: Irodoriモデル、CUDA、生成に必要な参照音声、音声生成APIだけ
+- worker側ではLocal Voice Bridgeの通知領域、小窓、デスクトップペット、Chrome拡張、favicon制御を起動しない
+- `8717`全体をworker PCへ転送しない。フロントPCのLocal Voice Bridge APIは必ずフロントPC自身が所有する
+
+worker APIはLANへ直接公開せず、フロントPC上のloopbackトンネルを経由します。標準例はフロントPCの`127.0.0.1:18730`をworkerの`127.0.0.1:8730`へ転送し、`config.local.json`へ次を設定します。
+
+互換workerの例は[local-tts-service](https://github.com/misaka310/local-tts-service)です。Bridgeは`GET /health`の`ok=true`、`POST /v1/speak`の`result.audioUrl`、そのURLから取得できるWAV音声を必要とします。workerはこのリポジトリには含まれず、別途セットアップします。
+
+フロントPCで次のSSHポート転送を起動し、Local Voice Bridgeを使う間は実行したままにします。接続先は実際のworker PCのSSHユーザー名とホスト名に置き換えてください。
+
+```powershell
+ssh -N -L 18730:127.0.0.1:8730 worker-user@worker-host
+```
+
+worker APIはworker PCのloopbackだけで待ち受けさせ、LANへ直接公開しないでください。接続確認は応答全体を表示せず、`ok`だけを確認できます。
+
+```powershell
+(Invoke-RestMethod "http://127.0.0.1:18730/health").ok
+```
+
+```json
+{
+  "remoteTts": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:18730",
+    "healthPath": "/health",
+    "speakPath": "/v1/speak",
+    "model": "irodori_v3_low_latency",
+    "timeoutSeconds": 180
+  },
+  "referenceVoices": {
+    "sakura_01": { "label": "sakura_01" },
+    "asuka": { "label": "asuka" },
+    "suguha": { "label": "suguha" }
+  }
+}
+```
+
+`referenceVoices`のフロントPC側エントリはキャラクター選択用のメタデータだけでよく、参照WAVはworker側だけに置けます。生成要求では選択したIDをworkerへ渡し、生成されたWAVだけをフロントPCへ戻して再生します。workerが停止しても、フロントPCの8717、拡張接続、ChatGPT状態監視、favicon制御はworkerと独立して維持します。
+
+### 検証上の制約
+
+自動テストはmock HTTP workerでプロトコルと応答制限を検証します。実機の2台接続とブラウザーを含む生成経路は未検証です。
+
+## 2台構成: SSH Irodori worker
+
+`generationBackend=remote_ssh`では、このPCのLocal API `127.0.0.1:8717`、Windows小窓、設定、キャラクター、再生はそのまま起動し、音声の**生成バックエンド**だけをSSH先へ委譲します。バックエンドが停止・切断してもLocal API自体は終了せず、音声生成だけを利用不可として扱います。生成側PCでLocal Voice Bridgeのtrayや8717を起動する必要はありません。
+
+## 通知領域メニュー
+
+表示言語はWindows小窓と同じ日本語です。
+
+- `状態: ...`: APIの現在状態
+- `小窓を表示` / `小窓を隠す`: Windows小窓を開閉
+- `デスクトップペットを戻す`: 画面外へ移動したペットを操作できる位置へ戻す
+- `Local Voice Bridge を再起動`: 通知領域アプリ、小窓、デスクトップペット、ローカルAPIをまとめて再起動する
+- `コントローラーログを開く`: `local-api/logs/controller.log`を開く
+- `生成音声フォルダーを開く`: 生成された音声フォルダーを開く
+- `生成音声を削除...`: 参照音声と設定を残し、生成済み音声だけを確認後に削除する
+- `参照音声フォルダーを開く`: 参照音声フォルダーを開く
+- `Windows起動時に開始`: 現在のユーザーのWindowsログイン時自動起動を切り替える
+- `終了して環境を修復`: APIを停止し、`LocalVoiceBridge.exe --setup`の正式な環境修復へ進む
+- `Local Voice Bridge をアンインストール...`: 自動起動とスタートメニュー登録を解除し、生成音声とログを削除する。参照音声、設定、モデル、リポジトリ本体は残す
+- `終了`: 通知領域アプリ、Windows小窓、デスクトップペット、このアプリが所有するAPIを終了する
+
+生成音声は起動時と生成後に自動整理します。初期値は最新1,000件、合計1GB、14日以内で、いずれかを超える古い音声から削除します。サーバーログとコントローラーログは各2MB、バックアップ2世代までです。
+
+## Windows Local Voice小窓
+
+小窓は日常操作の正本です。Chrome / Brave内にはLocal Voiceの日常操作パネルを置きません。
+
+小窓には次を表示します。
+
+- `キャラクター`
+- `音量`
+- `マイク会話`
+- `自動読み上げ`
+- `次へ`
+- `再生成`
+- `停止`
+- `もう一度`
+- `詳細設定`
+- API・再生状態
+- 現在生成中または直前に再生した文章
+- 共通キュー数
+- 登録済みChatGPTタブ数
+- Autoの全タブscope、手動操作対象タブ、再生元タブ
+
+`キャラクター`は内部では既存の参照音声設定`referenceVoice`を使い、空IDは`標準`として表示します。選択したIDと同名のペット素材がある場合はデスクトップペットも連動します。
+
+`自動読み上げ`と`マイク会話`は独立しています。一方のオン・オフで他方の永続設定を変更しません。
+
+`詳細設定`はWindows側の詳細設定を開きます。STTモデル、送信前猶予、Live TTSプロファイルはLocal APIの永続設定が正本です。ブラウザ固有の読み上げ範囲だけは、詳細設定内の`ブラウザの読み上げ範囲設定`から拡張Optionsへ移動して変更します。
+
+小窓の×はアプリ終了ではなく非表示です。上部を左ドラッグすると位置を移動できます。位置は`local-api/runtime/control-panel-window.json`へ保存されます。
+
+小窓を非表示にしている間も、同じcontrol-panel snapshot経路がバックグラウンドで低頻度に継続します。マイク設定や再生状態、デスクトップペット状態のためにtray側が別のAPI polling系統を持つことはありません。
+
+## 初回オンボーディング
+
+初回だけ次の流れをWindows小窓へまとめます。
+
+1. Chrome / BraveへLocal Voice Bridge拡張機能を読み込む
+2. 拡張機能の接続を待つ
+3. `テスト音声`で既存の`/v1/speak`経路を確認する
+4. 成功したら初回完了を永続化する
+5. 以後のWindows自動起動では小窓を前面へ出さず常駐する
+
+初回導線のためだけの別音声APIは追加しません。
+
+## デスクトップペット
+
+- 左ドラッグ: 位置を移動
+- 左ダブルクリック: Windows Local Voice小窓を表示・非表示
+- 通常クリック、右クリック: 何もしない
+- ドラッグ直後のダブルクリック: 誤操作防止のため無効
+
+ペットの種類はWindows Local Voice小窓の`キャラクター`と連動します。`referenceVoice`が空の場合や同じIDの素材がない場合は既定ペットへフォールバックします。
+
+設定は`local-api/runtime/desktop-pet-settings.json`へ保存されます。このファイルはローカル専用でGitには追加されません。モニター構成やDPIが変わって保存位置が完全に画面外になった場合は、起動時に操作できる位置へ一時補正します。
+
+## 状態表示と復旧
+
+通知領域の代表状態:
+
+- `状態: Starting`: API起動中
+- `状態: Checking environment`: CUDAとIrodoriの事前確認中
+- `状態: Ready`: 通知領域アプリが起動したAPIが正常
+- `状態: Ready (existing)`: 起動済みの互換APIへ接続中
+- `状態: Environment missing`: `.venv`またはサーバーファイルがない
+- `状態: CUDA or model unavailable`: CUDA、依存関係、モデルの確認に失敗
+- `状態: Port 8717 in use`: 別サービスが同じポートを使用中
+- `状態: Unhealthy` / `状態: Restarting`: API異常を検出し復旧処理中
+
+Windows小窓ではChatGPT/再生状態として`Waiting for ChatGPT`、`Ready`、`Generating`、`Playing`などを表示します。
+
+拡張機能の**切断**と**更新待ち**は別状態です。切断中には`拡張機能を再読み込み`を成功導線として出しません。接続済みかつ対応版が`updateRequired=true`で自己reload対応を示した場合だけ正式なreload経路を利用します。
+
+音声runtimeの修復が必要な場合は、小窓の`環境を修復`またはtrayの`終了して環境を修復`から`LocalVoiceBridge.exe --setup`へ進みます。
+
+## 拡張機能の役割
+
+ブラウザ拡張はChatGPTとLocal Voice Bridgeを接続するアダプターです。日常操作の正本ではありません。
+
+拡張アイコンを左クリックした場合はブラウザ固有のOptionsを開きます。Windows側で管理するSTTモデル、送信前猶予、Live TTSプロファイルはそこで重複管理しません。
+
+## Windowsで確認する手順
+
+1. Windows検索で`Local Voice Bridge`を開き、小窓が表示されることを確認する
+2. 初回未完了ならオンボーディングが表示され、拡張接続後にテスト音声を完了できることを確認する
+3. 小窓を閉じてからもう一度Windows検索で起動し、新しい常駐プロセスを増やさず既存小窓が再表示されることを確認する
+4. 通知領域アイコンのダブルクリックで小窓が表示できることを確認する
+5. trayメニューが日本語で、`小窓を表示` / `小窓を隠す`が現在状態に応じて切り替わることを確認する
+6. Windows自動起動を有効にし、次回ログイン時は`--background`で小窓を勝手に前面へ出さないことを確認する
+7. 小窓に`キャラクター`、`音量`、`マイク会話`、`自動読み上げ`、`次へ`、`再生成`、`停止`、`もう一度`、`詳細設定`があることを確認する
+8. `詳細設定`でSTTモデル、送信前猶予、Live TTSプロファイルを保存できることを確認する
+9. Chrome / Braveで2つ以上のChatGPTタブを開き、Autoの全タブscope、手動操作対象、再生元が小窓に表示されることを確認する
+10. `自動読み上げ`と`マイク会話`をそれぞれ切り替え、互いの設定が変わらないことを確認する
+11. 拡張切断時と接続済み更新待ち時の表示・操作が別であることを確認する
+12. runtime異常時に`環境を修復`からコンソールなしで正式setup導線へ移ることを確認する
+13. 拡張アイコン左クリックでブラウザ固有Optionsが開くことを確認する
+14. 小窓を非表示にした状態でも、再生状態やペット状態が追従し続けることを確認する
+15. `終了`でアプリを終了し、再起動後に小窓位置、ペット位置、キャラクター、音量、自動読み上げ、マイク会話、詳細runtime設定が復元されることを確認する
+
+`終了`は通知領域アプリが起動した`server.py`だけを停止します。別の方法で先に起動した互換APIへ接続している場合、その外部プロセスは停止しません。
