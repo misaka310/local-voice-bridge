@@ -1,0 +1,57 @@
+{
+  "engine": "irodori_direct",
+  "generationBackend": "local",
+  "remoteGeneration": {
+    "sshAlias": "generation-host",
+    "remoteRepoRoot": "C:/path/to/local-voice-bridge",
+    "connectTimeoutSeconds": 7.0,
+    "preferredCudaDevice": "",
+    "preferredGpuMinFreeMiB": 8192
+  },
+  "host": "127.0.0.1",
+  "port": 8717,
+  "publicBaseUrl": "http://127.0.0.1:8717",
+  "audioOutputDir": "./runtime/audio",
+  "audioRetention": {
+    "maxFiles": 1000,
+    "maxBytes": 1073741824,
+    "maxAgeDays": 14
+  },
+  "remoteTts": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:18730",
+    "healthPath": "/health",
+    "speakPath": "/v1/speak",
+    "model": "irodori_v3_low_latency",
+    "timeoutSeconds": 180
+  },
+
+  "defaultModel": "irodori-v3",
+  "models": {
+    "irodori-v3": {
+      "label": "Irodori v3 direct",
+      "runtime": "irodori_direct",
+      "hfCheckpoint": "Aratako/Irodori-TTS-500M-v3"
+    }
+  },
+  "referenceVoicesDir": "./reference/voices",
+  "irodori": {
+    "hfCheckpoint": "Aratako/Irodori-TTS-500M-v3",
+    "codecRepo": "Aratako/Semantic-DACVAE-Japanese-32dim",
+    "modelDevice": "auto",
+    "codecDevice": "auto",
+    "modelPrecision": "auto",
+    "codecPrecision": "auto",
+    "requireCuda": true,
+    "numSteps": 16,
+    "referenceNumSteps": 32,
+    "cfgScaleSpeaker": 6.0,
+    "tScheduleMode": "sway",
+    "swayCoeff": -1.0,
+    "durationScale": 1.0,
+    "decodeMode": "sequential",
+    "contextKvCache": true,
+    "releaseUnusedCudaCache": true,
+    "seed": 10
+  }
+}

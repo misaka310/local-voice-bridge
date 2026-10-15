@@ -1,0 +1,10 @@
+{
+  "referenceVoices": {
+    "sample-speaker": {
+      "label": "Sample speaker",
+      "referenceAudioPath": "./reference/voices/sample-speaker/voice.wav",
+      "referenceTextPath": "./reference/voices/sample-speaker/voice.txt",
+      "language": "Japanese"
+    }
+  }
+}

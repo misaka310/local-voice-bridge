@@ -1,0 +1,138 @@
+# dependencies
+node_modules/
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# build outputs
+dist/
+build/
+out/
+*.zip
+*.spec
+ChatGPTLocalVoiceBridge.exe
+ChatGPTLocalVoiceBridge.pdb
+LocalVoiceBridge.exe
+LocalVoiceBridge.pdb
+
+# local runtime
+local-api/runtime/
+local-api/.venv/
+local-api/config.json
+local-api/config.local.json
+local-api/health.json
+local-api/logs/
+local-api/workflows/*.json
+local-api/workflows/*.local.json
+
+# generated audio
+local-api/audio/
+local-api/output/
+public/audio/generated/
+
+# private reference audio/text/workflows
+local-api/reference/*.wav
+local-api/reference/*.mp3
+local-api/reference/*.flac
+local-api/reference/*.m4a
+local-api/reference/*.ogg
+local-api/reference/*.aac
+local-api/reference/*.txt
+local-api/reference/*.json
+local-api/reference/rejected/
+local-api/reference/voice-presets/**/*
+local-api/reference/voices/**/*
+!local-api/reference/README.md
+!local-api/reference/.gitkeep
+!local-api/reference/voice-presets/
+!local-api/reference/voice-presets/.gitkeep
+!local-api/reference/voices/
+!local-api/reference/voices/README.md
+!local-api/reference/voices/.gitkeep
+!local-api/workflows/README.md
+!local-api/workflows/*.example.json
+
+# local config / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# models / heavy assets
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# ChatGPT exports / private data
+conversations.json
+conversations-*.json
+chat.html
+exports/
+
+# logs / temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+.tmp-verify/
+.e2e-profile*/
+.demo-profile*/
+test-results/
+playwright-report/
+=/
+/-c/
+/node scripts/
+.npm-cache/
+npm-cache/
+.DS_Store
+Thumbs.db
+
+# local VM/browser verification screenshots
+.codex-vm-*.png
+.vm-*.png
+vm-*.png
+
+# local AI-agent handoff and review files
+.ai-bridge/
+.ai-review/
+.codex/
+# AGENTS.md is a required tracked repository instruction entrypoint.
+
+# removed optional native/background launch helpers
+# Keep local leftovers out of the public tree.
+tools/native-host/
+/start-voice-bridge.vbs
+
+# pet asset working files
+codex_prompt_*.txt
+pet_frames_preview*.png
+transparency_check*.json
+pixel-pet-*.css
+extension/assets/pet/transparency_report.json
+extension/assets/pet/spritesheet_*.png
+extension/assets/assets/
+extension/assets/pet/local/
+extension/assets/pet/local.json
+extension/assets/pet/*.local.*
+extension/assets/pet/*-local.*
+extension/assets/pet/spritesheet.local.*
+
+# editor
+.vscode/
+.idea/

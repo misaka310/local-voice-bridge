@@ -1,0 +1,27 @@
+{
+  "name": "local-voice-bridge",
+  "private": true,
+  "version": "0.4.3",
+  "scripts": {
+    "build:launcher": "node scripts/run-launcher-build.js",
+    "check:public": "node scripts/run-public-check.js",
+    "check:architecture": "node scripts/check-architecture.js && node scripts/check-tray-snapshot-sync.js && node scripts/check-runtime-boundaries.js",
+    "test:python": "node scripts/run-python-tests.js",
+    "test:background-core": "node scripts/run-background-core-tests.js",
+    "test:background": "node scripts/run-background-tests.js",
+    "test:e2e:mock": "node scripts/run-mock-e2e.js",
+    "test:e2e:brave-mic": "node scripts/run-brave-mic-e2e.js",
+    "test:live-e2e": "node scripts/verify-live-e2e.js",
+    "test:e2e:real": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --workers=1",
+    "test:ci": "node scripts/run-ci.js",
+    "demo": "node scripts/run-extension-demo.js",
+    "demo:check": "npm run test:e2e:mock",
+    "test:e2e:extension": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --workers=1",
+    "test:e2e:auto": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --grep=external.Auto --workers=1",
+    "test:e2e:multichunk": "playwright test tests/e2e/extension-external-panel-irodori.spec.js --grep=external.Next --workers=1",
+    "test:gui:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-windows-gui-smoke.ps1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

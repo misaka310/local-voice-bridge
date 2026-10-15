@@ -1,0 +1,9 @@
+{
+  "generationBackend": "local",
+  "irodori": {
+    "requireCuda": true,
+    "numSteps": 16,
+    "referenceNumSteps": 32,
+    "cfgScaleSpeaker": 6.0
+  }
+}

@@ -1,0 +1,4 @@
+# Compatibility bundle for existing developer workflows.
+# Normal users should install through LocalVoiceBridge.exe and choose a component profile.
+-r requirements-core.txt
+-r requirements-stt.txt

@@ -1,0 +1,70 @@
+# managed-by: repo-launch-doctor-public-guard-v1
+name: Repo Launch Doctor
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: repo-launch-doctor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  doctor:
+    name: public-readiness
+    if: github.event_name == 'workflow_dispatch' || github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: target
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Check out Repo Launch Doctor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: misaka310/repo-launch-doctor
+          ref: a1607d8b2e9c5bf8ca1c25482cf21787af9e7487
+          path: doctor
+
+      - name: Scan current repository state
+        working-directory: doctor
+        run: >-
+          python -m repo_launch_doctor scan ../target
+          --output "${{ runner.temp }}/repo-launch-doctor/current"
+          --fail-on high
+
+      - name: Scan pull request commit history
+        if: github.event_name == 'pull_request'
+        working-directory: doctor
+        run: >-
+          python -m repo_launch_doctor history-scan ../target
+          --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          --output "${{ runner.temp }}/repo-launch-doctor/history"
+
+      - name: Scan full history on manual run
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: doctor
+        run: >-
+          python -m repo_launch_doctor history-scan ../target
+          --all-history
+          --output "${{ runner.temp }}/repo-launch-doctor/history"
+
+      - name: Upload Repo Launch Doctor reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repo-launch-doctor-report
+          path: ${{ runner.temp }}/repo-launch-doctor
+          if-no-files-found: warn
+          retention-days: 7

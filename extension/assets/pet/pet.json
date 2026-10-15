@@ -1,0 +1,10 @@
+{
+  "id": "local-voice-placeholder",
+  "displayName": "Local Voice Placeholder",
+  "description": "A neutral placeholder pet.",
+  "spritesheetPath": "placeholder.svg",
+  "columns": 1,
+  "rows": 1,
+  "frameWidth": 192,
+  "frameHeight": 208
+}
