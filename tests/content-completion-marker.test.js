@@ -1,0 +1,472 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const ROOT = path.resolve(__dirname, '..');
+const SOURCE = path.join(ROOT, 'extension/content-completion-marker.js');
+const DOM_OBSERVER_SOURCE = path.join(ROOT, 'extension/content-dom-observer.js');
+const AGENTS = path.join(ROOT, 'AGENTS.md');
+const TAB_STATUS_DESIGN = path.join(ROOT, 'docs/tab-status-and-resource-design.md');
+
+class Element {
+  constructor(tag) {
+    this.nodeType = 1;
+    this.tagName = String(tag).toUpperCase();
+    this.parentNode = null;
+    this.children = [];
+    this.attributes = new Map();
+  }
+  get id() { return this.getAttribute('id') || ''; }
+  set id(value) { this.setAttribute('id', value); }
+  get rel() { return this.getAttribute('rel') || ''; }
+  set rel(value) { this.setAttribute('rel', value); }
+  get type() { return this.getAttribute('type') || ''; }
+  set type(value) { this.setAttribute('type', value); }
+  get href() { return this.getAttribute('href') || ''; }
+  set href(value) { this.setAttribute('href', value); }
+  get lastElementChild() { return this.children.at(-1) || null; }
+  setAttribute(name, value) { this.attributes.set(String(name), String(value)); }
+  getAttribute(name) { return this.attributes.has(String(name)) ? this.attributes.get(String(name)) : null; }
+  hasAttribute(name) { return this.attributes.has(String(name)); }
+  removeAttribute(name) { this.attributes.delete(String(name)); }
+  appendChild(child) {
+    child.remove();
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+    this.parentNode = null;
+  }
+  querySelectorAll(selector) {
+    const all = this.children.flatMap((child) => [child, ...child.querySelectorAll('*')]);
+    if (selector === '*') return all;
+    if (selector === 'link') return all.filter((element) => element.tagName === 'LINK');
+    const match = selector.match(/^link\[([^\]]+)\]$/);
+    if (match) return all.filter((element) => element.tagName === 'LINK' && element.hasAttribute(match[1]));
+    throw new Error(`Unsupported selector: ${selector}`);
+  }
+}
+
+class Document {
+  constructor(focused = false) {
+    this.title = 'ChatGPT';
+    this.head = new Element('head');
+    this.focused = focused;
+  }
+  createElement(tag) { return new Element(tag); }
+  getElementById(id) { return this.head.querySelectorAll('*').find((element) => element.id === id) || null; }
+  querySelectorAll(selector) { return this.head.querySelectorAll(selector); }
+  hasFocus() { return this.focused; }
+}
+
+class MutationObserver {
+  observe() {}
+  disconnect() {}
+}
+
+function createSessionStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(String(key), String(value)); },
+    removeItem(key) { values.delete(String(key)); },
+    snapshot() { return Object.fromEntries(values); },
+  };
+}
+
+function createMarker({ active = false, session = {} } = {}) {
+  const document = new Document(active);
+  const sessionStorage = createSessionStorage(session);
+  const context = vm.createContext({ console, encodeURIComponent, Object });
+  context.globalThis = context;
+  vm.runInContext(fs.readFileSync(SOURCE, 'utf8'), context, { filename: SOURCE });
+  const markerApi = context.LocalVoiceCompletionMarker;
+  const marker = markerApi.create({
+    document,
+    window: { setTimeout },
+    sessionStorage,
+    MutationObserver,
+    runtimeMessage: async () => ({ active }),
+  });
+  return { document, marker, markerApi, sessionStorage };
+}
+
+test('acknowledged answer stays cleared after content script reinitialization', async () => {
+  const first = createMarker();
+  await first.marker.initialize();
+  first.marker.markResponseCompleted('reply-1');
+  first.marker.acknowledge();
+
+  const session = first.sessionStorage.snapshot();
+  assert.equal(session.localVoiceTerminalStatus, undefined);
+  assert.equal(session.localVoiceAcknowledgedMessageKey, 'reply-1');
+
+  const restored = createMarker({ session });
+  await restored.marker.initialize();
+  restored.marker.markResponseCompleted('reply-1');
+  assert.equal(restored.marker.displayedStatus(), 'idle');
+
+  restored.marker.markResponseCompleted('reply-2');
+  assert.equal(restored.marker.displayedStatus(), 'complete');
+});
+
+test('startup restores only the latest eligible completion and forwards restoration options', () => {
+  const content = fs.readFileSync(path.join(ROOT, 'extension/content.js'), 'utf8');
+  const observer = fs.readFileSync(DOM_OBSERVER_SOURCE, 'utf8');
+
+  assert.match(content, /markExistingMessagesAsSeen\(\{ restoreLatestCompletion: true \}\)/);
+  assert.match(observer, /markExistingMessagesAsSeen: \(options = \{\}\) => ensureController\(\)\.markExistingMessagesAsSeen\(options\)/);
+  assert.match(observer, /hasResponseCompletionControl,\s+isResponseError,/);
+});
+
+function activeIcons(document) {
+  return document.querySelectorAll('link').filter((link) => /(^|\s)icon(\s|$)/i.test(link.rel));
+}
+
+function statusIcon(document) {
+  return document.getElementById('local-voice-completion-favicon');
+}
+
+function decodedSvg(icon) {
+  return decodeURIComponent(String(icon.href).split(',').slice(1).join(','));
+}
+
+test('generating, complete, playing, and text-response error use distinct static favicons', async () => {
+  const { document, marker } = createMarker();
+  const original = document.createElement('link');
+  original.rel = 'shortcut icon';
+  original.href = 'https://chatgpt.com/favicon.ico';
+  document.head.appendChild(original);
+  await marker.initialize();
+
+  marker.markResponseGenerating();
+  let icon = statusIcon(document);
+  assert.equal(marker.displayedStatus(), 'generating');
+  assert.equal(icon.getAttribute('data-local-voice-status'), 'generating');
+  assert.equal(icon.getAttribute('sizes'), 'any');
+  assert.match(decodedSvg(icon), /#2563eb/);
+  assert.match(decodedSvg(icon), /<circle/);
+
+  marker.markResponseCompleted();
+  icon = statusIcon(document);
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(icon.getAttribute('data-local-voice-status'), 'complete');
+  assert.match(decodedSvg(icon), /#facc15/);
+
+  marker.markPlaybackStarted();
+  icon = statusIcon(document);
+  assert.equal(marker.displayedStatus(), 'playing');
+  assert.equal(icon.getAttribute('data-local-voice-status'), 'playing');
+  assert.match(decodedSvg(icon), /#16a34a/);
+
+  marker.markPlaybackCompleted();
+  marker.markResponseError();
+  icon = statusIcon(document);
+  assert.equal(marker.displayedStatus(), 'error');
+  assert.equal(icon.getAttribute('data-local-voice-status'), 'error');
+  assert.match(decodedSvg(icon), /#dc2626/);
+  assert.deepEqual(activeIcons(document), [icon]);
+  assert.equal(original.hasAttribute('rel'), false);
+});
+
+test('completion remains yellow on the active tab until it is acknowledged after completion', async () => {
+  const { document, marker } = createMarker({ active: true });
+  await marker.initialize();
+
+  marker.markResponseGenerating();
+  assert.equal(marker.displayedStatus(), 'generating');
+
+  marker.markResponseCompleted();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+
+  marker.acknowledge();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+});
+
+test('generation end immediately removes a stale generating favicon', async () => {
+  const { document, marker } = createMarker();
+  const original = document.createElement('link');
+  original.rel = 'icon';
+  original.href = 'https://chatgpt.com/favicon.ico';
+  document.head.appendChild(original);
+  await marker.initialize();
+
+  marker.markResponseGenerating();
+  assert.equal(marker.displayedStatus(), 'generating');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'generating');
+
+  marker.markResponseGenerationEnded();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+  assert.equal(original.rel, 'icon');
+});
+
+test('playback temporarily overrides completion and returns to yellow until viewed', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseCompleted();
+  marker.markPlaybackStarted();
+  assert.equal(marker.displayedStatus(), 'playing');
+
+  marker.markPlaybackCompleted();
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+
+  marker.clear();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+});
+
+test('viewing during playback acknowledges completion without hiding the speaker', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseCompleted();
+  marker.markPlaybackStarted();
+
+  marker.clear();
+  assert.equal(marker.displayedStatus(), 'playing');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'playing');
+
+  marker.markPlaybackCompleted();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+});
+
+test('text-response error persists until the tab is acknowledged', async () => {
+  const { document, marker, sessionStorage } = createMarker();
+  await marker.initialize();
+  marker.markResponseError();
+
+  assert.equal(marker.displayedStatus(), 'error');
+  assert.equal(sessionStorage.snapshot().localVoiceTerminalStatus, 'error');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'error');
+
+  marker.clear();
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(sessionStorage.snapshot().localVoiceTerminalStatus, undefined);
+});
+
+test('audio failure and stop clear only the speaker and never create a red favicon', async () => {
+  const { document, marker, sessionStorage } = createMarker();
+  await marker.initialize();
+  marker.markResponseCompleted();
+  marker.markPlaybackStarted();
+  marker.markPlaybackError();
+
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+  assert.equal(sessionStorage.snapshot().localVoiceTerminalStatus, 'complete');
+
+  marker.markPlaybackStarted();
+  marker.markPlaybackStopped();
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+});
+
+test('legacy pending completion is migrated without changing the title', async () => {
+  const { document, marker, sessionStorage } = createMarker({
+    session: { localVoiceCompletionPending: '1' },
+  });
+  document.title = '● ChatGPT';
+  await marker.initialize();
+
+  assert.equal(document.title, 'ChatGPT');
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(sessionStorage.snapshot().localVoiceCompletionPending, undefined);
+  assert.equal(sessionStorage.snapshot().localVoiceTerminalStatus, 'complete');
+});
+
+test('ChatGPT cannot restore its own favicon while a status remains active', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseGenerating();
+
+  const rewritten = document.createElement('link');
+  rewritten.rel = 'icon';
+  rewritten.href = 'https://chatgpt.com/new-favicon.ico';
+  document.head.appendChild(rewritten);
+  marker.sync();
+
+  const icon = statusIcon(document);
+  assert.deepEqual(activeIcons(document), [icon]);
+  assert.equal(rewritten.hasAttribute('rel'), false);
+
+  marker.markResponseCompleted();
+  marker.clear();
+  assert.equal(rewritten.rel, 'icon');
+});
+
+test('competing ChatGPT favicon rewrites refresh the active href without reinserting it', async () => {
+  const { document, marker, markerApi } = createMarker();
+  await marker.initialize();
+  marker.markResponseGenerating();
+
+  const icon = statusIcon(document);
+  const initialIndex = document.head.children.indexOf(icon);
+  let previousHref = icon.href;
+
+  for (let index = 0; index < 3; index += 1) {
+    const rewritten = document.createElement('link');
+    rewritten.rel = 'icon';
+    rewritten.href = 'https://chatgpt.com/favicon-' + index + '.ico';
+    document.head.appendChild(rewritten);
+    const mutations = [{
+      type: 'childList',
+      target: document.head,
+      addedNodes: [rewritten],
+      removedNodes: [],
+    }];
+
+    assert.equal(markerApi.headMutationNeedsFaviconRefresh(mutations), true);
+    marker.sync({ refreshFavicon: markerApi.headMutationNeedsFaviconRefresh(mutations) });
+
+    assert.equal(document.head.children.indexOf(icon), initialIndex);
+    assert.equal(rewritten.hasAttribute('rel'), false);
+    assert.notEqual(icon.href, previousHref);
+    previousHref = icon.href;
+  }
+
+  assert.deepEqual(activeIcons(document), [icon]);
+});
+
+test('re-entering the same status uses a fresh favicon URL', async () => {
+  const { document, marker } = createMarker();
+  await marker.initialize();
+  marker.markResponseGenerating();
+  const firstHref = statusIcon(document).href;
+
+  marker.markResponseGenerationEnded();
+  marker.markResponseGenerating();
+
+  assert.notEqual(statusIcon(document).href, firstHref);
+});
+
+test('head mutation filter ignores unrelated churn and reacts to favicon changes', () => {
+  const { document, markerApi } = createMarker();
+  const unrelated = document.createElement('style');
+  const icon = document.createElement('link');
+  icon.rel = 'icon';
+
+  assert.equal(markerApi.headMutationNeedsSync([{
+    type: 'characterData',
+    target: unrelated,
+  }]), false);
+  assert.equal(markerApi.headMutationNeedsSync([{
+    type: 'childList',
+    target: document.head,
+    addedNodes: [unrelated],
+    removedNodes: [],
+  }]), false);
+  const addedIconMutation = [{
+    type: 'childList',
+    target: document.head,
+    addedNodes: [icon],
+    removedNodes: [],
+  }];
+  assert.equal(markerApi.headMutationNeedsSync(addedIconMutation), true);
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh(addedIconMutation), true);
+  assert.equal(markerApi.headMutationNeedsSync([{
+    type: 'attributes',
+    target: icon,
+  }]), true);
+
+  const statusIconNode = document.createElement('link');
+  statusIconNode.id = 'local-voice-completion-favicon';
+  statusIconNode.rel = 'icon';
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh([{
+    type: 'attributes',
+    target: statusIconNode,
+  }]), false);
+
+  icon.setAttribute('data-local-voice-original-rel', 'icon');
+  icon.removeAttribute('rel');
+  assert.equal(markerApi.headMutationNeedsFaviconRefresh([{
+    type: 'attributes',
+    target: icon,
+  }]), false);
+});
+
+test('blank new conversation uses a static plus and yields to active states', async () => {
+  const { document, marker, sessionStorage } = createMarker();
+  await marker.initialize();
+
+  marker.setNewConversation(true);
+  let icon = statusIcon(document);
+  assert.equal(marker.displayedStatus(), 'new');
+  assert.equal(icon.getAttribute('data-local-voice-status'), 'new');
+  assert.match(decodedSvg(icon), /#0891b2/);
+  assert.match(decodedSvg(icon), /M16 7v18M7 16h18/);
+  assert.equal(sessionStorage.snapshot().localVoiceTerminalStatus, undefined);
+
+  marker.markResponseGenerating();
+  assert.equal(marker.displayedStatus(), 'generating');
+
+  marker.markResponseCompleted();
+  assert.equal(marker.displayedStatus(), 'complete');
+  marker.clear();
+  assert.equal(marker.displayedStatus(), 'new');
+
+  marker.setNewConversation(false);
+  assert.equal(marker.displayedStatus(), 'idle');
+  assert.equal(statusIcon(document), null);
+});
+
+test('blank conversation detection is event driven and does not poll each tab', () => {
+  const content = fs.readFileSync(DOM_OBSERVER_SOURCE, 'utf8');
+
+  assert.match(content, /function isBlankNewConversation\(\)/);
+  assert.match(content, /location\.pathname !== '\/'/);
+  assert.match(content, /data-message-author-role/);
+  assert.match(content, /ctx\.setNewConversation\(next\)/);
+  assert.match(content, /function newConversationMutationNeedsRefresh\(/);
+  assert.match(content, /addedNodes/);
+  assert.match(content, /scheduleInspect/);
+  assert.doesNotMatch(content, /setInterval\(/);
+  assert.doesNotMatch(content, /addEventListener\(['"]scroll/);
+});
+
+test('repository-local policy owns ChatGPT tab status and favicon behavior', () => {
+  const agents = fs.readFileSync(AGENTS, 'utf8');
+  const design = fs.readFileSync(TAB_STATUS_DESIGN, 'utf8');
+
+  assert.match(agents, /責務境界/);
+  assert.match(agents, /このリポジトリは.*faviconを所有/);
+  assert.match(agents, /別プロジェクトの名称・番号・内部運用契約/);
+  assert.match(design, /faviconの状態/);
+  assert.match(design, /空の新規会話/);
+  assert.match(design, /回答完了・未確認/);
+  assert.match(design, /読み上げ処理中/);
+  assert.match(design, /Auto読み上げ設定から独立/);
+  assert.match(design, /Send.*Stop/);
+  assert.match(design, /data-conversation-role="assistant"/);
+  assert.match(design, /turn-action-controls/);
+  assert.match(design, /conversation-turn.*兄弟要素/);
+  assert.match(design, /生成中を実際に観測.*Stop系生成コントロールが消えて本文が安定/);
+});
+
+test('completion marker contract stays independent of speech preview, Auto, and local API recovery', async () => {
+  const { document, marker } = createMarker();
+  const design = fs.readFileSync(TAB_STATUS_DESIGN, 'utf8');
+  await marker.initialize();
+
+  marker.markResponseCompleted();
+  assert.equal(marker.displayedStatus(), 'complete');
+  assert.equal(statusIcon(document).getAttribute('data-local-voice-status'), 'complete');
+  assert.match(decodedSvg(statusIcon(document)), /#facc15/);
+
+  assert.match(design, /読み上げ用プレビュー.*依存しません/);
+  assert.match(design, /読み上げ対象が空でも.*黄色いチェック/);
+  assert.match(design, /回復sweep.*Auto読み上げ設定.*ローカルAPIの接続状態から独立/);
+  assert.match(design, /ローカルAPI停止中でも.*完了状態を回復/);
+});

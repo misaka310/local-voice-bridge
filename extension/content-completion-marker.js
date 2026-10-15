@@ -1,0 +1,353 @@
+'use strict';
+
+(function initContentCompletionMarker(global) {
+  const LEGACY_TITLE_PREFIX = '● ';
+  const LEGACY_SESSION_KEY = 'localVoiceCompletionPending';
+  const SESSION_KEY = 'localVoiceTerminalStatus';
+  const COMPLETED_MESSAGE_KEY_SESSION_KEY = 'localVoiceCompletedMessageKey';
+  const ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY = 'localVoiceAcknowledgedMessageKey';
+  const FAVICON_ID = 'local-voice-completion-favicon';
+  const ORIGINAL_REL_ATTRIBUTE = 'data-local-voice-original-rel';
+  const STATUS_SVG = Object.freeze({
+    new: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0891b2"/><path d="M16 7v18M7 16h18" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></svg>',
+    generating: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#2563eb"/><circle cx="9" cy="16" r="2.2" fill="#fff"/><circle cx="16" cy="16" r="2.2" fill="#fff"/><circle cx="23" cy="16" r="2.2" fill="#fff"/></svg>',
+    complete: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#facc15"/><path d="M8 16.5l5 5L24 10" fill="none" stroke="#111827" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    playing: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#16a34a"/><path d="M7 13h5l6-5v16l-6-5H7z" fill="#fff"/><path d="M21 12c2 2 2 6 0 8M24 9c4 4 4 10 0 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    error: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#dc2626"/><path d="M16 8v11" stroke="#fff" stroke-width="4" stroke-linecap="round"/><circle cx="16" cy="24" r="2.2" fill="#fff"/></svg>',
+  });
+  function versionedFaviconDataUrl(svg, revision) {
+    const versioned = String(svg || '').replace('</svg>', '<!--local-voice-revision:' + revision + '--></svg>');
+    return 'data:image/svg+xml,' + encodeURIComponent(versioned);
+  }
+
+  function elementForNode(node) {
+    if (!node) return null;
+    if (node.nodeType === 1) return node;
+    const parent = node.parentElement || node.parentNode;
+    return parent && parent.nodeType === 1 ? parent : null;
+  }
+
+  function isRelevantFaviconNode(node) {
+    const element = elementForNode(node);
+    if (!element) return false;
+    const links = [];
+    if (String(element.tagName || '').toLowerCase() === 'link') links.push(element);
+    if (typeof element.querySelectorAll === 'function') {
+      try {
+        links.push(...element.querySelectorAll('link'));
+      } catch (_error) {}
+    }
+    return links.some((link) => (
+      link.id === FAVICON_ID
+      || link.hasAttribute?.(ORIGINAL_REL_ATTRIBUTE)
+      || String(link.getAttribute?.('rel') || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon')
+    ));
+  }
+
+  function headMutationNeedsSync(mutations = []) {
+    const batch = Array.from(mutations || []);
+    if (!batch.length) return true;
+    return batch.some((mutation) => {
+      if (mutation.type === 'attributes') return isRelevantFaviconNode(mutation.target);
+      if (mutation.type !== 'childList') return false;
+      return [
+        ...Array.from(mutation.addedNodes || []),
+        ...Array.from(mutation.removedNodes || []),
+      ].some(isRelevantFaviconNode);
+    });
+  }
+
+  function activeCompetingFaviconNode(node) {
+    const element = elementForNode(node);
+    if (!element) return false;
+    const links = [];
+    if (String(element.tagName || '').toLowerCase() === 'link') links.push(element);
+    if (typeof element.querySelectorAll === 'function') {
+      try {
+        links.push(...element.querySelectorAll('link'));
+      } catch (_error) {}
+    }
+    return links.some((link) => (
+      link.id !== FAVICON_ID
+      && String(link.getAttribute?.('rel') || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon')
+    ));
+  }
+
+  function headMutationNeedsFaviconRefresh(mutations = []) {
+    const batch = Array.from(mutations || []);
+    return batch.some((mutation) => {
+      if (mutation.type === 'attributes') return activeCompetingFaviconNode(mutation.target);
+      if (mutation.type !== 'childList') return false;
+      return Array.from(mutation.addedNodes || []).some(activeCompetingFaviconNode);
+    });
+  }
+
+  function create(ctx) {
+    let terminalStatus = null;
+    let completedMessageKey = '';
+    let acknowledgedMessageKey = '';
+    let newConversation = false;
+    let generating = false;
+    let playing = false;
+    let baseTitle = '';
+    let titleObserver = null;
+    let faviconRevision = Date.now();
+    let activeFaviconHref = '';
+
+    function stripPrefix(title) {
+      const value = String(title || '');
+      return value.startsWith(LEGACY_TITLE_PREFIX) ? value.slice(LEGACY_TITLE_PREFIX.length) : value;
+    }
+
+    function getPlainDocumentTitle() {
+      return stripPrefix(ctx.document.title) || baseTitle || '';
+    }
+
+    function displayedStatus() {
+      if (playing) return 'playing';
+      if (terminalStatus === 'error') return 'error';
+      if (generating) return 'generating';
+      if (terminalStatus) return terminalStatus;
+      if (newConversation) return 'new';
+      return 'idle';
+    }
+
+    async function isTabActivelyViewed() {
+      try {
+        const attention = await Promise.race([
+          ctx.runtimeMessage('tab-attention-state'),
+          new Promise((resolve) => ctx.window.setTimeout(() => resolve(null), 500)),
+        ]);
+        return Boolean(attention && attention.active && ctx.document.hasFocus());
+      } catch (_error) {
+        return false;
+      }
+    }
+
+    function persistTerminalStatus() {
+      try {
+        ctx.sessionStorage.removeItem(LEGACY_SESSION_KEY);
+        if (terminalStatus) ctx.sessionStorage.setItem(SESSION_KEY, terminalStatus);
+        else ctx.sessionStorage.removeItem(SESSION_KEY);
+        if (completedMessageKey) {
+          ctx.sessionStorage.setItem(COMPLETED_MESSAGE_KEY_SESSION_KEY, completedMessageKey);
+        } else ctx.sessionStorage.removeItem(COMPLETED_MESSAGE_KEY_SESSION_KEY);
+        if (acknowledgedMessageKey) {
+          ctx.sessionStorage.setItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY, acknowledgedMessageKey);
+        } else ctx.sessionStorage.removeItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY);
+      } catch (_error) {}
+    }
+
+    function isIconRel(value) {
+      return String(value || '')
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === 'icon');
+    }
+
+    function suppressOriginalFavicons() {
+      for (const link of ctx.document.querySelectorAll('link')) {
+        if (link.id === FAVICON_ID) continue;
+        const storedRel = link.getAttribute(ORIGINAL_REL_ATTRIBUTE);
+        const currentRel = link.getAttribute('rel');
+        if (storedRel !== null) {
+          if (isIconRel(currentRel)) link.removeAttribute('rel');
+          continue;
+        }
+        if (!isIconRel(currentRel)) continue;
+        link.setAttribute(ORIGINAL_REL_ATTRIBUTE, currentRel);
+        link.removeAttribute('rel');
+      }
+    }
+
+    function restoreOriginalFavicons() {
+      for (const link of ctx.document.querySelectorAll(`link[${ORIGINAL_REL_ATTRIBUTE}]`)) {
+        const originalRel = link.getAttribute(ORIGINAL_REL_ATTRIBUTE);
+        if (originalRel) link.setAttribute('rel', originalRel);
+        else link.removeAttribute('rel');
+        link.removeAttribute(ORIGINAL_REL_ATTRIBUTE);
+      }
+    }
+
+    function freshFaviconHref(status) {
+      faviconRevision += 1;
+      return versionedFaviconDataUrl(STATUS_SVG[status], faviconRevision);
+    }
+
+    function ensureFavicon(status, refreshFavicon = false) {
+      if (!ctx.document.head || !STATUS_SVG[status]) return;
+      let favicon = ctx.document.getElementById(FAVICON_ID);
+      const previousStatus = favicon?.getAttribute('data-local-voice-status') || '';
+      if (!favicon) {
+        favicon = ctx.document.createElement('link');
+        favicon.id = FAVICON_ID;
+        favicon.rel = 'icon';
+        favicon.type = 'image/svg+xml';
+      }
+      const statusChanged = previousStatus !== status;
+      if (statusChanged) favicon.setAttribute('data-local-voice-status', status);
+      if (favicon.getAttribute('sizes') !== 'any') favicon.setAttribute('sizes', 'any');
+      if (!activeFaviconHref || statusChanged || refreshFavicon) activeFaviconHref = freshFaviconHref(status);
+      if (favicon.href !== activeFaviconHref) favicon.href = activeFaviconHref;
+      if (favicon.parentNode !== ctx.document.head) ctx.document.head.appendChild(favicon);
+    }
+
+    function sync(options = {}) {
+      const currentTitle = stripPrefix(ctx.document.title);
+      if (currentTitle) {
+        baseTitle = currentTitle;
+        if (ctx.document.title !== currentTitle) ctx.document.title = currentTitle;
+      }
+      const status = displayedStatus();
+      if (status === 'idle') {
+        ctx.document.getElementById(FAVICON_ID)?.remove();
+        activeFaviconHref = '';
+        restoreOriginalFavicons();
+        return;
+      }
+      suppressOriginalFavicons();
+      ensureFavicon(status, Boolean(options.refreshFavicon));
+    }
+
+    function setTerminalStatus(status) {
+      terminalStatus = status === 'complete' || status === 'error' ? status : null;
+      if (terminalStatus !== 'complete') completedMessageKey = '';
+      persistTerminalStatus();
+      sync();
+    }
+
+    function setNewConversation(value) {
+      const next = Boolean(value);
+      if (newConversation === next) return;
+      newConversation = next;
+      sync();
+    }
+
+    function acknowledge() {
+      if (!terminalStatus && !ctx.document.getElementById(FAVICON_ID)) return;
+      if (terminalStatus === 'complete' && completedMessageKey) {
+        acknowledgedMessageKey = completedMessageKey;
+      }
+      setTerminalStatus(null);
+    }
+
+    function markResponseGenerating() {
+      if (generating) return;
+      generating = true;
+      setTerminalStatus(null);
+    }
+
+    function markResponseGenerationEnded() {
+      if (!generating) return;
+      generating = false;
+      sync();
+    }
+
+    function markResponseCompleted(messageKey) {
+      generating = false;
+      completedMessageKey = String(messageKey || '').trim();
+      if (completedMessageKey && completedMessageKey === acknowledgedMessageKey) {
+        setTerminalStatus(null);
+        return;
+      }
+      setTerminalStatus('complete');
+    }
+
+    function markResponseError() {
+      generating = false;
+      setTerminalStatus('error');
+    }
+
+    function markPlaybackStarted() {
+      playing = true;
+      sync();
+    }
+
+    function markPlaybackCompleted() {
+      playing = false;
+      sync();
+    }
+
+    function markPlaybackError() {
+      playing = false;
+      sync();
+    }
+
+    function markPlaybackStopped() {
+      playing = false;
+      sync();
+    }
+
+    async function initialize() {
+      baseTitle = stripPrefix(ctx.document.title);
+      try {
+        const stored = String(ctx.sessionStorage.getItem(SESSION_KEY) || '');
+        terminalStatus = stored === 'complete' || stored === 'error'
+          ? stored
+          : ctx.sessionStorage.getItem(LEGACY_SESSION_KEY) === '1' ? 'complete' : null;
+        completedMessageKey = String(
+          ctx.sessionStorage.getItem(COMPLETED_MESSAGE_KEY_SESSION_KEY) || ''
+        ).trim();
+        acknowledgedMessageKey = String(
+          ctx.sessionStorage.getItem(ACKNOWLEDGED_MESSAGE_KEY_SESSION_KEY) || ''
+        ).trim();
+      } catch (_error) {
+        terminalStatus = null;
+        completedMessageKey = '';
+        acknowledgedMessageKey = '';
+      }
+      if (
+        terminalStatus === 'complete'
+        && completedMessageKey
+        && completedMessageKey === acknowledgedMessageKey
+      ) {
+        terminalStatus = null;
+        completedMessageKey = '';
+      }
+      persistTerminalStatus();
+      if (await isTabActivelyViewed()) acknowledge();
+      else sync();
+      titleObserver = new ctx.MutationObserver((mutations) => {
+        if (headMutationNeedsSync(mutations)) {
+          sync({ refreshFavicon: headMutationNeedsFaviconRefresh(mutations) });
+        }
+      });
+      titleObserver.observe(ctx.document.head, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['rel', 'href'],
+      });
+    }
+
+    function dispose() {
+      if (titleObserver) titleObserver.disconnect();
+      titleObserver = null;
+    }
+
+    return {
+      getPlainDocumentTitle,
+      isTabActivelyViewed,
+      displayedStatus,
+      sync,
+      setNewConversation,
+      clear: acknowledge,
+      acknowledge,
+      markResponseGenerating,
+      markResponseGenerationEnded,
+      markResponseCompleted,
+      markResponseError,
+      markPlaybackStarted,
+      markPlaybackCompleted,
+      markPlaybackError,
+      markPlaybackStopped,
+      initialize,
+      dispose,
+    };
+  }
+
+  global.LocalVoiceCompletionMarker = Object.freeze({ create, headMutationNeedsSync, headMutationNeedsFaviconRefresh });
+})(globalThis);

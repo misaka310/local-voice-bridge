@@ -1,0 +1,10 @@
+{
+  "id": "local-pet-example",
+  "displayName": "Local Pet Example",
+  "description": "Copy this file into extension/assets/pet/local/pet.json and replace the placeholder reference with your own spritesheet.",
+  "spritesheetPath": "../placeholder.svg",
+  "columns": 1,
+  "rows": 1,
+  "frameWidth": 192,
+  "frameHeight": 208
+}

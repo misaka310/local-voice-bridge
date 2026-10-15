@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Local Voice Bridge icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1020"/>
+      <stop offset="100%" stop-color="#172554"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="6" y="6" width="116" height="116" rx="30" fill="url(#bg)"/>
+
+  <path d="M38 39h52c12 0 21 9 21 21v13c0 12-9 21-21 21H66L47 108V94h-9c-12 0-21-9-21-21V60c0-12 9-21 21-21z" fill="#F8FAFC"/>
+
+  <path d="M37 66h7 M52 66h7 M67 66h7 M82 66h7" stroke="#0EA5E9" stroke-width="6" stroke-linecap="round"/>
+
+  <circle cx="28" cy="28" r="4.5" fill="#38BDF8"/>
+  <circle cx="101" cy="101" r="4.5" fill="#38BDF8"/>
+  <path d="M31 31C49 19 80 18 99 34" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.88"/>
+  <path d="M32 96C51 109 78 110 99 99" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.88"/>
+</svg>
