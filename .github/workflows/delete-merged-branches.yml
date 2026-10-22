@@ -50,7 +50,7 @@ jobs:
           for branch in "${names[@]}"; do
             [ "${branch}" = "${DEFAULT_BRANCH}" ] && continue
             case "${branch}" in
-              codexpro/session/*|security/*|fix/*|chore/*|privacy/*|maintenance/*|dependabot/*) ;;
+              codexpro/session/*|security/*|fix/*|chore/*|privacy/*|privacy-*|maintenance/*|dependabot/*) ;;
               *) continue ;;
             esac
 
@@ -73,8 +73,8 @@ jobs:
               ahead_by="$(jq -r '.ahead_by // -1' <<<"${compare}")"
             fi
 
-            if [ "${merged_count}" -eq 0 ] && [ "${ahead_by}" -ne 0 ]; then
-              echo "keep ${branch}: not proven merged"
+            if [ "${ahead_by}" -ne 0 ]; then
+              echo "keep ${branch}: not proven fully integrated (ahead_by=${ahead_by})"
               continue
             fi
 
