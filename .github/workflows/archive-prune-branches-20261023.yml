@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, os, sys, urllib.error, urllib.parse, urllib.request
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request
           repo = os.environ["GH_REPO"]
           token = os.environ["GH_TOKEN"]
           owner = repo.split("/")[0]
@@ -68,8 +68,14 @@ jobs:
               tag = "branch-archive/2026-10-23/" + name
               status, tag_ref = api("GET", "/git/ref/" + encoded("tags/"+tag), allowed=(404,))
               if status == 404:
-                  api("POST", "/git/refs", {"ref":"refs/tags/"+tag, "sha":expected_sha})
-              _, check = api("GET", "/git/ref/" + encoded("tags/"+tag))
+                  api("POST", "/git/refs", {"ref":"refs/tags/"+tag, "sha":expected_sha}, allowed=(422,))
+              for attempt in range(10):
+                  check_status, check = api("GET", "/git/ref/" + encoded("tags/"+tag), allowed=(404,))
+                  if check_status == 200:
+                      break
+                  time.sleep(2)
+              else:
+                  raise RuntimeError("Archive tag not visible: " + tag)
               if check["object"]["sha"] != expected_sha:
                   raise RuntimeError("Archive tag points elsewhere: " + tag)
               deleted, _ = api("DELETE", "/git/refs/" + encoded("heads/"+name))
