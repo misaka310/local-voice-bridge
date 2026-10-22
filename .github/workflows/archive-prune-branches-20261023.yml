@@ -1,0 +1,88 @@
+name: Archive reviewed branches 2026-10-23
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/archive-prune-branches-20261023.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive-and-prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      PRUNE_TARGETS: |
+        fix/auto-speech-startup-generation e6ea67c1e69a19aa2b184b5f7b339a1980f413a9
+    steps:
+      - name: Verify heads and open PRs, tag exact SHAs, then remove branches
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request
+          repo = os.environ["GH_REPO"]
+          token = os.environ["GH_TOKEN"]
+          owner = repo.split("/")[0]
+          default = os.environ["DEFAULT_BRANCH"]
+          targets = [line.split(" ", 1) for line in os.environ["PRUNE_TARGETS"].splitlines() if line.strip()]
+          api_root = "https://api.github.com/repos/" + repo
+          headers = {"Accept":"application/vnd.github+json", "Authorization":"Bearer "+token,"X-GitHub-Api-Version":"2022-11-28"}
+          summary = ["## Reviewed branch archival and pruning", "", "| Branch | Status | Archived at |", "|---|---|---|"]
+          def api(method, endpoint, payload=None, allowed=()):
+              url = api_root + endpoint
+              req = urllib.request.Request(url, data=(json.dumps(payload).encode() if payload is not None else None), headers=headers, method=method)
+              if payload is not None:
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req, timeout=40) as response:
+                      body = response.read()
+                      return response.status, (json.loads(body) if body else None)
+              except urllib.error.HTTPError as exc:
+                  if exc.code in allowed:
+                      return exc.code, None
+                  raise RuntimeError(method + " " + endpoint + ": HTTP " + str(exc.code)) from exc
+          def encoded(s):
+              return urllib.parse.quote(s, safe="")
+          for name, expected_sha in targets:
+              if name == default or len(expected_sha) != 40 or any(c not in "0123456789abcdef" for c in expected_sha):
+                  raise RuntimeError("Invalid target: " + name)
+              status, ref = api("GET", "/git/ref/" + encoded("heads/"+name), allowed=(404,))
+              if status == 404:
+                  summary.append("| `" + name + "` | Already absent | - |")
+                  continue
+              actual = ref["object"]["sha"]
+              if actual != expected_sha:
+                  raise RuntimeError("HEAD changed for " + name + ": expected " + expected_sha + " got " + actual)
+              _, prs = api("GET", "/pulls?state=open&per_page=100&head=" + encoded(owner+":"+name))
+              if prs:
+                  raise RuntimeError("Open PR blocks deletion: " + name)
+              tag = "branch-archive/2026-10-23/" + name
+              status, tag_ref = api("GET", "/git/ref/" + encoded("tags/"+tag), allowed=(404,))
+              if status == 404:
+                  api("POST", "/git/refs", {"ref":"refs/tags/"+tag, "sha":expected_sha}, allowed=(422,))
+              for attempt in range(10):
+                  check_status, check = api("GET", "/git/ref/" + encoded("tags/"+tag), allowed=(404,))
+                  if check_status == 200:
+                      break
+                  time.sleep(2)
+              else:
+                  raise RuntimeError("Archive tag not visible: " + tag)
+              if check["object"]["sha"] != expected_sha:
+                  raise RuntimeError("Archive tag points elsewhere: " + tag)
+              deleted, _ = api("DELETE", "/git/refs/" + encoded("heads/"+name))
+              if deleted != 204:
+                  raise RuntimeError("Deletion did not return 204: " + name)
+              print("Archived and deleted: "+name+" at "+expected_sha, flush=True)
+              summary.append("| `" + name + "` | Archived and branch deleted | `" + tag + "` |")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(summary) + "\n")
+          PY
