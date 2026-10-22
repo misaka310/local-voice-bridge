@@ -73,8 +73,8 @@ jobs:
               ahead_by="$(jq -r '.ahead_by // -1' <<<"${compare}")"
             fi
 
-            if [ "${merged_count}" -eq 0 ] && [ "${ahead_by}" -ne 0 ]; then
-              echo "keep ${branch}: not proven merged"
+            if [ "${ahead_by}" -ne 0 ]; then
+              echo "keep ${branch}: not proven fully integrated (ahead_by=${ahead_by})"
               continue
             fi
 
