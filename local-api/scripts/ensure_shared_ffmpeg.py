@@ -10,21 +10,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_DIR = ROOT / "runtime" / "ffmpeg-shared"
-LATEST_RELEASE_API = "https://api.github.com/repos/GyanD/codexffmpeg/releases/latest"
+# TorchCodec 0.14.0 supports FFmpeg up to major version 8. Pin the matching
+# shared Windows build: /releases/latest currently serves FFmpeg 9.
+COMPATIBLE_RELEASE_API = "https://api.github.com/repos/GyanD/codexffmpeg/releases/tags/8.1.2"
 
 
 def has_shared_ffmpeg(target: Path) -> bool:
     bin_dir = target / "bin"
     return (
         bin_dir.is_dir()
-        and any(bin_dir.glob("avutil-*.dll"))
-        and any(bin_dir.glob("avcodec-*.dll"))
-        and any(bin_dir.glob("avformat-*.dll"))
+        and (bin_dir / "avutil-60.dll").is_file()
+        and (bin_dir / "avcodec-62.dll").is_file()
+        and (bin_dir / "avformat-62.dll").is_file()
     )
 
 
 def find_asset_url() -> tuple[str, str]:
-    with urllib.request.urlopen(LATEST_RELEASE_API) as response:
+    with urllib.request.urlopen(COMPATIBLE_RELEASE_API) as response:
         payload = json.load(response)
     for asset in payload.get("assets", []):
         name = str(asset.get("name") or "")

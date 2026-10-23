@@ -147,6 +147,7 @@ function Invoke-Native {
         [Parameter(Mandatory = $true)][string]$FailureMessage
     )
     Write-SetupLog ("RUN {0} {1}" -f $FilePath, ($Arguments -join " "))
+    $ErrorActionPreference = "Continue"  # Native stderr may be normal progress; check exit code.
     & $FilePath @Arguments 2>&1 | ForEach-Object {
         $text = [string]$_
         Write-Output $text
@@ -161,6 +162,7 @@ function Test-Native {
     param([string]$FilePath, [string[]]$Arguments)
     if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return $false }
     try {
+        $ErrorActionPreference = "Continue"
         & $FilePath @Arguments *> $null
         return $LASTEXITCODE -eq 0
     } catch {
@@ -412,15 +414,12 @@ try {
     }
 
     if ($Profile -ne "frontend") {
-    Invoke-SetupStage -Id "torch" -Name "CUDA版PyTorch・TorchAudioの導入" -Code "LVB-SETUP-040" -Verify { Test-PythonImport "import torch, torchaudio" } -Action {
+    Invoke-SetupStage -Id "torch" -Name "CUDA版PyTorch・TorchAudioの導入" -Code "LVB-SETUP-040" -Verify { Test-PythonImport "import numpy, torch, torchaudio" } -Action {
+        Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "numpy==2.4.6") -FailureMessage "PyTorchのNumPy依存を導入できませんでした。"
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "torch==2.11.0", "torchaudio==2.11.0", "--index-url", "https://download.pytorch.org/whl/cu128") -FailureMessage "CUDA版PyTorchの導入に失敗しました。"
     }
 
-    Invoke-SetupStage -Id "torchcodec" -Name "TorchCodecの導入" -Code "LVB-SETUP-050" -Verify { Test-PythonImport "import torchcodec" } -Action {
-        Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "torchcodec==0.14.0") -FailureMessage "TorchCodecの導入に失敗しました。"
-    }
-
-    Invoke-SetupStage -Id "ffmpeg" -Name "共有FFmpegランタイムの取得" -Code "LVB-SETUP-060" -Verify { Test-Path -LiteralPath (Join-Path $localApi "runtime\ffmpeg-shared\bin") -PathType Container } -Action {
+    Invoke-SetupStage -Id "ffmpeg" -Name "共有FFmpegランタイムの取得" -Code "LVB-SETUP-060" -Verify { Test-Path -LiteralPath (Join-Path $localApi "runtime\ffmpeg-shared\bin\avcodec-62.dll") -PathType Leaf } -Action {
         Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\ensure_shared_ffmpeg.py")) -FailureMessage "FFmpegランタイムの取得に失敗しました。"
     }
 
@@ -428,11 +427,15 @@ try {
         Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\install_venv_bootstrap.py")) -FailureMessage "仮想環境ブートストラップの導入に失敗しました。"
     }
 
+    Invoke-SetupStage -Id "torchcodec" -Name "TorchCodecの導入" -Code "LVB-SETUP-050" -Verify { Test-PythonImport "import torchcodec" } -Action {
+        Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "torchcodec==0.14.0") -FailureMessage "TorchCodecの導入に失敗しました。"
+    }
+
     Invoke-SetupStage -Id "core-dependencies" -Name "読み上げ・Windows小窓の依存を導入" -Code "LVB-SETUP-080" -Verify { Test-PythonImport "import PySide6, soundfile, transformers, yaml" } -Action {
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", (Join-Path $localApi "requirements-core.txt")) -FailureMessage "読み上げ依存の導入に失敗しました。"
     }
 
-    Invoke-SetupStage -Id "irodori" -Name "Irodoriランタイムの導入" -Code "LVB-SETUP-090" -Verify { Test-PythonImport "import irodori" } -Action {
+    Invoke-SetupStage -Id "irodori" -Name "Irodoriランタイムの導入" -Code "LVB-SETUP-090" -Verify { Test-PythonImport "import irodori_tts" } -Action {
         Invoke-Native -FilePath $python -Arguments @("-m", "pip", "install", "--upgrade", "--no-deps", "-r", (Join-Path $localApi "requirements-irodori.txt")) -FailureMessage "Irodoriランタイムの導入に失敗しました。"
     }
 
@@ -440,14 +443,14 @@ try {
         Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\audit_runtime_dependencies.py")) -FailureMessage "依存関係の整合性確認に失敗しました。"
     }
 
-    Invoke-SetupStage -Id "runtime-check" -Name "CUDA・音声ランタイムの確認" -Code "LVB-SETUP-100" -AlwaysRun -Action {
-        Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\preflight_irodori.py"), "--strict-cuda", "--quick") -FailureMessage "CUDAまたは音声ランタイムの確認に失敗しました。"
-    }
-
     if (-not $SkipModelDownload) {
         Invoke-SetupStage -Id "model-cache" -Name "Irodoriモデル・Codecの取得" -Code "LVB-SETUP-110" -AlwaysRun -Action {
             Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\preflight_irodori.py"), "--strict-cuda") -FailureMessage "Irodoriモデルの取得または確認に失敗しました。"
         }
+    }
+
+    Invoke-SetupStage -Id "runtime-check" -Name "CUDA・音声ランタイムの確認" -Code "LVB-SETUP-100" -AlwaysRun -Action {
+        Invoke-Native -FilePath $python -Arguments @((Join-Path $localApi "scripts\preflight_irodori.py"), "--strict-cuda", "--quick") -FailureMessage "CUDAまたは音声ランタイムの確認に失敗しました。"
     }
 
     } else {

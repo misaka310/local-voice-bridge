@@ -14,12 +14,12 @@ EXPECTED_VCS_COMMITS = {
     "silentcipher": "d46d7d0893a583d8968ab3a6626e2289faec9152",
 }
 EXPECTED_EXACT_VERSIONS = {
-    "transformers": "5.18.0",
+    "transformers": "5.20.1",
     "datasets": "5.0.1",
     "huggingface-hub": "1.31.0",
     "hf-xet": "1.6.0",
     "sentencepiece": "0.2.2",
-    "PySide6": "6.11.2",
+    "PySide6": "6.12.0",
     "torchcodec": "0.14.0",
 }
 EXPECTED_VERSION_RANGES = {
@@ -32,6 +32,7 @@ ALLOWED_PIP_CHECK_FRAGMENTS = (
     "irodori-tts 0.1.0 has requirement sentencepiece<0.2",
     "irodori-tts 0.1.0 has requirement torchcodec<0.11.0",
     "irodori-tts 0.1.0 has requirement transformers<5",
+    "irodori-tts 0.1.0 requires wandb",
 )
 
 
