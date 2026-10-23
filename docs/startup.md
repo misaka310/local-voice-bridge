@@ -15,6 +15,8 @@
 
 `.venv`、`pythonw.exe`、`PySide6`、`QtWidgets`、`QtSvg`などが不足している場合は、EXEから正式なセットアップ/修復画面へ進めます。通常利用者へ内部セットアップスクリプトを直接案内しません。
 
+Irodori生成環境の修復では、PyTorchとNumPyの導入後、TorchCodecのインポート前に互換版の共有FFmpeg 8.1.2とDLL読み込み設定を用意します。TorchCodec 0.14はFFmpeg 9との組み合わせでは読み込めません。音声モデルの初回取得後にオフラインの実行前検査を行います。
+
 ## 2台構成: フロントPC + TTS worker
 
 `remoteTts.enabled=true`を明示した場合だけ、音声生成を別PCへ委譲できます。責務は次のように固定します。

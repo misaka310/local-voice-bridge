@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import tempfile
 import sys
 import unittest
 from importlib.metadata import PackageNotFoundError
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCAL_API = ROOT / "local-api"
 PREFLIGHT_PATH = LOCAL_API / "scripts" / "preflight_irodori.py"
 AUDIT_PATH = LOCAL_API / "scripts" / "audit_runtime_dependencies.py"
+SHARED_FFMPEG_PATH = LOCAL_API / "scripts" / "ensure_shared_ffmpeg.py"
 FRONTEND_PREFLIGHT_PATH = LOCAL_API / "scripts" / "preflight_frontend.py"
 FRONTEND_REQUIREMENTS = LOCAL_API / "requirements-frontend.txt"
 
@@ -30,6 +32,7 @@ def load_module(name: str, path: Path):
 
 preflight = load_module("irodori_preflight_for_test", PREFLIGHT_PATH)
 audit = load_module("runtime_dependency_audit_for_test", AUDIT_PATH)
+ffmpeg_setup = load_module("shared_ffmpeg_bootstrap_for_test", SHARED_FFMPEG_PATH)
 frontend_preflight = load_module("frontend_preflight_for_test", FRONTEND_PREFLIGHT_PATH)
 
 
@@ -163,6 +166,29 @@ class DependencyAuditTests(unittest.TestCase):
         completed = subprocess.CompletedProcess([], 1, stdout=warning, stderr="")
         with patch.object(audit.subprocess, "run", return_value=completed):
             self.assertEqual(audit.audit_pip_check(), [warning])
+
+
+class SharedFfmpegTests(unittest.TestCase):
+    def test_accepts_supported_ffmpeg_8_shared_dlls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            bin_dir = target / "bin"
+            bin_dir.mkdir()
+            for name in ("avutil-60.dll", "avcodec-62.dll", "avformat-62.dll"):
+                (bin_dir / name).write_bytes(b"test")
+            self.assertTrue(ffmpeg_setup.has_shared_ffmpeg(target))
+
+    def test_rejects_ffmpeg_9_even_with_shared_dlls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            bin_dir = target / "bin"
+            bin_dir.mkdir()
+            for name in ("avutil-61.dll", "avcodec-63.dll", "avformat-63.dll"):
+                (bin_dir / name).write_bytes(b"test")
+            self.assertFalse(ffmpeg_setup.has_shared_ffmpeg(target))
+
+    def test_release_url_is_pinned_to_supported_ffmpeg_8(self):
+        self.assertIn("/releases/tags/8.", ffmpeg_setup.COMPATIBLE_RELEASE_API)
 
 
 if __name__ == "__main__":
