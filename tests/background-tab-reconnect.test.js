@@ -182,11 +182,43 @@ test('safe background page refresh requires an idle tab and current watcher vers
   assert.equal(managed.has(505), true);
 });
 
-test('active, playing, or stale-version tabs are never refreshed', async () => {
+test('an idle active ChatGPT tab refreshes after an extension content-script update', async () => {
+  const reloads = [];
+  const managed = new Set();
+  const reconnect = loadModule().create({
+    chrome: {
+      tabs: {
+        async get(tabId) { return { id: tabId, url: 'https://chatgpt.com/c/515', active: true }; },
+        async reload(tabId) { reloads.push(tabId); },
+      },
+      scripting: {
+        async executeScript() { return [{ frameId: 0, result: true }]; },
+      },
+    },
+    tabs: new Map(),
+    reconnectingTabs: new Map(),
+    managedRefreshTabs: managed,
+    tabPatterns: ['https://chatgpt.com/*'],
+    contentScriptVersion: '0.4.7',
+    persistManagedRefreshTabs: async () => {},
+    ensureOwner() {},
+    broadcastState() {},
+  });
+
+  const result = await reconnect.handlePageReadyForUpdate(
+    { id: 515, url: 'https://chatgpt.com/c/515' },
+    '0.4.7',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, reloading: true, retry: false });
+  assert.deepEqual(reloads, [515]);
+  assert.equal(managed.has(515), true);
+});
+
+test('playing or stale-version tabs are never refreshed', async () => {
   const reloads = [];
   const probes = [];
   let active = true;
-  let playing = false;
+  let playing = true;
   const reconnect = loadModule().create({
     chrome: {
       tabs: {
@@ -210,16 +242,44 @@ test('active, playing, or stale-version tabs are never refreshed', async () => {
     { id: 606, url: 'https://chatgpt.com/c/606' }, '0.4.6',
   ))), { ok: false, reloading: false, retry: false });
   active = false;
-  playing = true;
-  assert.deepEqual(JSON.parse(JSON.stringify(await reconnect.handlePageReadyForUpdate(
-    { id: 606, url: 'https://chatgpt.com/c/606' }, '0.4.6',
-  ))), { ok: false, reloading: false, retry: false });
   playing = false;
   assert.deepEqual(JSON.parse(JSON.stringify(await reconnect.handlePageReadyForUpdate(
     { id: 606, url: 'https://chatgpt.com/c/606' }, '0.4.5',
   ))), { ok: false, reloading: false, retry: false });
   assert.equal(probes.length, 0);
   assert.deepEqual(reloads, []);
+});
+
+test('an active tab is not refreshed when its page is still in use', async () => {
+  const reloads = [];
+  const managed = new Set();
+  const reconnect = loadModule().create({
+    chrome: {
+      tabs: {
+        async get(tabId) { return { id: tabId, url: 'https://chatgpt.com/c/616', active: true }; },
+        async reload(tabId) { reloads.push(tabId); },
+      },
+      scripting: {
+        async executeScript() { return [{ frameId: 0, result: false }]; },
+      },
+    },
+    tabs: new Map(),
+    reconnectingTabs: new Map(),
+    managedRefreshTabs: managed,
+    tabPatterns: ['https://chatgpt.com/*'],
+    contentScriptVersion: '0.4.7',
+    persistManagedRefreshTabs: async () => {},
+    ensureOwner() {},
+    broadcastState() {},
+  });
+
+  const result = await reconnect.handlePageReadyForUpdate(
+    { id: 616, url: 'https://chatgpt.com/c/616' },
+    '0.4.7',
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: false, reloading: false, retry: false });
+  assert.deepEqual(reloads, []);
+  assert.equal(managed.has(616), false);
 });
 
 test('a tab that becomes active while refresh state is persisted is not reloaded', async () => {

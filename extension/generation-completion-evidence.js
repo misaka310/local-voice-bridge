@@ -15,7 +15,9 @@
       isResponseGenerating,
       isResponseError,
       stableMs,
+      sentFlag,
     } = environment;
+    const completionSentFlag = String(sentFlag || 'localVoiceSent');
     const isGenerating = typeof isResponseGenerating === 'function' ? isResponseGenerating : () => false;
     const isError = typeof isResponseError === 'function' ? isResponseError : () => false;
     let baselineNode = null;
@@ -39,7 +41,7 @@
       return getStableKey(node);
     }
 
-    function markGenerationObserved({ suppressAuto = false } = {}) {
+    function markGenerationObserved({ suppressAuto = false, preserveAuto = false } = {}) {
       const nodes = getAssistantNodes();
       baselineNode = nodes.length ? nodes[nodes.length - 1] : null;
       baselineText = baselineNode ? extractAssistantText(baselineNode) : '';
@@ -47,12 +49,26 @@
       if (!baselineNode) return;
       const item = ensureState(baselineNode, baselineText);
       item.generationObserved = true;
-      if (item.sent || suppressAuto) {
+      if (preserveAuto) {
+        item.sent = false;
+        item.suppressAuto = false;
+        item.completionNotified = false;
+        if (baselineNode.dataset) delete baselineNode.dataset[completionSentFlag];
+      } else if (item.sent || suppressAuto) {
         item.sent = false;
         item.suppressAuto = true;
         item.completionNotified = false;
       }
       resetCandidate(item);
+    }
+
+    function prepareLatestStartupGeneration(enabled) {
+      if (!enabled || !isGenerating()) return false;
+      const nodes = getAssistantNodes();
+      const latest = nodes[nodes.length - 1];
+      if (!latest || hasCompletionControl(latest) || isError(latest)) return false;
+      markGenerationObserved({ preserveAuto: true });
+      return true;
     }
 
     function inherit(node, item, text) {
@@ -89,7 +105,7 @@
     }
 
     function hasResponseProgress(node, text) {
-      return node !== baselineNode || text !== baselineText || hasCompletionControl(node);
+      return node !== baselineNode || text !== baselineText;
     }
 
     return Object.freeze({
@@ -97,6 +113,7 @@
       hasResponseProgress,
       inherit,
       markGenerationObserved,
+      prepareLatestStartupGeneration,
       observe,
       reset,
       resetCandidate,

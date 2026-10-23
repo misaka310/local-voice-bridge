@@ -142,12 +142,17 @@
       return payload;
     }
 
-    async function replayLocalAudio(text = '') {
+    async function replayLocalAudio(text = '', item = {}) {
       const settings = await getSettings();
-      return controlPanelRequest(settings, '/v1/playback/replay', {
-        method: 'POST',
-        body: { text: String(text || ''), voiceVolume: Number(settings.voiceVolume) },
-      });
+      try {
+        return await controlPanelRequest(settings, '/v1/playback/replay', {
+          method: 'POST',
+          body: { text: String(text || ''), voiceVolume: Number(settings.voiceVolume) },
+        });
+      } catch (error) {
+        if (!/no replay audio is available/i.test(String(error && error.message || error))) throw error;
+        return speak(text, `replay-${String(item.id || 'latest')}-${Date.now()}`, item.voiceProfile, item.referenceVoice, item.voicePrompt, true);
+      }
     }
 
     async function stopLocalAudio() {

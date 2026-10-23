@@ -8,6 +8,7 @@
   const generationEvidenceApi = typeof module !== 'undefined' && module.exports
     ? require('./generation-completion-evidence.js')
     : globalThis.LocalVoiceGenerationCompletionEvidence;
+  const snapshotSelectionApi = typeof module !== 'undefined' && module.exports ? require('./assistant-snapshot-selection.js') : globalThis.LocalVoiceAssistantSnapshotSelection;
 
   function createAutoSpeechController(environment = {}) {
     const getAssistantNodes = environment.getAssistantNodes;
@@ -103,7 +104,7 @@
     }
 
     const completionEvidence = generationEvidenceApi.createCompletionEvidence({
-      getAssistantNodes, extractAssistantText,
+      getAssistantNodes, extractAssistantText, sentFlag,
       ensureState: ensureElementState,
       hasCompletionControl: hasResponseCompletionControl,
       getStableKey,
@@ -242,13 +243,13 @@
       completionEvidence.reset();
       const nodes = getAssistantNodes();
       const latest = nodes[nodes.length - 1];
+      const latestGenerating = completionEvidence.prepareLatestStartupGeneration(options.restoreLatestCompletion);
       let latestText = '';
       for (const node of nodes) {
         const text = extractAssistantText(node);
         if (node === latest) latestText = text;
-        if (!text) {
-          pendingElements.add(node);
-          if (node === latest && options.restoreLatestCompletion && isResponseGenerating()) completionEvidence.markGenerationObserved({ suppressAuto: true });
+        if (!text || (node === latest && latestGenerating)) {
+          if (!text) pendingElements.add(node);
           continue;
         }
         if (pendingElements.has(node)) continue;
@@ -269,9 +270,9 @@
     function reportLatestSnapshot() {
       const nodes = getAssistantNodes();
       if (!nodes.length) return false;
-      const node = nodes[nodes.length - 1];
-      const text = extractAssistantText(node);
-      if (!text) return false;
+      const snapshot = snapshotSelectionApi.latestNonEmpty(nodes, extractAssistantText);
+      if (!snapshot) return false;
+      const { node, text } = snapshot;
       const item = ensureElementState(node, text);
       const { chunks, preview } = previewParts(text);
       if (!chunks.length || !preview) return false;
@@ -324,6 +325,5 @@
       stateFor: (node) => stateByElement.get(node) || null,
     };
   }
-
   return { createAutoSpeechController };
 }));

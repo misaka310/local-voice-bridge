@@ -14,8 +14,10 @@ test('normalizes assistant text without flattening meaningful line boundaries', 
 test('recognizes transient ChatGPT generation labels only when they are the whole message', () => {
   assert.equal(assistantText.isTransientAssistantStatus('画像を分析しています…'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinking...'), true);
+  assert.equal(assistantText.isTransientAssistantStatus('ChatGPT の発言:'), true);
   assert.equal(assistantText.isTransientAssistantStatus('<|SpawnThinking|>'), true);
   assert.equal(assistantText.isTransientAssistantStatus('Thinkingについて説明します。'), false);
+  assert.equal(assistantText.isTransientAssistantStatus('ChatGPT の発言: この回答は参考になります。'), false);
 });
 
 test('removes internal ChatGPT control tokens before assistant speech extraction', () => {
@@ -54,13 +56,33 @@ test('assistant node discovery supports current data-conversation-role markup', 
   const documentObject = {
     querySelectorAll(selector) {
       seenSelectors.push(selector);
-      if (selector.includes('[data-conversation-role="assistant"]')) return [assistant];
+      if (selector === '[data-conversation-role="assistant"]') return [assistant];
       return [];
     },
   };
 
   assert.deepEqual(assistantText.getAssistantNodes(documentObject), [assistant]);
-  assert.match(seenSelectors[0], /data-conversation-role="assistant"/);
+  assert.ok(seenSelectors.includes('[data-conversation-role="assistant"]'));
+});
+
+test('assistant role heading resolves to its response body sibling instead of the label', () => {
+  const responseContainer = { id: 'assistant-response-container' };
+  const answerBody = { id: 'assistant-response-body' };
+  const label = {
+    tagName: 'H4',
+    innerText: 'ChatGPT の発言:',
+    textContent: 'ChatGPT の発言:',
+    parentElement: responseContainer,
+    nextElementSibling: answerBody,
+  };
+  const documentObject = {
+    querySelectorAll(selector) {
+      if (selector === '[data-conversation-role="assistant"]') return [label];
+      return [];
+    },
+  };
+
+  assert.deepEqual(assistantText.getAssistantNodes(documentObject), [answerBody]);
 });
 
 test('stable key prefers message id then turn id and finally a generated node id', () => {

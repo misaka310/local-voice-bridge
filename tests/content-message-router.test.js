@@ -10,6 +10,10 @@ const SOURCE = fs.readFileSync(
   path.resolve(__dirname, '../extension/content-message-router.js'),
   'utf8',
 );
+const MANIFEST = JSON.parse(fs.readFileSync(
+  path.resolve(__dirname, '../extension/manifest.json'),
+  'utf8',
+));
 
 function deferred() {
   let resolve;
@@ -67,7 +71,7 @@ test('reconnect reports the running content-script version', async () => {
   assert.equal(handled, true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(responseValue.ok, true);
-  assert.equal(responseValue.contentScriptVersion, '0.4.6');
+  assert.equal(responseValue.contentScriptVersion, MANIFEST.version);
 });
 
 test('local playback status ignores stale completion tokens', () => {

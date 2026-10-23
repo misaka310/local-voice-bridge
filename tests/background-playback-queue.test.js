@@ -43,6 +43,7 @@ function createHarness(options = {}) {
     lastPlayedItem: options.lastPlayedItem || null,
   };
   const messages = [];
+  const replayItems = [];
   let speakCalls = 0;
   let replayCalls = 0;
   const context = vm.createContext({
@@ -82,8 +83,9 @@ function createHarness(options = {}) {
     broadcastState() {},
     flushBrowserRuntimeState: options.flushBrowserRuntimeState || (async () => {}),
     runtimePersistMicrotaskBudget: 4,
-    replayLocalAudio: async () => {
+    replayLocalAudio: async (text, item) => {
       replayCalls += 1;
+      replayItems.push({ text, item: item && { ...item } });
       return { ...replayResult };
     },
     speak: async () => {
@@ -116,6 +118,7 @@ function createHarness(options = {}) {
     state,
     speakCalls: () => speakCalls,
     replayCalls: () => replayCalls,
+    replayItems: () => replayItems,
   };
 }
 
@@ -125,7 +128,7 @@ function statusTypes(harness, tabId = 202) {
     .map((entry) => entry.message.type);
 }
 
-test('playback waits until the source tab observes the started status', async () => {
+test('playback starts while the source-tab acknowledgement is still pending', async () => {
   let releaseStarted;
   const started = new Promise((resolve) => { releaseStarted = resolve; });
   const harness = createHarness({
@@ -135,10 +138,11 @@ test('playback waits until the source tab observes the started status', async ()
 
   const playback = harness.controller.playNext();
   await delay(20);
-  assert.equal(harness.speakCalls(), 0);
+  const speakCallsBeforeAcknowledgement = harness.speakCalls();
 
   releaseStarted({ ok: true });
   await playback;
+  assert.equal(speakCallsBeforeAcknowledgement, 1);
   assert.equal(harness.speakCalls(), 1);
   assert.deepEqual(statusTypes(harness), ['playback-started', 'playback-completed']);
 });
@@ -203,6 +207,21 @@ test('Replay stays on the local playback worker and reports status to the answer
   assert.equal(harness.replayCalls(), 1);
   assert.deepEqual(statusTypes(harness), ['playback-started', 'playback-completed']);
   assert.equal(harness.messages.some((entry) => entry.message.type === 'play-audio'), false);
+});
+
+test('Replay forwards the saved speech item to the local audio handler', async () => {
+  const harness = createHarness({
+    queue: [queueItem({ mode: 'replay', reason: 'replay', audioUrl: 'http://127.0.0.1:8717/audio/expired.wav' })],
+  });
+
+  await harness.controller.playNext();
+
+  assert.equal(harness.replayCalls(), 1);
+  assert.equal(harness.speakCalls(), 0);
+  assert.deepEqual(statusTypes(harness), ['playback-started', 'playback-completed']);
+  assert.equal(harness.replayItems()[0].text, 'テスト音声です。');
+  assert.equal(harness.replayItems()[0].item.id, 'q-1');
+  assert.equal(harness.replayItems()[0].item.referenceVoice, 'sample');
 });
 
 test('browser playback remains only as a fallback while status stays on the answer tab', async () => {

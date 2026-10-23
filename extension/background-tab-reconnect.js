@@ -11,6 +11,7 @@
     'assistant-source-filter.js',
     'assistant-text-extractor.js',
     'generation-completion-evidence.js',
+    'assistant-snapshot-selection.js',
     'auto-speech-controller.js',
     'content-settings.js',
     'content-mic-keepalive.js',
@@ -71,7 +72,11 @@
       }
     }
 
-    async function safeRefreshTab(tabId, contentScriptVersionFromPage = contentScriptVersion) {
+    async function safeRefreshTab(
+      tabId,
+      contentScriptVersionFromPage = contentScriptVersion,
+      { allowActiveWhenSafe = false } = {},
+    ) {
       if (!Number.isInteger(tabId) || tabId <= 0) return false;
       if (!contentScriptVersion || contentScriptVersionFromPage !== contentScriptVersion) return false;
       if (ctx.isTabPlaying && ctx.isTabPlaying(tabId)) return false;
@@ -79,7 +84,8 @@
       if (!ctx.chrome.tabs || typeof ctx.chrome.tabs.reload !== 'function') return false;
       try {
         const tab = await settleWithin(ctx.chrome.tabs.get(tabId));
-        if (!tab || tab.active !== false || tab.discarded === true) return false;
+        const activeRefreshAllowed = Boolean(allowActiveWhenSafe && tab && tab.active === true);
+        if (!tab || (tab.active !== false && !activeRefreshAllowed) || tab.discarded === true) return false;
         managedRefreshTabs.add(tabId);
         try {
           if (ctx.persistManagedRefreshTabs) await ctx.persistManagedRefreshTabs();
@@ -89,7 +95,9 @@
         }
 
         const currentTab = await settleWithin(ctx.chrome.tabs.get(tabId));
-        if (!currentTab || currentTab.active !== false || currentTab.discarded === true
+        const currentTabActive = Boolean(currentTab && currentTab.active === true);
+        if (!currentTab || (currentTab.active !== false && !(activeRefreshAllowed && currentTabActive))
+          || currentTab.discarded === true
           || (ctx.isTabPlaying && ctx.isTabPlaying(tabId))
           || (ctx.hasPendingPlayback && ctx.hasPendingPlayback(tabId))) {
           await clearManagedRefresh(tabId);
@@ -123,7 +131,7 @@
       if (!['chatgpt.com', 'chat.openai.com'].includes(hostname)) {
         return { ok: false, retry: false };
       }
-      const reloading = await safeRefreshTab(tabId, String(version || ''));
+      const reloading = await safeRefreshTab(tabId, String(version || ''), { allowActiveWhenSafe: true });
       return { ok: reloading, reloading, retry: false };
     }
 

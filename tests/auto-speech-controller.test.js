@@ -101,6 +101,22 @@ test('startup restores the latest completed answer without queueing it for Auto'
   assert.equal(latestNode.dataset.sent, '1');
 });
 
+test('initial manual target falls back past an empty latest assistant node without Auto-reading old text', async () => {
+  const harness = createHarness();
+  const previousAnswer = { key: 'previous-answer', text: '前の実回答本文です。', dataset: {}, complete: true };
+  const latestTransient = { key: 'latest-transient', text: '', dataset: {}, complete: false };
+  harness.nodes.push(previousAnswer, latestTransient);
+
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+  const reported = await harness.controller.reportLatestSnapshot();
+
+  assert.equal(reported, true);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].entry.messageKey, 'previous-answer');
+  assert.equal(harness.reports[0].entry.text, '前の実回答本文です。');
+  assert.equal(harness.reports[0].isAuto, false);
+});
+
 test('startup skips completion restore while generating or for error/incomplete replies', () => {
   const cases = [
     { generating: true, node: { key: 'generating', text: '生成中です。', dataset: {}, complete: true } },
@@ -118,15 +134,31 @@ test('startup skips completion restore while generating or for error/incomplete 
   }
 });
 
-test('a reply already generating at startup gets a completion marker without Auto playback', () => {
+test('startup does not Auto-read an old completed reply while another generation is active', () => {
+  const harness = createHarness();
+  const node = { key: 'old-before-startup-generation', text: '前の完了済み回答です。', dataset: {}, complete: true };
+  harness.nodes.push(node);
+  harness.setGenerating(true);
+
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
+
+  harness.controller.markGenerationObserved();
+  harness.setGenerating(false);
+  harness.controller.processNode(node);
+  harness.clock.advance(300);
+
+  assert.equal(harness.completionMarks(), 0);
+  assert.equal(harness.reports.length, 0);
+  assert.equal(node.dataset.sent, '1');
+});
+
+test('a reply already generating at startup is Auto-read after completion', () => {
   const harness = createHarness();
   const node = { key: 'startup-generation', text: '起動時から生成中の返答です。', dataset: {}, complete: false };
   harness.nodes.push(node);
   harness.setGenerating(true);
 
-  harness.controller.markExistingMessagesAsSeen();
-  harness.controller.markGenerationObserved();
-  assert.equal(node.dataset.sent, '1');
+  harness.controller.markExistingMessagesAsSeen({ restoreLatestCompletion: true });
 
   harness.setGenerating(false);
   node.complete = true;
@@ -135,10 +167,12 @@ test('a reply already generating at startup gets a completion marker without Aut
 
   assert.equal(harness.completionMarks(), 1);
   assert.deepEqual(harness.completionKeys(), ['startup-generation']);
-  assert.equal(harness.reports.length, 0);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].isAuto, true);
+  assert.equal(harness.reports[0].entry.text, '起動時から生成中の返答です。');
 });
 
-test('an empty assistant shell already generating at startup gets completion-only tracking', () => {
+test('an empty assistant shell already generating at startup is Auto-read after completion', () => {
   const harness = createHarness();
   const node = { key: 'startup-empty-generation', text: '', dataset: {}, complete: false };
   harness.nodes.push(node);
@@ -153,7 +187,9 @@ test('an empty assistant shell already generating at startup gets completion-onl
 
   assert.equal(harness.completionMarks(), 1);
   assert.deepEqual(harness.completionKeys(), ['startup-empty-generation']);
-  assert.equal(harness.reports.length, 0);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].isAuto, true);
+  assert.equal(harness.reports[0].entry.text, '初期化後に完成した返答です。');
 });
 
 test('baseline marks visible replies as consumed and does not Auto queue later growth', () => {

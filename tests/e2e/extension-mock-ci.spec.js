@@ -695,6 +695,117 @@ test('Auto waits for the completed streaming reply and Next uses its following c
   }
 });
 
+test('Auto reads the reply that was already generating when the content script initializes', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker, { enabled: true });
+    const page = await context.newPage();
+    const inFlightHtml = fixtureHtml()
+      .replace(
+        '<button class="send" id="add-reply">送信</button>',
+        '<button class="send" id="fixture-composer-action" aria-label="Stop">停止</button>',
+      )
+      .replace(
+        '</section>',
+        '<article class="turn assistant" data-testid="conversation-turn-assistant-startup">'
+          + '<div class="message" data-message-author-role="assistant" data-message-id="startup-generated-reply">'
+          + '起動後に初めて表示される生成途中の回答</div></article></section>',
+      );
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: inFlightHtml,
+    }));
+    await page.goto('https://chatgpt.com/c/startup-generating-reply', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await page.waitForTimeout(1200);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
+
+    await page.evaluate(() => {
+      document.querySelector('#fixture-composer-action')?.setAttribute('aria-label', 'Send prompt');
+      const reply = document.querySelector('[data-message-id="startup-generated-reply"]');
+      reply.textContent = '起動時から生成中だったChatGPTの回答内容を、完了後に冒頭プレビューで読み上げます。';
+      const actions = document.createElement('div');
+      actions.className = 'turn-action-controls';
+      document.querySelector('[data-testid="conversation-turn-assistant-startup"]').append(actions);
+    });
+    await waitForCounts(1, 1);
+
+    const posts = (await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body.text).toContain('起動時から生成中だったChatGPTの回答内容を');
+    expect(posts[0].body.text).not.toContain('この返答は読み上げられません');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
+test('Auto skips the ChatGPT speaker label and reads the completed answer instead', async () => {
+  test.setTimeout(90000);
+  const api = await startMock();
+  const context = await launchContext();
+
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await configureWorker(worker, { enabled: true });
+    const page = await context.newPage();
+    const inFlightHtml = fixtureHtml()
+      .replace(
+        '<button class="send" id="add-reply">送信</button>',
+        '<button class="send" id="fixture-composer-action" aria-label="Stop">停止</button>',
+      )
+      .replace(
+        '</section>',
+        '<article class="turn assistant" data-testid="conversation-turn-assistant-label">'
+          + '<div class="message" data-message-author-role="assistant" data-message-id="speaker-label-only">'
+          + 'ChatGPT の発言:</div></article></section>',
+      );
+    await page.route('https://chatgpt.com/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: inFlightHtml,
+    }));
+    await page.goto('https://chatgpt.com/c/speaker-label-only', { waitUntil: 'domcontentloaded' });
+    await waitForControlReady(1);
+    await page.waitForTimeout(1200);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
+
+    await page.evaluate(() => {
+      document.querySelector('#fixture-composer-action')?.setAttribute('aria-label', 'Send prompt');
+      const actions = document.createElement('div');
+      actions.className = 'turn-action-controls';
+      const copy = document.createElement('button');
+      copy.setAttribute('aria-label', 'Copy');
+      actions.append(copy);
+      document.querySelector('[data-testid="conversation-turn-assistant-label"]').append(actions);
+    });
+    await page.waitForTimeout(4500);
+    expect((await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak')).toHaveLength(0);
+
+    const answer = '起動時の話者ラベルではなく、完了したChatGPT回答の内容を読み上げます。';
+    await page.evaluate((text) => {
+      document.querySelector('[data-message-id="speaker-label-only"]').textContent = text;
+    }, answer);
+    await expect.poll(async () => (await apiEvents()).filter(
+      (event) => event.method === 'POST' && event.path === '/v1/speak',
+    ).length, { timeout: 30000 }).toBe(1);
+
+    const posts = (await apiEvents()).filter((event) => event.method === 'POST' && event.path === '/v1/speak');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body.text).toContain('完了したChatGPT回答の内容を読み上げます');
+  } finally {
+    await context.close().catch(() => {});
+    await stopMock(api);
+    fs.rmSync(PROFILE, { recursive: true, force: true });
+  }
+});
+
 test('Auto does not finalize a one-character streaming fragment and repairs the completed word', async () => {
   test.setTimeout(90000);
   const api = await startMock();
