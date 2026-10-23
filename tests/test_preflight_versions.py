@@ -76,7 +76,7 @@ class FrontendDependencyTests(unittest.TestCase):
         self.assertEqual(
             requirements,
             {
-                "PySide6==6.11.2",
+                "PySide6==6.12.0",
                 "soundfile==0.14.0",
                 "sounddevice>=0.5.6,<0.6",
                 "numpy==2.4.6",
