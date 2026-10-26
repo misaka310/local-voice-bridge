@@ -152,6 +152,29 @@ test('startup does not Auto-read an old completed reply while another generation
   assert.equal(node.dataset.sent, '1');
 });
 
+test('rebaseline after Auto turns on preserves an in-flight reply on a hidden tab', () => {
+  const harness = createHarness();
+  const old = { key: 'previous', text: 'すでに完了した返答です。', dataset: {}, complete: true };
+  const current = { key: 'in-flight', text: 'Auto同期時に生成中の返答です。', dataset: {}, complete: false };
+  harness.nodes.push(old, current);
+  harness.setGenerating(true);
+
+  harness.controller.markExistingMessagesAsSeen();
+
+  assert.equal(old.dataset.sent, '1');
+  assert.equal(current.dataset.sent, undefined);
+
+  harness.setGenerating(false);
+  current.complete = true;
+  harness.controller.processNode(current);
+  harness.clock.advance(300);
+
+  assert.deepEqual(harness.completionKeys(), ['in-flight']);
+  assert.equal(harness.reports.length, 1);
+  assert.equal(harness.reports[0].isAuto, true);
+  assert.equal(harness.reports[0].entry.text, 'Auto同期時に生成中の返答です。');
+});
+
 test('a reply already generating at startup is Auto-read after completion', () => {
   const harness = createHarness();
   const node = { key: 'startup-generation', text: '起動時から生成中の返答です。', dataset: {}, complete: false };
