@@ -243,7 +243,11 @@
       completionEvidence.reset();
       const nodes = getAssistantNodes();
       const latest = nodes[nodes.length - 1];
-      const latestGenerating = completionEvidence.prepareLatestStartupGeneration(options.restoreLatestCompletion);
+      // Enabling Auto can reach a hidden tab after it has started generating.
+      // Never rebaseline that in-flight reply as an already-consumed response.
+      const latestGenerating = completionEvidence.prepareLatestStartupGeneration(
+        Boolean(options.restoreLatestCompletion || isResponseGenerating()),
+      );
       let latestText = '';
       for (const node of nodes) {
         const text = extractAssistantText(node);
