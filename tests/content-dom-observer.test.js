@@ -12,7 +12,6 @@ const {
   RESPONSE_GENERATING_SELECTOR,
   RESPONSE_COMPLETE_SELECTOR,
   isRelevantMutationBatch,
-  isGenerationControlRelease,
   isResponseError,
 } = require('../extension/content-mutation-filter.js');
 
@@ -157,24 +156,12 @@ test('current ChatGPT generation DOM is covered by selectors and attribute obser
   assert.match(RESPONSE_COMPLETE_SELECTOR, /data-testid\*=\"copy\"/);
   assert.match(RESPONSE_COMPLETE_SELECTOR, /aria-label\^=\"Copy\"/);
   assert.equal(OBSERVER_OPTIONS.attributes, true);
-  assert.equal(OBSERVER_OPTIONS.attributeOldValue, true);
   assert.equal(OBSERVER_OPTIONS.childList, true);
   assert.equal(OBSERVER_OPTIONS.subtree, true);
   assert.deepEqual(
     Array.from(OBSERVER_OPTIONS.attributeFilter),
     ['aria-label', 'title', 'data-testid', 'data-message-author-role', 'data-conversation-role'],
   );
-});
-
-test('renaming Stop to Send is a relevant generation-end mutation', () => {
-  const changedButton = element();
-  changedButton.tagName = 'BUTTON';
-  const transition = { type: 'attributes', target: changedButton,
-    attributeName: 'aria-label', oldValue: 'Stop' };
-  assert.equal(isGenerationControlRelease(transition), true);
-  assert.equal(isRelevantMutationBatch([transition]), true);
-  assert.equal(isGenerationControlRelease({ ...transition, oldValue: 'Send prompt' }), false);
-  assert.equal(isRelevantMutationBatch([{ ...transition, oldValue: 'Send prompt' }]), false);
 });
 
 test('completion lookup prefers the outer conversation turn so sibling action controls count', () => {

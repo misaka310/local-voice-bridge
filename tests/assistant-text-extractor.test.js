@@ -65,6 +65,32 @@ test('assistant node discovery supports current data-conversation-role markup', 
   assert.ok(seenSelectors.includes('[data-conversation-role="assistant"]'));
 });
 
+test('mixed old and new ChatGPT role attributes keep replies in document order', () => {
+  const current = { id: 'new-conversation-role', textContent: '新しい回答です。', compareDocumentPosition: () => 2 };
+  const old = { id: 'old-message-author-role', compareDocumentPosition: (other) => other === current ? 4 : 0 };
+  const documentObject = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role="assistant"]') return [old];
+      if (selector === '[data-conversation-role="assistant"]') return [current];
+      return [];
+    },
+  };
+  assert.deepEqual(assistantText.getAssistantNodes(documentObject), [old, current]);
+});
+
+test('nested legacy assistant body does not duplicate its conversation-role wrapper', () => {
+  const message = { id: 'nested-message' };
+  const wrapper = { textContent: '既存の本文', contains: (node) => node === message };
+  const documentObject = {
+    querySelectorAll(selector) {
+      if (selector === '[data-message-author-role="assistant"]') return [message];
+      if (selector === '[data-conversation-role="assistant"]') return [wrapper];
+      return [];
+    },
+  };
+  assert.deepEqual(assistantText.getAssistantNodes(documentObject), [message]);
+});
+
 test('assistant role heading resolves to its response body sibling instead of the label', () => {
   const responseContainer = { id: 'assistant-response-container' };
   const answerBody = { id: 'assistant-response-body' };

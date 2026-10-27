@@ -181,7 +181,6 @@
     }
 
     function isGenerationControlNode(node) {
-      if (node?.type === 'attributes') return mutationFilter.isGenerationControlRelease(node);
       if (!node || node.nodeType !== 1) return false;
       return node.matches(RESPONSE_GENERATING_SELECTOR)
         || Boolean(node.querySelector(RESPONSE_GENERATING_SELECTOR));

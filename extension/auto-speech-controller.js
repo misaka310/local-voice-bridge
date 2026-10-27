@@ -288,8 +288,8 @@
     }
 
     function scheduleInspect(mutations = []) {
-      const generationEnded = Array.from(mutations || []).some((mutation) => isGenerationControlNode(mutation)
-        || Array.from(mutation.removedNodes || []).some((node) => isGenerationControlNode(node)));
+      const generationEnded = Array.from(mutations || []).some((mutation) => Array.from(mutation.removedNodes || [])
+        .some((node) => isGenerationControlNode(node)));
       const completionControlAdded = Array.from(mutations || []).some((mutation) => Array.from(mutation.addedNodes || [])
         .some((node) => isCompletionControlNode(node)));
       if (generationEnded || completionControlAdded) {
