@@ -21,7 +21,7 @@ gradio==6.30.0
 # wandb is a training-only dependency and conflicts with descript-audiotools protobuf in the inference environment.
 flask==3.1.3
 pyaml==26.7.0
-Pillow==12.0.0
+Pillow==13.0.0
 PySide6==6.12.0
 dacvae @ git+https://github.com/facebookresearch/dacvae.git@414c20785fc3a28373073ea8ef7a1316eeeaca6e
 silentcipher @ git+https://github.com/SesameAILabs/silentcipher.git@d46d7d0893a583d8968ab3a6626e2289faec9152
