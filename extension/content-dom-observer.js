@@ -214,6 +214,7 @@
         isAutoEnabled: () => Boolean(ctx.isEnabled() && settings().enabled),
         isGenerationControlNode,
         isCompletionControlNode,
+        isGenerationControlRelease: mutationFilter.isGenerationControlRelease,
         requestRecheck: (delayMs) => ctx.requestAutoRecheck(delayMs),
         afterInspectLatest: () => {
           if (settings().micConversationEnabled) void ctx.ensureLiveController()?.inspect();

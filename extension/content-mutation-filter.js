@@ -13,6 +13,7 @@
     childList: true,
     subtree: true,
     attributes: true,
+    attributeOldValue: true,
     attributeFilter: Object.freeze([
       'aria-label',
       'title',
@@ -134,10 +135,23 @@
     return Boolean(retry && !normalCompletion);
   }
 
+  // A Stop button can become a Send button via aria-label alone. Its new DOM
+  // no longer matches the generating selector, so check the previous value.
+  function isGenerationControlRelease(mutation) {
+    if (!mutation || mutation.type !== 'attributes') return false;
+    const previous = String(mutation.oldValue || '').trim();
+    const wasStop = mutation.attributeName === 'data-testid'
+      ? previous === 'stop-button'
+      : (mutation.attributeName === 'aria-label' || mutation.attributeName === 'title')
+        && /^(?:Stop|Stop generating|Stop streaming|停止|生成を停止|応答を停止|ストリーミングを停止)$/i.test(previous);
+    return Boolean(wasStop && !safeCall(mutation.target, 'matches', RESPONSE_GENERATING_SELECTOR));
+  }
+
   function isRelevantMutationBatch(mutations = []) {
     const batch = Array.from(mutations || []);
     if (!batch.length) return true;
     return batch.some((mutation) => {
+      if (isGenerationControlRelease(mutation)) return true;
       if (nodeTouchesAssistant(mutation.target) || nodeTouchesResponseControl(mutation.target)) return true;
       const changedNodes = [
         ...Array.from(mutation.addedNodes || []),
@@ -156,5 +170,6 @@
     RESPONSE_RETRY_SELECTOR,
     isResponseError,
     isRelevantMutationBatch,
+    isGenerationControlRelease,
   });
 }));
