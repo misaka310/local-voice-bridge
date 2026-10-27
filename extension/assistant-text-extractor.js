@@ -88,15 +88,25 @@
   function getAssistantNodes(documentObject) {
     if (!documentObject || typeof documentObject.querySelectorAll !== 'function') return [];
     const messageNodes = Array.from(documentObject.querySelectorAll('[data-message-author-role="assistant"]'));
-    if (messageNodes.length > 0) return messageNodes;
-
     const roleNodes = Array.from(documentObject.querySelectorAll('[data-conversation-role="assistant"]'));
-    if (roleNodes.length > 0) {
-      return Array.from(new Set(roleNodes.map((node) => {
+    if (messageNodes.length || roleNodes.length) {
+      // Old and new ChatGPT role attributes may coexist in the same conversation.
+      // Do not let an older message-author-role reply hide a newer conversation-role reply.
+      const resolvedRoles = roleNodes.map((node) => {
         const label = normalizeText(node.innerText || node.textContent || '');
         if (!isTransientAssistantStatus(label)) return node;
         return node.nextElementSibling || node.previousElementSibling || node.parentElement || node;
-      })));
+      }).filter((node) => !messageNodes.some((message) => (
+        node === message || (typeof node.contains === 'function' && node.contains(message))
+      )));
+      const merged = Array.from(new Set([...messageNodes, ...resolvedRoles]));
+      // Source arrays are each in DOM order; restore order across both role formats.
+      merged.sort((left, right) => {
+        if (typeof left.compareDocumentPosition !== 'function') return 0;
+        const relation = left.compareDocumentPosition(right);
+        return relation & 4 ? -1 : relation & 2 ? 1 : 0;
+      });
+      return merged;
     }
 
     return Array.from(documentObject.querySelectorAll('article')).filter((node) => {

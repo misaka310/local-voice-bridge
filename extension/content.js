@@ -280,14 +280,15 @@
     const claimUiOwnership = () => {
       chrome.runtime.sendMessage({ type: 'register-tab', title: getPlainDocumentTitle(), claimOwner: true }).catch(() => {});
     };
-    window.addEventListener('focus', clearCompletionMarker);
+    window.addEventListener('focus', () => void isTabActivelyViewed().then((active) => {
+      if (active) { clearCompletionMarker(); claimUiOwnership(); }
+    }));
     document.addEventListener('visibilitychange', () => {
       micKeepalive?.sync();
       void isTabActivelyViewed().then((active) => {
         if (active) clearCompletionMarker();
       });
     });
-    window.addEventListener('focus', claimUiOwnership);
     document.addEventListener('pointerdown', clearCompletionMarker, { capture: true });
     document.addEventListener('pointerdown', claimUiOwnership, { capture: true });
     document.addEventListener('focusin', (event) => reportComposerFocus(event.target), { capture: true });

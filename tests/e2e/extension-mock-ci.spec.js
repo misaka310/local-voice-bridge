@@ -1221,7 +1221,29 @@ test('a hidden background tab shows a yellow completion favicon and clears when 
         },
       });
     }, backgroundTabId);
-    await waitForCounts(1, 1);
+    try {
+      await waitForCounts(1, 1);
+    } catch (error) {
+      const diagnostics = await Promise.allSettled([
+        backgroundPage.evaluate(() => ({
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+          faviconStatus: document.querySelector('#local-voice-completion-favicon')?.getAttribute('data-local-voice-status'),
+          generatingControl: Boolean(document.querySelector('button[aria-label="Stop"]')),
+          completionControl: Boolean(document.querySelector('.turn-action-controls')),
+          assistantTexts: [...document.querySelectorAll('[data-conversation-role="assistant"]')].map((node) => ({
+            text: node.textContent?.slice(0, 100),
+            sent: node.dataset.localVoiceSent,
+            messageId: node.dataset.messageId,
+          })),
+        })),
+        worker.evaluate(async () => chrome.storage.local.get(['enabled', 'micConversationEnabled', 'voiceId', 'referenceVoice'])),
+        controllerPage.evaluate(async (id) => chrome.tabs.get(id), backgroundTabId),
+        controlSnapshot(),
+      ]);
+      console.error('[hidden-tab-completion-diagnostics]', JSON.stringify(diagnostics));
+      throw error;
+    }
     await expect.poll(() => backgroundPage.title(), { timeout: 10000 }).toBe('Local Voice Demo Fixture');
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('href', /^data:image\/svg\+xml,/);
     await expect(backgroundPage.locator('#local-voice-completion-favicon')).toHaveAttribute('data-local-voice-status', 'playing');
