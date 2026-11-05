@@ -43,7 +43,10 @@ class SetupRuntimeCompatTests(unittest.TestCase):
         self.assertIn('Test-PythonImport "import irodori_tts"', source)
         self.assertIn('numpy==2.4.6', source)
         requirements = CORE.read_text(encoding="utf-8")
-        self.assertIn("Pillow==12.0.0", requirements)
+        self.assertIn("Pillow==13.0.0", requirements)
+        # gradio pins pillow<13; the bridge only uses irodori_tts.inference_runtime,
+        # which does not import gradio, so it must not be in the core set.
+        self.assertNotRegex(requirements, r"(?im)^gradio\b")
         self.assertNotIn("\nwandb==0.28.0\n", "\n" + requirements + "\n")
         audit = AUDIT.read_text(encoding="utf-8")
         self.assertIn('"transformers": "5.20.1"', audit)
