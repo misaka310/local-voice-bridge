@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Removed the unused `gradio` pin from `local-api/requirements-core.txt`. `gradio` requires `pillow<13`, so after the Pillow 13.0.0 security update the core dependency install (`setup-engine.ps1` stage `core-dependencies`) could not resolve. The bridge only imports `irodori_tts.inference_runtime`, which does not use gradio. `tests/test_setup_runtime_compat.py` now checks this and runs in CI.
 - Updated the Irodori runtime to Transformers 5.18.0, Datasets 5.0.1, Hugging Face Hub 1.31.0, hf-xet 1.6.0, and SentencePiece 0.2.2; the Datasets update fixes GHSA-379c-qx7v-6h59.
 - Updated `transformers` to 5.10.0, the first version containing the current `save_pretrained` path-traversal fix, and kept `sentencepiece` at the security-fixed 0.2.1 baseline.
 - Added weekly Dependabot checks for the Python and Node.js manifests.

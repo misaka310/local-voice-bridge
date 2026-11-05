@@ -38,6 +38,7 @@ const TEST_MODULES = [
   'tests.test_setup_completion_handoff',
   'tests.test_venv_launcher_integrity',
   'tests.test_windows_gui_smoke_script',
+  'tests.test_setup_runtime_compat',
   'tests.test_windows_process_identity',
   'tests.test_extension_reload_script',
 ];
